@@ -1,0 +1,17 @@
+.DS_Store
+**/.DS_Store
+**/__pycache__/
+**/*.py[cod]
+
+# Local tool state
+**/.claude/
+**/.continue/
+**/.localcode/
+**/.cache/
+**/.vscode/
+
+# Virtual environments
+**/venv/
+
+# Contains deployment secrets in this workspace
+just1stock_day_trade_web/render.yaml
