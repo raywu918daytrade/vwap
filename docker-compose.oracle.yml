@@ -1,0 +1,42 @@
+name: vwap
+
+services:
+  backend:
+    image: vwap-backend:local
+    platform: linux/amd64
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      TZ: Asia/Taipei
+      PYTHONUNBUFFERED: "1"
+      HF_HOME: /app/.cache/huggingface
+    volumes:
+      - ./backend/db:/app/db
+      - ./backend/log:/app/log
+      - ./backend/logs:/app/logs
+      - ./backend/.cache:/app/.cache
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  web:
+    image: vwap-frontend:local
+    platform: linux/amd64
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"

@@ -16,6 +16,20 @@ from fubon_neo.sdk import FubonSDK, Mode, build_websocket_client
 
 load_dotenv(Path(__file__).parents[1] / ".env", override=True)
 
+_REQUIRED_LOGIN_ENV = ("FUBON_ID", "FUBON_API_KEY", "FUBON_CERT_B64")
+
+
+def missing_login_env() -> list[str]:
+    """Return missing required Fubon login environment variable names."""
+    return [name for name in _REQUIRED_LOGIN_ENV if not os.environ.get(name)]
+
+
+def _ensure_login_env() -> None:
+    """Fail fast when deployment credentials are incomplete."""
+    missing = missing_login_env()
+    if missing:
+        raise RuntimeError(f"缺少富邦登入環境變數: {', '.join(missing)}")
+
 
 def _resolve_cert_path() -> str:
     """憑證路徑：.p12 檔案不進版控，一律用 FUBON_CERT_B64（憑證 base64 編碼）
@@ -43,6 +57,7 @@ def login(retry_delays: tuple[float, ...] = (60, 300, 600)) -> tuple[FubonSDK, l
     固定間隔——如果失敗原因是跟本機live_trader搶同一組帳密的session
     （見對話紀錄的假設），本機那邊通常不會秒退，給更長的等待時間比較有
     機會等到session釋放。"""
+    _ensure_login_env()
     last_err: Exception | None = None
     attempts = len(retry_delays) + 1
     for i in range(attempts):

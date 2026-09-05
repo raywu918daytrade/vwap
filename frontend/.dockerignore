@@ -1,0 +1,15 @@
+.env
+.env.*
+.claude/
+.vscode/
+.mysql
+.DS_Store
+node_modules/
+dist/
+.vite/
+venv/
+day_trade_web/
+trading/
+db.sqlite3
+*.log
+*.sqlite3

@@ -26,6 +26,18 @@ npm run dev
 
 前端開發伺服器預設跑 `http://127.0.0.1:8001`，由 Vite proxy 連到 `TRADING_BACKEND_URL`；未設定時使用 `http://127.0.0.1:8000`。若要純靜態部署，可在建置時設定 `VITE_BACKEND_URL`。
 
+## Docker Compose / Oracle Cloud
+
+Oracle Cloud VM 部署使用 `docker-compose.oracle.yml`：
+
+```bash
+cp backend/.env.example backend/.env
+mkdir -p backend/db backend/log backend/logs backend/.cache
+docker compose -f docker-compose.oracle.yml up -d --build
+```
+
+對外只需要開 HTTP `80`；前端 Nginx 會 serve React build，並把 API、SSE 與圖表資料 proxy 到後端。完整步驟見 `docs/oracle-cloud.md`。
+
 ## 保留功能
 
 - VWAP框：`/vwap_sr_replay`、`/vwap_breakout/today`、`/sr_vwap_cross/today`、`/vwap_activity`、`/vwap_macd_div`、`/vwap_obv_div`，並整合 `/api/pattern/types`、`/api/pattern/scan/submit` 型態掃描結果

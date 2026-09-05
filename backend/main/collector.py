@@ -12,7 +12,16 @@ _COLLECTOR_RETRY_DELAY = int(os.environ.get("COLLECTOR_RETRY_DELAY", "10"))
 
 def start_collector(on_minute, backfill_done=None) -> None:
     """Run the M1 collector forever and retry with a fresh instance on errors."""
+    from fubon import fubon_api
     from fubon.marketdata_ws import FubonM1Collector
+
+    missing = fubon_api.missing_login_env()
+    if missing:
+        set_collector_status("error")
+        msg = f"Collector 未啟動：缺少富邦登入環境變數 {', '.join(missing)}"
+        print(msg, flush=True)
+        _log_sys(msg, "error")
+        return
 
     attempt = 0
     while True:
