@@ -499,6 +499,7 @@ export default function App() {
   const pendingPatternJobRef = useRef("");
   const vwapMenuRef = useRef(null);
   const patternMenuRef = useRef(null);
+  const watchDrawerRef = useRef(null);
 
   const [universe, setUniverse] = useState(() => localStorage.getItem("vwapUniverse") || "daytrade");
   const [universeSets, setUniverseSets] = useState({ daytrade: new Set(), full: new Set(), names: new Map() });
@@ -519,6 +520,7 @@ export default function App() {
   const [activityFilters, setActivityFilters] = useState(initialActivityFilters);
   const [vwapSort, setVwapSort] = useState({ key: "time", dir: -1 });
   const [obsStocks, setObsStocks] = useState(() => new Set(JSON.parse(localStorage.getItem("obsStocks") || "[]")));
+  const [watchDrawerOpen, setWatchDrawerOpen] = useState(false);
   const [focusedPanel, setFocusedPanel] = useState("vwap");
 
   const stockIdRef = useRef(stockId);
@@ -581,6 +583,22 @@ export default function App() {
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [patternMenuOpen, vwapMenuOpen]);
+
+  useEffect(() => {
+    if (!watchDrawerOpen) return undefined;
+    window.requestAnimationFrame(() => {
+      watchDrawerRef.current?.focus({ preventScroll: true });
+    });
+
+    function closeOnEscape(event) {
+      if (event.key === "Escape") {
+        closeWatchDrawer();
+      }
+    }
+
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [watchDrawerOpen]);
 
   const loadCharts = useCallback(async () => {
     const sid = stockId.trim();
@@ -1134,6 +1152,11 @@ export default function App() {
     });
   }
 
+  function closeWatchDrawer() {
+    setWatchDrawerOpen(false);
+    setFocusedPanel("vwap");
+  }
+
   function sortVwap(key) {
     setVwapSort((prev) =>
       prev.key === key
@@ -1236,12 +1259,24 @@ export default function App() {
             <div className="text-sm font-bold text-primary">{PRODUCT_NAME}</div>
             <StatusBadge status={connection} />
           </div>
-          <HealthLine health={health} clock={clock} />
+          <div className="flex items-center gap-2">
+            <HealthLine health={health} clock={clock} />
+            <button
+              type="button"
+              className={`btn btn-xs rounded ${watchDrawerOpen ? "btn-primary" : ""}`}
+              onClick={() => {
+                setWatchDrawerOpen(true);
+                setFocusedPanel("obs");
+              }}
+            >
+              觀察 {obsRows.length}
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="grid min-h-0 flex-1 grid-rows-[minmax(220px,45%)_minmax(260px,55%)] gap-2 p-2">
-        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(300px,32%)] gap-2 overflow-hidden">
+        <div className="grid min-h-0 grid-cols-1 overflow-hidden">
           <Panel
             title={SIGNAL_LABEL}
             count={vwapRows.length}
@@ -1539,64 +1574,6 @@ export default function App() {
               <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">該日尚無盤中 / SR 訊號</div>
             )}
           </Panel>
-
-          <Panel
-            title="觀察"
-            count={obsRows.length}
-            bodyClassName="flex flex-col overflow-hidden"
-            focused={focusedPanel === "obs"}
-            onFocusPanel={() => setFocusedPanel("obs")}
-          >
-            {obsRows.length ? (
-              <div className="min-h-0 flex-1 overflow-auto">
-                <table className="table table-xs table-pin-rows min-w-max">
-                  <thead>
-                    <tr>
-                      <th>股票</th>
-                      <th>漲幅</th>
-                      <th className="text-right">時間</th>
-                      <th className="text-center">SR</th>
-                      <th className="text-center">MACD</th>
-                      <th className="text-center">OBV</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {obsRows.map((row, idx) => {
-                      const key = eventKey(row);
-                      const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id);
-                      return (
-                        <tr
-                          key={row.stock_id}
-                          data-panel="obs"
-                          data-row-index={idx}
-                          className={selected ? "bg-primary/15" : ""}
-                          onClick={() => selectMarketRow(row, key, "obs", "", false)}
-                          onDoubleClick={() => toggleObsStock(row.stock_id)}
-                        >
-                          <StockCell row={row} />
-                          <td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>
-                            {row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}
-                          </td>
-                          <td className="text-right text-base-content/50">{hm(row.time)}</td>
-                          <td className="text-center">
-                            <Lamp on={row.sr_on} kind="both" title="SR" />
-                          </td>
-                          <td className="text-center">
-                            <Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" />
-                          </td>
-                          <td className="text-center">
-                            <Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">在盤中訊號框雙擊股票加入觀察</div>
-            )}
-          </Panel>
         </div>
 
         <div className="grid min-h-0 gap-2 lg:grid-cols-[minmax(360px,42%)_minmax(0,1fr)]">
@@ -1641,6 +1618,85 @@ export default function App() {
           </ChartPanel>
         </div>
       </main>
+
+      {watchDrawerOpen ? (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-40 cursor-default bg-black/35"
+            aria-label="關閉觀察清單"
+            onClick={closeWatchDrawer}
+          />
+          <aside
+            ref={watchDrawerRef}
+            tabIndex={-1}
+            className="fixed right-0 top-0 z-50 flex h-dvh w-[min(420px,calc(100vw-1rem))] flex-col border-l border-base-300 bg-base-100 shadow-2xl"
+            aria-label="觀察清單"
+            onFocusCapture={() => setFocusedPanel("obs")}
+            onMouseDown={() => setFocusedPanel("obs")}
+          >
+            <div className="flex min-h-12 items-center justify-between border-b border-base-300 bg-base-200 px-3">
+              <div className="min-w-0 truncate text-sm font-semibold text-primary">
+                觀察 <span className="font-normal text-base-content/45">({obsRows.length})</span>
+              </div>
+              <button type="button" className="btn btn-ghost btn-square btn-xs rounded" title="關閉" aria-label="關閉" onClick={closeWatchDrawer}>
+                ×
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto">
+              {obsRows.length ? (
+                <table className="table table-xs table-pin-rows min-w-max">
+                  <thead>
+                    <tr>
+                      <th>股票</th>
+                      <th>漲幅</th>
+                      <th className="text-right">時間</th>
+                      <th className="text-center">SR</th>
+                      <th className="text-center">MACD</th>
+                      <th className="text-center">OBV</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {obsRows.map((row, idx) => {
+                      const key = eventKey(row);
+                      const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id);
+                      return (
+                        <tr
+                          key={row.stock_id}
+                          data-panel="obs"
+                          data-row-index={idx}
+                          className={selected ? "bg-primary/15" : ""}
+                          onClick={() => selectMarketRow(row, key, "obs", "", false)}
+                          onDoubleClick={() => toggleObsStock(row.stock_id)}
+                        >
+                          <StockCell row={row} />
+                          <td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>
+                            {row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}
+                          </td>
+                          <td className="text-right text-base-content/50">{hm(row.time)}</td>
+                          <td className="text-center">
+                            <Lamp on={row.sr_on} kind="both" title="SR" />
+                          </td>
+                          <td className="text-center">
+                            <Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" />
+                          </td>
+                          <td className="text-center">
+                            <Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="flex h-full items-center justify-center p-6 text-center text-sm text-base-content/50">
+                  在盤中訊號框雙擊股票加入觀察
+                </div>
+              )}
+            </div>
+          </aside>
+        </>
+      ) : null}
     </div>
   );
 }
