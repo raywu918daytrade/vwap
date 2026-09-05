@@ -106,7 +106,7 @@ function addVwap(chart, vwap) {
     color: COLORS.vwap,
     lineWidth: 1,
     lineStyle: LineStyle.Dashed,
-    title: "VWAP",
+    title: "基準線",
     priceLineVisible: false,
   });
   series.setData(vwap);

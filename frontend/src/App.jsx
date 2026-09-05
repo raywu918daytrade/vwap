@@ -5,6 +5,9 @@ import { TIMEFRAME_LABEL, priceSummary } from "./chartData.js";
 import TradingViewChart, { indicatorLabel } from "./TradingViewChart.jsx";
 
 const DEFAULT_STOCK = "0050";
+const PRODUCT_NAME = "盤勢雷達";
+const SIGNAL_LABEL = "盤中訊號";
+const BASELINE_LABEL = "基準線";
 const PATTERN_TIMEFRAME = "day";
 const PATTERN_TIMEFRAME_LABEL = "D1";
 const PATTERN_TYPE_META = {
@@ -694,7 +697,7 @@ export default function App() {
         setObvMap(obv.stocks || {});
       }
     } catch (error) {
-      setVwapError(error.message || "VWAP 載入失敗");
+      setVwapError(error.message || `${SIGNAL_LABEL}載入失敗`);
     } finally {
       setVwapLoading(false);
     }
@@ -1230,7 +1233,7 @@ export default function App() {
       <header className="border-b border-base-300 bg-base-200">
         <div className="flex min-h-12 flex-wrap items-center justify-between gap-2 px-3 py-2">
           <div className="flex items-center gap-3">
-            <div className="text-sm font-bold text-primary">VWAP 型態監控</div>
+            <div className="text-sm font-bold text-primary">{PRODUCT_NAME}</div>
             <StatusBadge status={connection} />
           </div>
           <HealthLine health={health} clock={clock} />
@@ -1240,7 +1243,7 @@ export default function App() {
       <main className="grid min-h-0 flex-1 grid-rows-[minmax(220px,45%)_minmax(260px,55%)] gap-2 p-2">
         <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(300px,32%)] gap-2 overflow-hidden">
           <Panel
-            title="VWAP突破"
+            title={SIGNAL_LABEL}
             count={vwapRows.length}
             actions={vwapLoading || patternLoading ? <span className="loading loading-spinner loading-xs text-primary" /> : null}
             bodyClassName="flex flex-col overflow-hidden"
@@ -1291,8 +1294,8 @@ export default function App() {
                 >
                   <summary
                     className="btn btn-square btn-xs rounded"
-                    title="VWAP條件"
-                    aria-label="VWAP條件"
+                    title={`${SIGNAL_LABEL}條件`}
+                    aria-label={`${SIGNAL_LABEL}條件`}
                     onClick={(event) => {
                       event.preventDefault();
                       setVwapMenuOpen((open) => !open);
@@ -1302,7 +1305,7 @@ export default function App() {
                   </summary>
                   <div className="dropdown-content z-50 mt-1 max-h-44 w-60 overflow-y-auto rounded border border-base-300 bg-base-200 p-3 shadow">
                     <div className="mb-2 flex items-center justify-between border-b border-base-300 pb-2">
-                      <span className="text-xs font-semibold text-base-content/70">VWAP條件</span>
+                      <span className="text-xs font-semibold text-base-content/70">{SIGNAL_LABEL}條件</span>
                       <button
                         type="button"
                         className="btn btn-ghost btn-square btn-xs rounded"
@@ -1500,7 +1503,7 @@ export default function App() {
                           <StockCell row={row}>
                             {row.direction ? (
                               <div className={`mt-1 text-[10px] ${row.direction === "up" ? "text-error" : "text-success"}`}>
-                                {row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} (VWAP {Number(row.vwap).toFixed(2)})
+                                {row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} ({BASELINE_LABEL} {Number(row.vwap).toFixed(2)})
                               </div>
                             ) : null}
                           </StockCell>
@@ -1533,7 +1536,7 @@ export default function App() {
                 </table>
               </div>
             ) : (
-              <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">該日尚無 VWAP / SR 訊號</div>
+              <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">該日尚無盤中 / SR 訊號</div>
             )}
           </Panel>
 
@@ -1591,7 +1594,7 @@ export default function App() {
                 </table>
               </div>
             ) : (
-              <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">在 VWAP 突破框雙擊股票加入觀察</div>
+              <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">在盤中訊號框雙擊股票加入觀察</div>
             )}
           </Panel>
         </div>
