@@ -48,6 +48,7 @@ def sync_local_market_db_from_hf_if_stale() -> str:
     done = _get_done_stocks(check_date)
     if "0050" in done:
         print(f"[HF同步檢查] 0050 {check_date} 的 d1 flag 已存在，本機資料新鮮，跳過下載", flush=True)
+        prune_local_runtime_history()
         return "fresh"
 
     print(f"[HF同步檢查] 0050 {check_date} 沒有 d1 flag，本機資料可能落後，從 HF Hub 同步保留資料夾...", flush=True)
@@ -59,6 +60,7 @@ def sync_local_market_db_from_hf_if_stale() -> str:
         return "synced"
     except Exception as exc:
         print(f"[HF同步檢查] 下載失敗，改用現有本機資料繼續開機: {exc}", flush=True)
+        prune_local_runtime_history()
         return "failed"
 
 
@@ -77,6 +79,33 @@ def clear_market_query_caches() -> None:
     clear_macd_cache()
     clear_obv_cache()
     print("[HF同步檢查] 歷史查詢快取已清空", flush=True)
+
+
+def prune_local_runtime_history() -> None:
+    """Prune local runtime data that is intentionally excluded from HF sync."""
+    try:
+        from scripts.sync_market_db_from_hf import (
+            _resolve_app_log_days,
+            _resolve_m1_live_files,
+            _resolve_sdk_log_days,
+            prune_local_log_history,
+            prune_local_m1_live_history,
+        )
+
+        removed = prune_local_m1_live_history()
+        if removed:
+            keep_files = _resolve_m1_live_files()
+            print(f"[HF同步檢查] 已清理 db/m1_live 舊檔 {removed} 個，只保留最近 {keep_files} 個交易檔", flush=True)
+
+        removed_logs = prune_local_log_history()
+        if removed_logs.get("log"):
+            days = _resolve_sdk_log_days()
+            print(f"[HF同步檢查] 已清理 log/ 舊日誌 {removed_logs['log']} 個，只保留最近 {days} 個日曆天", flush=True)
+        if removed_logs.get("logs"):
+            days = _resolve_app_log_days()
+            print(f"[HF同步檢查] 已清理 logs/ 舊日誌 {removed_logs['logs']} 個，只保留最近 {days} 個日曆天", flush=True)
+    except Exception as exc:
+        print(f"[HF同步檢查] 清理本機 runtime 檔案失敗，略過: {exc}", flush=True)
 
 
 def refresh_fubon_subscription_universe(state) -> None:
