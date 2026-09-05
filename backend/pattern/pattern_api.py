@@ -6,7 +6,7 @@ Pattern Recognition API Endpoints (FastAPI Router)
 - GET  /api/pattern/stocks/daytrade    當沖候選股清單（db/fubon_subscribe/subscribe_list.parquet，
                                         今天實際被富邦WebSocket即時收集的股票池，見該端點的說明）
 - GET  /api/pattern/types             取得可用的技術型態選單清單 (含中文名稱)
-- GET  /api/pattern/scan             過濾篩選特定型態與時區的符合股票清單（同步版本，支援快取）
+- GET  /api/pattern/scan             過濾篩選 D1 型態符合股票清單（同步版本，支援快取）
 - GET  /api/pattern/scan/submit      非同步版本：立刻回傳 job_id，掃描完成後透過 SSE
                                        （type: pattern_scan_done）推播結果，見 _run_scan_job()
                                        的說明——2026-08-11加，避免掃描（純Python迴圈跑型態
@@ -39,6 +39,7 @@ from data.adjustment_query import load_pattern_volume_profile
 from data.build_poc import compute_poc_dataframe
 
 router = APIRouter(prefix="/api/pattern", tags=["技術型態"])
+PATTERN_SCAN_TIMEFRAME = "day"
 
 # 註冊所有可用型態檢測器
 DETECTORS = {
@@ -160,6 +161,14 @@ def reload_universe_cache() -> None:
     FULL_UNIVERSE_LIST = _read_full_universe()
 
 
+def _normalize_scan_timeframe(timeframe: str | None) -> str:
+    """Pattern scanning only supports D1; intraday K lines are chart-only."""
+    value = str(timeframe or PATTERN_SCAN_TIMEFRAME).strip().lower()
+    if value in (PATTERN_SCAN_TIMEFRAME, "d1"):
+        return PATTERN_SCAN_TIMEFRAME
+    raise HTTPException(status_code=400, detail="型態掃描只支援 D1（日K），已移除 1m/3m/5m 掃描")
+
+
 def _horizontal_sr_lines(df: pd.DataFrame, to_epoch, stock_id: str) -> List[Dict[str, Any]]:
     """日K 橫向壓力／支撐（雙轉折水平線），不要求型態過關。
 
@@ -257,16 +266,16 @@ def get_pattern_types() -> Dict[str, Any]:
     }
 
 
-@router.get("/scan", summary="過濾篩選符合特定型態與時區的股票清單")
+@router.get("/scan", summary="過濾篩選符合特定 D1 型態的股票清單")
 def scan_patterns(
     pattern_type: str = Query("triangle", description="型態種類: 可帶單一型態(triangle)、逗號分隔多型態(triangle,w_bottom)、或全型態(all)。可用型態: triangle, abcd_bull, abcd_bear, w_bottom, m_top, head_shoulders_bottom, head_shoulders_top, cup_handle, breakout_retest, breakdown_retest, macd_hist_bull, macd_hist_bear, all"),
-    timeframe: str = Query("day", description="時間週期: 1m, 3m, 5m, day"),
+    timeframe: str = Query(PATTERN_SCAN_TIMEFRAME, description="型態掃描固定只支援 D1/day"),
     date: Optional[str] = Query(None, description="基準日期 (YYYY-MM-DD)，預設為最新交易日"),
     min_score: float = Query(60.0, description="最小信心度分數 (0~100)"),
     min_vol_lots: Optional[float] = Query(1000.0, description="日 K 10 日均量過濾門檻 (張)，預設 1000 張；設為 None 或 0 表示不限制"),
     limit: int = Query(120, description="K 線視窗根數，預設 120 根"),
 ) -> Dict[str, Any]:
-    """掃描 tick_universe（約 400 檔）股票，找出符合特定/多個/全型態與時區條件的清單（支援記憶體快取與 10 日均量過濾）。"""
+    """掃描 tick_universe（約 400 檔）股票，找出符合特定/多個/全型態 D1 條件的清單（支援記憶體快取與 10 日均量過濾）。"""
     # 處理直接在 Python 內部調用函式時可能傳入 Query 物件的情況
     if hasattr(pattern_type, "default"):
         pattern_type = pattern_type.default
@@ -278,6 +287,7 @@ def scan_patterns(
         min_vol_lots = min_vol_lots.default
     if hasattr(limit, "default"):
         limit = limit.default
+    timeframe = _normalize_scan_timeframe(timeframe)
 
     # 1. 解析型態參數 (支援逗號分隔與 "all")
     raw_types = [t.strip() for t in pattern_type.split(",") if t.strip()]
@@ -316,12 +326,8 @@ def scan_patterns(
     if cache_key in _SCAN_CACHE:
         return _SCAN_CACHE[cache_key]
 
-    # 3. 只讀 tick_universe 母體（上限800檔）的 K 線，不要整個市場（~2900檔）
-    # 都讀進來才在下面的迴圈丟掉——這支函式本來就只會對 TICK_UNIVERSE_SET
-    # 裡的股票跑型態偵測，intraday（3m/5m）資料量大，先用 stock_ids
-    # 篩掉不需要的股票，實測全型態掃描才不會因為讀太多用不到的資料逾時/
-    # 斷線（2026-08-11 使用者提出：已經用成交量篩過候選池了，應該先篩
-    # 再抓K線，不要抓完K線才篩）。
+    # 3. 只讀 tick_universe 母體（上限800檔）的 D1 K 線，不要整個市場
+    # （~2900檔）都讀進來才在下面的迴圈丟掉。
     all_candles = get_all_stocks_candles(timeframe=timeframe, date=date, limit=limit, stock_ids=TICK_UNIVERSE_SET)
     avg_vol_map = get_stocks_10d_avg_vol_lots(date=date)
 
@@ -441,6 +447,7 @@ async def _run_scan_job(
     from api import _broadcast
 
     try:
+        timeframe = _normalize_scan_timeframe(timeframe)
         raw_types = [t.strip() for t in pattern_type.split(",") if t.strip()]
         if "all" in raw_types:
             selected_types = list(DETECTORS.keys())
@@ -503,7 +510,7 @@ async def _run_scan_job(
 @router.get("/scan/submit", summary="非同步版本：立刻回傳job_id，掃描完成後透過SSE推播結果")
 async def submit_scan(
     pattern_type: str = Query("triangle", description="同 /scan 的說明"),
-    timeframe: str = Query("day", description="時間週期: 1m, 3m, 5m, day"),
+    timeframe: str = Query(PATTERN_SCAN_TIMEFRAME, description="型態掃描固定只支援 D1/day"),
     date: Optional[str] = Query(None, description="基準日期 (YYYY-MM-DD)，預設為最新交易日"),
     min_score: float = Query(60.0, description="最小信心度分數 (0~100)"),
     min_vol_lots: Optional[float] = Query(1000.0, description="日 K 10 日均量過濾門檻 (張)"),
@@ -513,6 +520,7 @@ async def submit_scan(
     呼叫 asyncio.create_task()（同步 def 路由會被 FastAPI 丟到背景執行緒
     跑，那個執行緒沒有 running event loop，呼叫 create_task 會直接出錯）。
     """
+    timeframe = _normalize_scan_timeframe(timeframe)
     job_id = str(uuid.uuid4())
     _scan_jobs[job_id] = {"status": "pending"}
     asyncio.create_task(
@@ -528,7 +536,7 @@ def get_pattern_detail(
         "triangle",
         description="型態種類: triangle, w_bottom, m_top, abcd_bull, abcd_bear, head_shoulders_bottom, cup_handle, macd_hist_bull, macd_hist_bear；或 none（只回 K 線／VWAP／POC，不跑型態偵測——股票清單欄型態全關時用）",
     ),
-    timeframe: str = Query("day", description="時間週期: 1m, 3m, 5m, day"),
+    timeframe: str = Query("day", description="圖表週期: 1m, 3m, 5m, day；pattern_type 非 none 時只支援 D1/day"),
     date: Optional[str] = Query(None, description="基準日期 (YYYY-MM-DD)"),
     limit: int = Query(120, description="K 線視窗根數，預設 120 根，full_day=true 時忽略"),
     full_day: bool = Query(False, description="True 時忽略 limit，改成回傳 date（沒帶則今天）當天完整一天的K線（開盤到現在/收盤），只對 1m/3m/5m 有意義"),
@@ -557,6 +565,8 @@ def get_pattern_detail(
             status_code=400,
             detail=f"尚未支援或無效的型態: {pattern_type}。可用型態: {list(DETECTORS.keys())} 或 none",
         )
+    if not skip_pattern:
+        timeframe = _normalize_scan_timeframe(timeframe)
 
     # 取得最新 K 線時間戳以構造智慧快取 Key
     latest_ts = get_latest_candle_timestamp(timeframe=timeframe, date=date)

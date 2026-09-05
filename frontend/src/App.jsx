@@ -5,12 +5,8 @@ import { TIMEFRAME_LABEL, priceSummary } from "./chartData.js";
 import TradingViewChart, { indicatorLabel } from "./TradingViewChart.jsx";
 
 const DEFAULT_STOCK = "0050";
-const PATTERN_TIMEFRAMES = [
-  ["day", "日"],
-  ["1m", "1分"],
-  ["3m", "3分"],
-  ["5m", "5分"],
-];
+const PATTERN_TIMEFRAME = "day";
+const PATTERN_TIMEFRAME_LABEL = "D1";
 const ACTIVITY_FILTERS = {
   day_atr: {
     label: "ATR",
@@ -267,13 +263,14 @@ export default function App() {
 
   const [patternTypes, setPatternTypes] = useState([]);
   const [selectedPatternTypes, setSelectedPatternTypes] = useState(["triangle"]);
-  const [patternTimeframe, setPatternTimeframe] = useState("day");
   const [patternLimit, setPatternLimit] = useState(120);
   const [patternMinVol, setPatternMinVol] = useState(1000);
   const [patternRows, setPatternRows] = useState([]);
   const [patternLoading, setPatternLoading] = useState(false);
   const [patternError, setPatternError] = useState("");
+  const [patternSettingsOpen, setPatternSettingsOpen] = useState(false);
   const pendingPatternJobRef = useRef("");
+  const patternSettingsRef = useRef(null);
 
   const [universe, setUniverse] = useState(() => localStorage.getItem("vwapUniverse") || "daytrade");
   const [universeSets, setUniverseSets] = useState({ daytrade: new Set(), full: new Set(), names: new Map() });
@@ -310,7 +307,7 @@ export default function App() {
   const rightSummary = useMemo(() => priceSummary(intradayData?.candles), [intradayData]);
   const isVwapChart = chartContext.kind === "vwap" || chartContext.kind === "obs";
   const isPatternChart = chartContext.kind === "pattern";
-  const activeChartTimeframe = isVwapChart ? "1m" : isPatternChart ? chartContext.timeframe || patternTimeframe : timeframe;
+  const activeChartTimeframe = isVwapChart ? "1m" : isPatternChart ? chartContext.timeframe || PATTERN_TIMEFRAME : timeframe;
   const activeChartPatternType = isPatternChart ? chartContext.patternType || "none" : "none";
   const activeChartLimit = isPatternChart ? chartContext.limit || patternLimit || 120 : 120;
   const activeChartDate = isPatternChart ? patternDate : isVwapChart ? vwapDate : vwapDate || patternDate;
@@ -323,6 +320,29 @@ export default function App() {
     activeChartDateRef.current = activeChartDate;
     vwapDateRef.current = vwapDate;
   }, [stockId, activeChartDate, vwapDate]);
+
+  useEffect(() => {
+    if (!patternSettingsOpen) return undefined;
+
+    function closeOnOutsidePointer(event) {
+      if (!patternSettingsRef.current?.contains(event.target)) {
+        setPatternSettingsOpen(false);
+      }
+    }
+
+    function closeOnEscape(event) {
+      if (event.key === "Escape") {
+        setPatternSettingsOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [patternSettingsOpen]);
 
   const loadCharts = useCallback(async () => {
     const sid = stockId.trim();
@@ -558,7 +578,7 @@ export default function App() {
       try {
         const params = new URLSearchParams({
           pattern_type: patternType,
-          timeframe: patternTimeframe,
+          timeframe: PATTERN_TIMEFRAME,
           limit: String(patternLimit || 120),
           min_vol_lots: String(patternMinVol || 0),
         });
@@ -593,7 +613,7 @@ export default function App() {
       stopped = true;
       window.clearTimeout(fallbackTimer);
     };
-  }, [selectedPatternTypes, patternTimeframe, patternLimit, patternMinVol, patternDate]);
+  }, [selectedPatternTypes, patternLimit, patternMinVol, patternDate]);
 
   useEffect(() => {
     const es = new EventSource(apiUrl("/stream"));
@@ -780,10 +800,10 @@ export default function App() {
     setChartContext({
       kind: "pattern",
       patternType: row.pattern_type,
-      timeframe: patternTimeframe,
+      timeframe: PATTERN_TIMEFRAME,
       limit: patternLimit,
     });
-  }, [patternLimit, patternTimeframe]);
+  }, [patternLimit]);
 
   function togglePatternType(id) {
     setSelectedPatternTypes((prev) => {
@@ -929,37 +949,13 @@ export default function App() {
             focused={focusedPanel === "pattern"}
             onFocusPanel={() => setFocusedPanel("pattern")}
           >
-            <div className="flex flex-wrap gap-1 border-b border-base-300 bg-base-200 p-2">
-              <select className="select select-bordered select-xs rounded" value={patternTimeframe} onChange={(e) => setPatternTimeframe(e.target.value)}>
-                {PATTERN_TIMEFRAMES.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+            <div className="flex flex-wrap items-start gap-1 border-b border-base-300 bg-base-200 p-2">
               <input
                 type="date"
                 className="input input-bordered input-xs w-32 rounded"
                 value={patternDate}
                 title="基準日期，留空＝最新交易日"
                 onChange={(e) => setPatternDate(e.target.value)}
-              />
-              <input
-                type="number"
-                className="input input-bordered input-xs w-16 rounded"
-                value={patternLimit}
-                min="20"
-                max="500"
-                step="10"
-                onChange={(e) => setPatternLimit(Number(e.target.value) || 120)}
-              />
-              <input
-                type="number"
-                className="input input-bordered input-xs w-20 rounded"
-                value={patternMinVol}
-                min="0"
-                step="100"
-                onChange={(e) => setPatternMinVol(Number(e.target.value) || 0)}
               />
               <details className="dropdown">
                 <summary className="btn btn-xs rounded">
@@ -986,6 +982,77 @@ export default function App() {
                       <span className="truncate">{type.name}</span>
                     </label>
                   ))}
+                </div>
+              </details>
+              <details
+                ref={patternSettingsRef}
+                className="dropdown dropdown-end ml-auto"
+                open={patternSettingsOpen}
+                onBlurCapture={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setPatternSettingsOpen(false);
+                  }
+                }}
+              >
+                <summary
+                  className="btn btn-square btn-xs rounded"
+                  title="型態掃描設定"
+                  aria-label="型態掃描設定"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setPatternSettingsOpen((open) => !open);
+                  }}
+                >
+                  ☰
+                </summary>
+                <div className="dropdown-content z-20 mt-1 w-56 rounded border border-base-300 bg-base-200 p-3 shadow">
+                  <div className="mb-2 flex items-center justify-between border-b border-base-300 pb-2">
+                    <span className="text-xs font-semibold text-base-content/70">掃描設定</span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-square btn-xs rounded"
+                      title="關閉"
+                      aria-label="關閉"
+                      onClick={() => setPatternSettingsOpen(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <label className="form-control w-full">
+                    <div className="label py-1">
+                      <span className="label-text text-xs">週期</span>
+                    </div>
+                    <select className="select select-bordered select-xs rounded" value={PATTERN_TIMEFRAME} disabled>
+                      <option value={PATTERN_TIMEFRAME}>{PATTERN_TIMEFRAME_LABEL}</option>
+                    </select>
+                  </label>
+                  <label className="form-control mt-2 w-full">
+                    <div className="label py-1">
+                      <span className="label-text text-xs">大棒根數</span>
+                    </div>
+                    <input
+                      type="number"
+                      className="input input-bordered input-xs rounded"
+                      value={patternLimit}
+                      min="20"
+                      max="500"
+                      step="10"
+                      onChange={(e) => setPatternLimit(Number(e.target.value) || 120)}
+                    />
+                  </label>
+                  <label className="form-control mt-2 w-full">
+                    <div className="label py-1">
+                      <span className="label-text text-xs">成交量張數</span>
+                    </div>
+                    <input
+                      type="number"
+                      className="input input-bordered input-xs rounded"
+                      value={patternMinVol}
+                      min="0"
+                      step="100"
+                      onChange={(e) => setPatternMinVol(Number(e.target.value) || 0)}
+                    />
+                  </label>
                 </div>
               </details>
             </div>

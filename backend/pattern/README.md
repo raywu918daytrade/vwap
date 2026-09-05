@@ -1,6 +1,6 @@
 # 技術型態識別系統 (Pattern Recognition System)
 
-本模組提供 K 線技術型態（如三角收斂、W底、M頭、頭肩頂、頭肩底、杯柄、ABCD、突破壓力回測、跌破支撐反彈等 10 種型態）的自動識別演算、跨時間週期資料載入、FastAPI 端點與記憶體快取機制。
+本模組提供 D1 技術型態（如三角收斂、W底、M頭、頭肩頂、頭肩底、杯柄、ABCD、突破壓力回測、跌破支撐反彈等 10 種型態）的自動識別演算、圖表資料載入、FastAPI 端點與記憶體快取機制。
 
 ---
 
@@ -11,7 +11,7 @@ pattern/
 ├── README.md                 # 本說明文件
 ├── __init__.py               # 模組對外匯入點
 ├── base.py                   # 統一資料結構 (PivotPoint, TrendLine, PatternResult) 與 Detector 基類
-├── data_loader.py            # 跨週期 K 線載入 (1m, 3m, 5m, day) 與 10日均量計算
+├── data_loader.py            # 圖表 K 線載入 (1m, 3m, 5m, day) 與 D1 掃描用 10日均量計算
 ├── pattern_api.py            # FastAPI APIRouter 進入點 (掛載至 api.py /api/pattern)
 ├── triangle/                 # 三角收斂型態檢測器
 │   ├── __init__.py
@@ -268,7 +268,7 @@ pattern/
     1. **單一型態**：`triangle`
     2. **多個型態 (逗號分隔)**：`triangle,w_bottom,m_top`
     3. **全型態掃描**：`all`（一次掃描所有 10 種已註冊型態）
-  - `timeframe` (str): 時間週期，可選 `1m`, `3m`, `5m`, `day`（預設 `day`）。
+  - `timeframe` (str): 型態掃描固定只支援 `day` / `D1`（預設 `day`）；`1m`, `3m`, `5m` 已移除。
   - `date` (str, 選填): 基準日期 `YYYY-MM-DD`（預設最新交易日）。
   - `min_score` (float): 最低信心分數門檻，預設 `60.0`。
   - `min_vol_lots` (float, 選填): **日 K 10日均量過濾門檻 (張)**，預設 `1000.0` 張（設為 0 不限制）。
@@ -277,7 +277,7 @@ pattern/
 
 ### 3. `GET /api/pattern/{stock_id}/detail`
 - **用途**：取得單一股票的 K 線歷史數據、型態繪圖座標、當日 Volume Profile 成交量分布與 POC / VAH / VAL 數據。
-- **查詢參數**：`pattern_type`, `timeframe`, `date`, `limit`
+- **查詢參數**：`pattern_type`, `timeframe`, `date`, `limit`。`pattern_type=none` 時可用於純圖表 K 線；要跑型態偵測時只支援 `timeframe=day`。
 - **回傳內容**：
   - `stock_id`: 股票代號（例如 `"2330"`）。
   - `stock_name`: 股票中文名稱（例如 `"台積電"`）。
@@ -304,6 +304,5 @@ pattern/
   `(pattern_type, timeframe, date, min_score, min_vol_lots, limit, latest_ts)`
 - **自動失效與更新**：
   - 快取 Key 自動綁定 `get_latest_candle_timestamp()`（最新 K 線時間戳）。
-  - **盤中時間**：每分鐘寫入新 1 分 K 線時，時間戳更新，快取自動失效並重算最新型態。
-  - **盤後時間**：日 K 或盤後資料不變，快取持續生效，二次查詢時間由 1.9 秒降至 **< 50ms**（加速約 40 倍）。
-- **參數隔離**：不同型態、週期或均量門檻的查詢條件會生成獨立 Key，互不干擾。
+  - **盤後時間**：日 K 資料不變，快取持續生效，二次查詢時間由 1.9 秒降至 **< 50ms**（加速約 40 倍）。
+- **參數隔離**：不同型態、日期或均量門檻的查詢條件會生成獨立 Key，互不干擾。
