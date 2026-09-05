@@ -90,11 +90,17 @@ except Exception:
 
 
 def _load_daytrade_list() -> List[Dict[str, str]]:
-    """讀 db/tickers/tick_universe.parquet 裡 daytrade_ok=True 的列——這是
-    main/premarket.py::refresh_tickers() 每天早上6點實際呼叫
-    fubon/subscribe_list.py::build_and_save_subscribe_list() 驗證過的結果，
-    是「今天實際會被富邦WebSocket即時收集」的股票池，db/m1_live 有哪些
-    股票就是看這份決定的。
+    """讀 db/tickers/tick_universe.parquet 裡的當沖候選清單。
+
+    新版 GHA/HF 同步下來的 tick_universe.parquet 可能已經是過濾後的候選
+    母體，只保留 day_trade_tier/rank/forced_include 等欄位，沒有舊版
+    daytrade_ok。這種格式就直接回傳檔案內容；若遇到舊格式含 daytrade_ok，
+    則沿用 daytrade_ok=True 的列。
+
+    舊版語意：main/premarket.py::refresh_tickers() 每天早上6點實際呼叫
+    fubon/subscribe_list.py::build_and_save_subscribe_list() 驗證過的結果，是
+    「今天實際會被富邦WebSocket即時收集」的股票池，db/m1_live 有哪些股票
+    就是看這份決定的。
 
     2026-08-19改版：股票清單欄的「當沖候選」選項原本讀
     db/tickers/tick_universe.parquet 整份（不分今天能不能當沖）——這會
@@ -119,10 +125,12 @@ def _load_daytrade_list() -> List[Dict[str, str]]:
     try:
         df = pd.read_parquet(path, columns=["stock_id", "name", "daytrade_ok"])
     except Exception:
-        return []
-    if "daytrade_ok" not in df.columns:
-        return []
-    df = df[df["daytrade_ok"] == True]  # noqa: E712
+        try:
+            df = pd.read_parquet(path, columns=["stock_id", "name"])
+        except Exception:
+            return []
+    if "daytrade_ok" in df.columns:
+        df = df[df["daytrade_ok"] == True]  # noqa: E712
     return [
         {"stock_id": str(sid), "name": str(name).strip()}
         for sid, name in zip(df["stock_id"], df["name"])
