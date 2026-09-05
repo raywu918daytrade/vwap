@@ -59,8 +59,7 @@ Fugle + 富邦同時下載（2026-08-13改成共用queue，取代原本事先切
         同上，但抓完整還原版本，寫入 db/adjustment_day/。
 
 ⚠️ update_day() 跟 update_adjustment_day() 要依序執行、不能同時跑——兩者都會
-用到 Fugle 雙帳號 + 富邦三路併發下載，同時跑會互搶同一組 rate limit
-（見 scripts/update_daily.py）。
+用到 Fugle 雙帳號 + 富邦三路併發下載，同時跑會互搶同一組 rate limit。
 
 資料格式（db/d1/YYYY_M.parquet、db/adjustment_day/YYYY_M.parquet）：
     stock_id, date(str), open, high, low, close(float32), volume(int64)
@@ -100,8 +99,8 @@ _flag_lock = threading.Lock()
 # （日K/分K歷史，跟 Fugle 同一套底層 fugle_marketdata 元件），該函式自己的
 # docstring 明載官方限制是 60次/分鐘，跟 Fugle 一樣——不是 300次/分鐘。
 # 300次/分鐘是 fubon/tick_api.py 用的 intraday/trades（抓當天tick）另一個
-# 端點家族的限制，兩者不能混為一談，之前誤用同一個常數導致實際跑
-# scripts/update_daily.py 時打出 429 Rate limit exceeded。
+# 端點家族的限制，兩者不能混為一談，之前誤用同一個常數導致資料更新流程
+# 打出 429 Rate limit exceeded。
 # 2026-08-13：三路併發（Fugle/Fugle-DT/富邦）改成共用queue動態搶股票
 # （見 _update_day_generic()），不再事先按節流速率切固定份數。
 _FUGLE_INTERVAL = 1.05  # 秒/次，60次/分鐘留緩衝
@@ -642,7 +641,7 @@ def update_adjustment_day(start_date: str = None, stocks: list = None, workers: 
     門檻）。用法/參數同 update_day()。
 
     ⚠️ 跟 update_day() 要依序執行、不能同時跑（兩者都用 Fugle雙帳號+富邦三路
-    併發下載，同時跑會互搶同一組 rate limit），見 scripts/update_daily.py。
+    併發下載，同時跑會互搶同一組 rate limit）。
     """
     _update_day_generic(
         start_date, stocks, workers, adjusted=True, base_dir=_ADJUSTMENT_DAY_DIR, flag_path=_ADJUSTMENT_DAY_FLAG_PATH

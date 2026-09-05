@@ -92,7 +92,7 @@ except Exception:
 def _load_daytrade_list() -> List[Dict[str, str]]:
     """讀 db/tickers/tick_universe.parquet 裡的當沖候選清單。
 
-    新版 GHA/HF 同步下來的 tick_universe.parquet 可能已經是過濾後的候選
+    HF 同步下來的 tick_universe.parquet 可能已經是過濾後的候選
     母體，只保留 day_trade_tier/rank/forced_include 等欄位，沒有舊版
     daytrade_ok。這種格式就直接回傳檔案內容；若遇到舊格式含 daytrade_ok，
     則沿用 daytrade_ok=True 的列。

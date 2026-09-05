@@ -18,8 +18,8 @@
 `scripts.sync_market_db_from_hf.sync_market_db_from_hf()` 從 Hugging Face dataset
 同步 `db/`。
 
-這段只負責把 GHA 已經推到 HF 的歷史資料拉回本機，不負責盤中 WebSocket 補
-M1 缺口。
+這段只負責把外部維護的 HF dataset 歷史資料拉回本機，不負責每日歷史資料
+更新、上傳 HF，也不負責盤中 WebSocket 補 M1 缺口。
 
 ## 盤中補資料
 

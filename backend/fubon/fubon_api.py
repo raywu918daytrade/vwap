@@ -32,9 +32,9 @@ def login(retry_delays: tuple[float, ...] = (60, 300, 600)) -> tuple[FubonSDK, l
     """身分證字號＋API Key（.env 的 FUBON_API_KEY）＋憑證登入。第一次連線測試
     （身分證字號＋密碼＋憑證）已經在 2026-07 完成、帳號權限開通，之後一律用這個。
 
-    2026-08-28加重試：2026-08-27 GHA排程整個失敗，原因是 FubonSDK() 建構
+    2026-08-28加重試：2026-08-27 外部資料更新流程整個失敗，原因是 FubonSDK() 建構
     子連線時噴 ValueError（Unable to connect to wss://neoapi.fbs.com.tw/...），
-    這個例外沒接住，直接把整支 update_daily.py 炸掉（後面 m1/d1/
+    這個例外沒接住，直接把整支資料更新流程炸掉（後面 m1/d1/
     adjustment_day/tick_universe全部沒機會跑，見對話紀錄的診斷）。查過去
     21次排程只有這一次失敗，屬於偶發的暫時性連線問題（不是帳密/憑證這種
     重試也沒用的錯誤），所以在這裡包一層重試，換掉單點失敗就讓一整天全部

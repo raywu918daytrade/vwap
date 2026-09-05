@@ -1,8 +1,8 @@
 # finmind/ 說明
 
 FinMind 是「歷史回補」用的資料源，解決 Fugle/富邦「近30日」硬限制碰不到的
-更早期間。**日常自動排程（`scripts/update_daily.py`）完全不會呼叫這個資料夾
-裡任何一支腳本**，全部都是手動、需要時才跑的一次性/背景工具。
+更早期間。新專案不再負責日常資料生產；這個資料夾裡的腳本都是手動、需要時
+才跑的一次性/背景工具。
 
 股票母體固定是 `tick_universe.py` 算出來的400支，**所有CLI/函式現在預設就是
 這400支，不用另外加旗標**——真的要補全市場才需要明確帶 `--all` 選擇退出。
@@ -82,8 +82,8 @@ python -m finmind.backfill_m1_history 2026-01 2026-05 --all 1000   # 全市場�
 
 ## 除權息調整係數（db/tick_adjust_factor）
 
-日常自動的 `data/build_tick_adjust_factor.py`（在 `scripts/update_daily.py`
-裡）拿本機既有的 `db/tick`+`db/fugle_day` 直接算，不打任何API，只能算
+日常資料生產流程中的 `data/build_tick_adjust_factor.py` 拿本機既有的
+`db/tick`+`db/fugle_day` 直接算，不打任何API，只能算
 `db/tick` 涵蓋範圍內（目前約2025-08起）的係數。
 
 `db/tick` 涵蓋範圍**之前**的除權息事件（例如某支股票的除息/拆股發生在

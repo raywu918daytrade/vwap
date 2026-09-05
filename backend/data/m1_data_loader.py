@@ -12,7 +12,7 @@ adjusted 參數——需要還原後價格的地方改用 data/query.py::load_m1
 當作反推係數的基準來源。
 
 與 fubon/marketdata_ws.py 的差異：
-    m1_data_loader.py       → 下載歷史分K（近30日），存 db/m1/，給訓練用，GHA 每日觸發
+    m1_data_loader.py       → 下載歷史分K（近30日），存 db/m1/，給資料生產流程使用
     fubon/marketdata_ws.py  → 盤中富邦 WebSocket 即時推送，存 db/m1_live/，給當天交易推論用
 
 Fugle + 富邦同時下載（2026-08-13改成共用queue+兩階段，取代原本事先切固定
@@ -66,9 +66,8 @@ _flag_lock = threading.Lock()
 
 def _m1_file_path(date: pd.Timestamp) -> Path:
     """月份補零，避免同一個月產生檔名不同的分檔、觸發 schema 衝突（db/fugle_day/
-    已經因此撞過一次，見 2026_7.parquet vs 2026_07.parquet）。scripts/push_db_to_hf.py
-    現在是直接鏡像整個 db/ 資料夾上 HF Hub，本機檔名就是 HF 上的檔名，這裡的
-    命名慣例統一與否直接反映到雲端，更要保持一致。"""
+    已經因此撞過一次，見 2026_7.parquet vs 2026_07.parquet）。HF dataset 會
+    保留本機檔名結構，這裡的命名慣例統一與否直接反映到雲端，更要保持一致。"""
     return _ROOT / f"db/m1/{date.year}_{date.month:02d}.parquet"
 
 
@@ -304,7 +303,7 @@ def _last_stored_dates_m1() -> dict:
     return df.groupby("stock_id")["date"].max().to_dict()
 
 
-_INTRADAY_FAST_WORKERS = 8  # 2026-08-14從10調降：GHA實跑撞到約7.5%(140/1864)的429，降併發數當第一道防線
+_INTRADAY_FAST_WORKERS = 8  # 2026-08-14從10調降：資料更新實跑撞到約7.5%(140/1864)的429，降併發數當第一道防線
 _INTRADAY_FAST_INTERVAL = 0.25
 
 
@@ -346,9 +345,9 @@ def _update_m1_fugle(
     _save_lock 卡住，每次呼叫都要整檔重讀重寫，是比API rate limit更嚴重
     的瓶頸。
 
-    ⚠️ 2026-08-14加 failed 參數：實際跑GHA時發現 Phase 1（不管Fugle還是
+    ⚠️ 2026-08-14加 failed 參數：實際跑資料更新時發現 Phase 1（不管Fugle還是
     富邦快路徑）真的請求失敗（不是404、是暫時性錯誤如rate limit——實測
-    一次GHA執行就有~140支股票因為富邦intraday撞到429失敗）時，原本這批
+    一次執行就有~140支股票因為富邦intraday撞到429失敗）時，原本這批
     股票當天完全沒有第二次機會，要等隔天gap偵測才會被抓回來補。現在把
     這種真正的請求失敗記進 failed（線程安全，用同一把 buffer_lock 保護，
     append本身很輕量不會卡），update_m1() 收集完 Phase 1 全部 failed 後
@@ -414,7 +413,7 @@ def _update_m1_fubon_fast(
     嚴重的瓶頸，跟這裡的併發下載無關）。
 
     ⚠️ 2026-08-14加 failed 參數：理由/語意同 _update_m1_fugle() 的
-    failed 參數說明——實測GHA一次執行約140支股票在這裡因為富邦intraday
+    failed 參數說明——實測一次執行約140支股票在這裡因為富邦intraday
     撞到429失敗，記進 failed 讓 update_m1() 併入 Phase 2 同一天內用
     慢路徑補回來，不用等隔天。"""
     from concurrent.futures import ThreadPoolExecutor
@@ -548,7 +547,7 @@ def update_m1(stocks: list = None):
 
     ⚠️ 2026-08-14加：Phase 2 除了原本的 `gap_stocks`，還會併入 **Phase 1
     這次真的請求失敗**（rate limit等暫時性錯誤，不是404、也不是單純空
-    結果）的股票——實測GHA一次執行就有約140支股票在富邦intraday快路徑
+    結果）的股票——實測一次執行就有約140支股票在富邦intraday快路徑
     撞到429失敗，原本這批股票當天完全沒有第二次機會，要等隔天gap偵測
     才會被抓回來補，現在同一天內就用Phase 2的慢路徑補回來。用
     `set(gap_stocks) | set(failed1)` 去重，避免同一支股票被塞進queue
@@ -616,7 +615,7 @@ def update_m1(stocks: list = None):
 
         # ── Phase 2：補 Phase 1 開始前就已經確認有缺口的股票，
         # 加上 Phase 1 這次真的請求失敗（rate limit等暫時性錯誤，不是
-        # 404）的股票——2026-08-14加：實測GHA一次執行約140支股票在富邦
+        # 404）的股票——2026-08-14加：實測一次執行約140支股票在富邦
         # intraday快路徑撞到429失敗，原本要等隔天gap偵測才會被抓回來，
         # 現在同一天內就用慢路徑補，不用等隔天。用 set 去重，避免同一支
         # 股票同時在 gap_stocks 跟 failed1 裡導致 queue 重複塞兩次。

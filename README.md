@@ -2,7 +2,7 @@
 
 這個專案已瘦身成兩個入口資料夾：
 
-- `backend/`：FastAPI、資料下載、日K/M1K 查詢、富邦即時 M1 collector、VWAP/SR/型態 API。
+- `backend/`：FastAPI、HF 歷史資料同步、日K/M1K 查詢、富邦即時 M1 collector、VWAP/SR/型態 API。
 - `frontend/`：React + Vite + Tailwind + DaisyUI 純前端，保留原本型態框、VWAP框、觀察框、TradingView 日K/M1K 圖表與即時連線狀態。
 
 已移除模型推論、策略回測、下單、部位、成交回報與舊監控畫面。歷史資料與即時資料保留在 `backend/db/`，不納入 git。
@@ -32,8 +32,8 @@ npm run dev
 - VWAP框：`/vwap_sr_replay`、`/vwap_breakout/today`、`/sr_vwap_cross/today`、`/vwap_activity`、`/vwap_macd_div`、`/vwap_obv_div`
 - 觀察框：前端 localStorage 保存觀察股票，沿用 VWAP/SR/MACD/OBV 顯示
 - K線圖：`/api/pattern/{stock_id}/detail` 提供日K、M1K、型態線、轉折點、VWAP、日壓力支撐、Volume Profile、POC/VAH/VAL 疊圖；VWAP/觀察列另保留 MACD、OBV、0050 子面板
-- 歷史資料下載：`backend/scripts/update_daily.py` 與相關 `backend/finmind/`、`backend/data/` 工具
-- 開機 HF 同步：`backend/main/startup_data.py` 會視本機 D1 flag 新鮮度呼叫 `backend/scripts/sync_market_db_from_hf.py`
+- 歷史資料同步：`backend/scripts/sync_market_db_from_hf.py` 從外部維護的 Hugging Face dataset 下載 `db/`
+- 開機 HF 同步：`backend/main/startup_data.py` 會視本機 D1 flag 新鮮度呼叫 HF 同步；本專案不再負責每日資料更新或上傳 HF
 - 即時連線：`backend/fubon/marketdata_ws.py`
 
 ## 盤中補資料

@@ -212,8 +212,8 @@ def _assign_connections(df: pd.DataFrame) -> pd.DataFrame:
 
 def _try_download_from_hf(path: Path) -> None:
     """一律先試著把 HF Hub 上最新的 tick_universe.parquet 下載蓋過本機
-    再繼續（2026-08-19：候選母體現在由 scripts/update_daily.py 統一每天
-    重建一次、同步到HF，見該檔案說明），不管本機原本有沒有這個檔案都下載，
+    再繼續（候選母體由外部資料生產流程維護並同步到 HF），不管本機原本
+    有沒有這個檔案都下載，
     確保用到的是最新版本。下載失敗（沒設定HF_REPO_ID、網路問題、或HF上
     還沒有這個檔案）不當成錯誤，靜默放棄，讓呼叫端 fallback 到本機既有
     檔案或整包重建（見 _load_or_rebuild_universe_pool()）。"""

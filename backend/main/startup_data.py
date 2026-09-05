@@ -46,9 +46,8 @@ def sync_local_market_db_from_hf_if_stale() -> None:
 
     `live_trader` calls this during startup. The freshness check uses the D1
     completion flag for stock 0050 on the expected latest trading day. When that
-    flag is missing, the local DB is probably behind the GitHub Actions daily
-    update, so we mirror the dataset from Hugging Face before realtime M1
-    collection begins.
+    flag is missing, the local DB is probably behind the external HF dataset,
+    so we mirror that dataset before realtime M1 collection begins.
     """
     from datetime import datetime, timedelta, timezone
 
