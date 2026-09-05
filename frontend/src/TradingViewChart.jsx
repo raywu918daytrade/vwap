@@ -520,10 +520,8 @@ export default function TradingViewChart({
       addHorizontalSrLines(candleSeries, extraSr);
       fullDaySlotCount = padFullDay(chart, plottedCandles, timeframe);
     } else {
-      if (!data.pattern?.lines?.length) {
-        if (daySrMode === "segments") addPatternLines(chart, data.sr_lines);
-        else addLatestHorizontalSrLines(candleSeries, data.sr_lines);
-      }
+      if (daySrMode === "segments") addPatternLines(chart, data.sr_lines);
+      else addLatestHorizontalSrLines(candleSeries, data.sr_lines);
       chart.timeScale().fitContent();
       chart.timeScale().applyOptions({ rightOffset: 20 });
     }

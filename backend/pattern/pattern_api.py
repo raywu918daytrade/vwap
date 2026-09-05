@@ -27,7 +27,7 @@ from pattern.abcd_bull.detector import AbcdBullDetector
 from pattern.breakdown_retest.detector import BreakdownRetestDetector
 from pattern.breakout_retest.detector import BreakoutRetestDetector
 from pattern.cup_handle.detector import CupHandleDetector
-from pattern.data_loader import get_all_stocks_candles, get_latest_candle_timestamp, get_stock_candles, get_stocks_10d_avg_vol_lots
+from pattern.data_loader import get_all_stocks_candles, get_latest_candle_timestamp, get_stock_candles
 from pattern.head_shoulders_bottom.detector import HeadShouldersBottomDetector
 from pattern.head_shoulders_top.detector import HeadShouldersTopDetector
 from pattern.m_top.detector import MTopDetector
@@ -54,6 +54,67 @@ DETECTORS = {
     "macd_hist_bull": MacdHistBullDetector(),
     "macd_hist_bear": MacdHistBearDetector(),
 }
+
+_EVENT_DATE_DETAIL_KEYS = (
+    "event_date",
+    "break_date",
+    "trigger_date",
+    "completion_date",
+    "h2_date",
+    "right_shoulder_date",
+    "handle_breakout_date",
+)
+
+
+def _date_text(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return str(value)[:10]
+
+
+def _latest_date_from(items: Any, keys: tuple[str, ...]) -> str:
+    latest = ""
+    if not isinstance(items, list):
+        return latest
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        for key in keys:
+            date_text = _date_text(item.get(key))
+            if date_text and date_text > latest:
+                latest = date_text
+    return latest
+
+
+def _attach_event_date(pattern_dict: Dict[str, Any]) -> None:
+    """Expose a normalized event_date for the front-end VWAP signal column."""
+    details = pattern_dict.get("details")
+    if isinstance(details, dict):
+        for key in _EVENT_DATE_DETAIL_KEYS:
+            date_text = _date_text(details.get(key))
+            if date_text:
+                pattern_dict["event_date"] = date_text
+                return
+
+    line_date = _latest_date_from(pattern_dict.get("lines"), ("end_date", "start_date"))
+    if line_date:
+        pattern_dict["event_date"] = line_date
+        return
+
+    pivot_date = _latest_date_from(pattern_dict.get("pivots"), ("date",))
+    if pivot_date:
+        pattern_dict["event_date"] = pivot_date
+        return
+
+    date_text = _date_text(pattern_dict.get("date"))
+    if date_text:
+        pattern_dict["event_date"] = date_text
+
 
 def _read_tick_universe() -> tuple[set[str], Dict[str, str]]:
     """Read the HF-synced day-trade universe and stock-name map."""
@@ -270,10 +331,9 @@ def scan_patterns(
     timeframe: str = Query(PATTERN_SCAN_TIMEFRAME, description="型態掃描固定只支援 D1/day"),
     date: Optional[str] = Query(None, description="基準日期 (YYYY-MM-DD)，預設為最新交易日"),
     min_score: float = Query(60.0, description="最小信心度分數 (0~100)"),
-    min_vol_lots: Optional[float] = Query(1000.0, description="日 K 10 日均量過濾門檻 (張)，預設 1000 張；設為 None 或 0 表示不限制"),
     limit: int = Query(120, description="K 線視窗根數，預設 120 根"),
 ) -> Dict[str, Any]:
-    """掃描 tick_universe（約 400 檔）股票，找出符合特定/多個/全型態 D1 條件的清單（支援記憶體快取與 10 日均量過濾）。"""
+    """掃描 tick_universe 股票，找出符合特定/多個/全型態 D1 條件的清單。"""
     # 處理直接在 Python 內部調用函式時可能傳入 Query 物件的情況
     if hasattr(pattern_type, "default"):
         pattern_type = pattern_type.default
@@ -281,8 +341,6 @@ def scan_patterns(
         timeframe = timeframe.default
     if hasattr(min_score, "default"):
         min_score = min_score.default
-    if hasattr(min_vol_lots, "default"):
-        min_vol_lots = min_vol_lots.default
     if hasattr(limit, "default"):
         limit = limit.default
     timeframe = _normalize_scan_timeframe(timeframe)
@@ -319,7 +377,7 @@ def scan_patterns(
 
     # 2. 取得最新 K 線時間戳以構造智慧快取 Key
     latest_ts = get_latest_candle_timestamp(timeframe=timeframe, date=date)
-    cache_key = (normalized_pattern_key, timeframe, date or "latest", min_score, min_vol_lots, limit, latest_ts)
+    cache_key = (normalized_pattern_key, timeframe, date or "latest", min_score, limit, latest_ts)
 
     if cache_key in _SCAN_CACHE:
         return _SCAN_CACHE[cache_key]
@@ -327,7 +385,6 @@ def scan_patterns(
     # 3. 只讀 tick_universe 母體（上限800檔）的 D1 K 線，不要整個市場
     # （~2900檔）都讀進來才在下面的迴圈丟掉。
     all_candles = get_all_stocks_candles(timeframe=timeframe, date=date, limit=limit, stock_ids=TICK_UNIVERSE_SET)
-    avg_vol_map = get_stocks_10d_avg_vol_lots(date=date)
 
     active_detectors = [(pt, DETECTORS[pt]) for pt in selected_types]
 
@@ -339,11 +396,6 @@ def scan_patterns(
 
         str_stock_id = str(stock_id)
 
-        # 10 日均量 (張) 過濾
-        avg_vol_lots = avg_vol_map.get(str_stock_id, 0.0)
-        if min_vol_lots and min_vol_lots > 0 and avg_vol_lots < min_vol_lots:
-            continue
-
         # 一支股票可同時匹配多個 Detector
         for pt_key, detector in active_detectors:
             try:
@@ -352,10 +404,10 @@ def scan_patterns(
                     stock_name = STOCK_NAME_MAP.get(str_stock_id, str_stock_id)
                     res_dict = res.to_dict()
                     res_dict["pattern_name"] = detector.display_name
+                    _attach_event_date(res_dict)
                     res_dict["stock_name"] = stock_name
                     res_dict["name"] = stock_name
                     res_dict["in_tick_universe"] = True
-                    res_dict["details"]["avg_vol_10d_lots"] = avg_vol_lots
                     matches.append(res_dict)
             except Exception:
                 continue
@@ -368,7 +420,6 @@ def scan_patterns(
         "pattern_types": selected_types,
         "timeframe": timeframe,
         "date": date or (matches[0]["date"] if matches else None),
-        "min_vol_lots": min_vol_lots,
         "total_matches": len(matches),
         "results": matches,
     }
@@ -392,11 +443,9 @@ _SCAN_YIELD_EVERY = 20  # 每處理這麼多檔股票就讓出 event loop 一次
 
 async def _scan_stocks_async(
     all_candles: Dict[str, pd.DataFrame],
-    avg_vol_map: Dict[str, float],
     active_detectors: list,
     timeframe: str,
     min_score: float,
-    min_vol_lots: Optional[float],
 ) -> list:
     """邏輯跟 scan_patterns() 內的迴圈完全一樣，差別只在定期
     await asyncio.sleep(0)，讓任何一段連續佔用 GIL 的時間都壓在很短
@@ -410,9 +459,6 @@ async def _scan_stocks_async(
             continue
 
         str_stock_id = str(stock_id)
-        avg_vol_lots = avg_vol_map.get(str_stock_id, 0.0)
-        if min_vol_lots and min_vol_lots > 0 and avg_vol_lots < min_vol_lots:
-            continue
 
         for pt_key, detector in active_detectors:
             try:
@@ -421,10 +467,10 @@ async def _scan_stocks_async(
                     stock_name = STOCK_NAME_MAP.get(str_stock_id, str_stock_id)
                     res_dict = res.to_dict()
                     res_dict["pattern_name"] = detector.display_name
+                    _attach_event_date(res_dict)
                     res_dict["stock_name"] = stock_name
                     res_dict["name"] = stock_name
                     res_dict["in_tick_universe"] = True
-                    res_dict["details"]["avg_vol_10d_lots"] = avg_vol_lots
                     matches.append(res_dict)
             except Exception:
                 continue
@@ -439,7 +485,6 @@ async def _run_scan_job(
     timeframe: str,
     date: Optional[str],
     min_score: float,
-    min_vol_lots: Optional[float],
     limit: int,
 ) -> None:
     from api import _broadcast
@@ -460,18 +505,14 @@ async def _run_scan_job(
             _broadcast({"type": "pattern_scan_done", "job_id": job_id, "error": "未指定有效的型態"})
             return
 
-        # 讀K線資料（get_all_stocks_candles/get_stocks_10d_avg_vol_lots）本來
-        # 以為只是「一次性成本、不是這次問題的主因」，但實測（2026-08-11）
-        # 光是這段就會擋住 event loop 快30秒，跟型態偵測迴圈一樣嚴重——
-        # 丟進預設執行緒池跑（loop.run_in_executor），這些底層是
-        # pyarrow/pandas 的 I/O／C-level 運算，會釋放 GIL，才能真的讓
-        # event loop 在這段期間繼續處理 SSE／健康檢查。
+        # 讀K線資料會擋住 event loop 一段時間。丟進預設執行緒池跑，
+        # 讓 pyarrow/pandas 的 I/O 與 C-level 運算期間仍可處理 SSE/健康檢查。
         loop = asyncio.get_event_loop()
         latest_ts = await loop.run_in_executor(
             None, lambda: get_latest_candle_timestamp(timeframe=timeframe, date=date)
         )
         normalized_pattern_key = ",".join(sorted(selected_types))
-        cache_key = (normalized_pattern_key, timeframe, date or "latest", min_score, min_vol_lots, limit, latest_ts)
+        cache_key = (normalized_pattern_key, timeframe, date or "latest", min_score, limit, latest_ts)
 
         if cache_key in _SCAN_CACHE:
             result = _SCAN_CACHE[cache_key]
@@ -482,17 +523,15 @@ async def _run_scan_job(
                     timeframe=timeframe, date=date, limit=limit, stock_ids=TICK_UNIVERSE_SET
                 ),
             )
-            avg_vol_map = await loop.run_in_executor(None, lambda: get_stocks_10d_avg_vol_lots(date=date))
             active_detectors = [(pt, DETECTORS[pt]) for pt in selected_types]
             matches = await _scan_stocks_async(
-                all_candles, avg_vol_map, active_detectors, timeframe, min_score, min_vol_lots
+                all_candles, active_detectors, timeframe, min_score
             )
             result = {
                 "pattern_type": pattern_type,
                 "pattern_types": selected_types,
                 "timeframe": timeframe,
                 "date": date or (matches[0]["date"] if matches else None),
-                "min_vol_lots": min_vol_lots,
                 "total_matches": len(matches),
                 "results": matches,
             }
@@ -511,7 +550,6 @@ async def submit_scan(
     timeframe: str = Query(PATTERN_SCAN_TIMEFRAME, description="型態掃描固定只支援 D1/day"),
     date: Optional[str] = Query(None, description="基準日期 (YYYY-MM-DD)，預設為最新交易日"),
     min_score: float = Query(60.0, description="最小信心度分數 (0~100)"),
-    min_vol_lots: Optional[float] = Query(1000.0, description="日 K 10 日均量過濾門檻 (張)"),
     limit: int = Query(120, description="K 線視窗根數，預設 120 根"),
 ) -> Dict[str, Any]:
     """立刻回傳 job_id，不等掃描完成——一定要宣告成 async def 才能在這裡
@@ -522,7 +560,7 @@ async def submit_scan(
     job_id = str(uuid.uuid4())
     _scan_jobs[job_id] = {"status": "pending"}
     asyncio.create_task(
-        _run_scan_job(job_id, pattern_type, timeframe, date, min_score, min_vol_lots, limit)
+        _run_scan_job(job_id, pattern_type, timeframe, date, min_score, limit)
     )
     return {"job_id": job_id}
 
@@ -620,6 +658,7 @@ def get_pattern_detail(
     if pattern_res:
         pattern_dict = pattern_res.to_dict()
         pattern_dict["pattern_name"] = detector.display_name
+        _attach_event_date(pattern_dict)
         # 把 lines 和 pivots 裡的時間也轉成 epoch 秒數方便前端畫圖
         for p in pattern_dict.get("pivots", []):
             try:

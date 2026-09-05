@@ -3,7 +3,7 @@
 這個專案已瘦身成兩個入口資料夾：
 
 - `backend/`：FastAPI、HF 歷史資料同步、日K/M1K 查詢、富邦即時 M1 collector、VWAP/SR/型態 API。
-- `frontend/`：React + Vite + Tailwind + DaisyUI 純前端，保留原本型態框、VWAP框、觀察框、TradingView 日K/M1K 圖表與即時連線狀態。
+- `frontend/`：React + Vite + Tailwind + DaisyUI 純前端，保留 VWAP框、觀察框、TradingView 日K/M1K 圖表與即時連線狀態；型態掃描已合併到 VWAP 框內。
 
 已移除模型推論、策略回測、下單、部位、成交回報與舊監控畫面。歷史資料與即時資料保留在 `backend/db/`，不納入 git。
 
@@ -28,8 +28,7 @@ npm run dev
 
 ## 保留功能
 
-- 型態框：`/api/pattern/types`、`/api/pattern/scan/submit`，結果由 `/stream` 回傳
-- VWAP框：`/vwap_sr_replay`、`/vwap_breakout/today`、`/sr_vwap_cross/today`、`/vwap_activity`、`/vwap_macd_div`、`/vwap_obv_div`
+- VWAP框：`/vwap_sr_replay`、`/vwap_breakout/today`、`/sr_vwap_cross/today`、`/vwap_activity`、`/vwap_macd_div`、`/vwap_obv_div`，並整合 `/api/pattern/types`、`/api/pattern/scan/submit` 型態掃描結果
 - 觀察框：前端 localStorage 保存觀察股票，沿用 VWAP/SR/MACD/OBV 顯示
 - K線圖：`/api/pattern/{stock_id}/detail` 提供日K、M1K、型態線、轉折點、VWAP、日壓力支撐疊圖；VWAP/觀察列另保留 MACD、OBV、0050 子面板
 - 歷史資料同步：`backend/scripts/sync_market_db_from_hf.py` 從外部維護的 Hugging Face dataset 下載 `db/`

@@ -312,6 +312,11 @@ class MTopDetector(BasePatternDetector):
             lines=[line_start, line_left_leg, line_right_leg, line_drop, line_neckline],
             details={
                 "breakout_status": breakout_status,
+                "event_date": d_date,
+                "break_date": d_date,
+                "h1_date": str(p_h1.date),
+                "neckline_date": str(p_l.date),
+                "h2_date": str(p_h2.date),
                 "price_L0": round(float(p_l0.price), 2),
                 "price_H1": round(float(p_h1.price), 2),
                 "price_L": round(float(p_l.price), 2),

@@ -7,6 +7,8 @@ import TradingViewChart, { indicatorLabel } from "./TradingViewChart.jsx";
 const DEFAULT_STOCK = "0050";
 const PATTERN_TIMEFRAME = "day";
 const PATTERN_TIMEFRAME_LABEL = "D1";
+const HISTORICAL_PATTERN_HEAD_CLASS = "bg-base-300/70 text-base-content/70";
+const HISTORICAL_PATTERN_CELL_CLASS = "bg-base-300/35";
 const ACTIVITY_FILTERS = {
   day_atr: {
     label: "ATR",
@@ -44,6 +46,15 @@ const ACTIVITY_STORAGE_KEYS = {
   open5_rng: "vwapActOpen5",
   vol5_pr: "vwapActVolPr",
 };
+const ACTIVITY_DEFAULT_VERSION = "2";
+const ACTIVITY_DEFAULT_VERSION_KEY = "vwapActivityDefaultVersion";
+const ACTIVITY_DEFAULTS = {
+  day_atr: "0.05",
+  open5_rng: "",
+  vol5_pr: "0.5",
+};
+const VWAP_FILTER_DEFAULT_VERSION = "2";
+const VWAP_FILTER_DEFAULT_VERSION_KEY = "vwapFilterDefaultVersion";
 
 function StatusBadge({ status }) {
   if (status === "connected") return <span className="badge badge-success badge-sm">已連線</span>;
@@ -85,7 +96,34 @@ function initialSavedDate(key) {
   return legacy == null ? previousTaipeiWeekdayIso() : legacy;
 }
 
-function Panel({ title, count, children, actions, className = "", width, focused = false, onFocusPanel }) {
+function initialPatternFilters() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem("vwapPatternFilters") || "null");
+    if (Array.isArray(saved)) return saved.filter(Boolean);
+  } catch {
+    // Ignore old or malformed session values.
+  }
+  return [];
+}
+
+function initialActivityFilters() {
+  const seedDefaults = sessionStorage.getItem(ACTIVITY_DEFAULT_VERSION_KEY) !== ACTIVITY_DEFAULT_VERSION;
+  return Object.fromEntries(
+    Object.entries(ACTIVITY_STORAGE_KEYS).map(([key, storageKey]) => {
+      const saved = sessionStorage.getItem(storageKey);
+      return [key, seedDefaults ? ACTIVITY_DEFAULTS[key] || "" : saved != null ? saved : ACTIVITY_DEFAULTS[key] || ""];
+    }),
+  );
+}
+
+function initialSessionFlag(storageKey, defaultValue) {
+  const seedDefaults = sessionStorage.getItem(VWAP_FILTER_DEFAULT_VERSION_KEY) !== VWAP_FILTER_DEFAULT_VERSION;
+  if (seedDefaults) return defaultValue;
+  const saved = sessionStorage.getItem(storageKey);
+  return saved == null ? defaultValue : saved === "1";
+}
+
+function Panel({ title, count, children, actions, className = "", bodyClassName = "overflow-auto", width, focused = false, onFocusPanel }) {
   const style = width ? { width, minWidth: width, flex: `0 0 ${width}px` } : undefined;
   return (
     <section
@@ -101,7 +139,7 @@ function Panel({ title, count, children, actions, className = "", width, focused
         </div>
         {actions}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+      <div className={`min-h-0 flex-1 ${bodyClassName}`}>{children}</div>
     </section>
   );
 }
@@ -201,12 +239,124 @@ function srEventAtOrBefore(rows, stockId, time) {
   return best || (rows || []).find((row) => String(row.stock_id) === sid) || null;
 }
 
+function isoDate(value) {
+  if (!value) return "";
+  return String(value).slice(0, 10);
+}
+
+function daysBetweenIso(fromDate, toDate) {
+  const from = isoDate(fromDate);
+  const to = isoDate(toDate);
+  if (!from || !to) return null;
+  const fromMs = Date.parse(`${from}T00:00:00+08:00`);
+  const toMs = Date.parse(`${to}T00:00:00+08:00`);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return null;
+  return Math.max(0, Math.round((toMs - fromMs) / 86400000));
+}
+
+function latestObjectDate(items, keys) {
+  let latest = "";
+  for (const item of items || []) {
+    for (const key of keys) {
+      const value = isoDate(item?.[key]);
+      if (value && value > latest) latest = value;
+    }
+  }
+  return latest;
+}
+
+function patternEventDate(row) {
+  return isoDate(
+    row?.event_date ||
+      row?.details?.event_date ||
+      row?.details?.break_date ||
+      row?.details?.trigger_date ||
+      row?.details?.completion_date ||
+      row?.details?.h2_date ||
+      row?.details?.right_shoulder_date ||
+      latestObjectDate(row?.lines, ["end_date", "start_date"]) ||
+      latestObjectDate(row?.pivots, ["date"]) ||
+      row?.date,
+  );
+}
+
+function patternSignalKind(patternType) {
+  const key = String(patternType || "");
+  if (key.includes("bear") || key.includes("top") || key.includes("breakdown") || key === "m_top") return "bear";
+  if (key === "triangle") return "both";
+  return "bull";
+}
+
+function patternDisplayName(row) {
+  return row?.pattern_name || row?.pattern_type || "型態";
+}
+
+function bestPatternHit(hits, preferredTypes = []) {
+  const hitList = preferredTypes.length ? preferredTypes.map((type) => hits?.get(type)).filter(Boolean) : [...(hits?.values() || [])];
+  return hitList.sort((a, b) => {
+    const dateCmp = String(b.event_date || "").localeCompare(String(a.event_date || ""));
+    if (dateCmp) return dateCmp;
+    return Number(b.score || 0) - Number(a.score || 0);
+  })[0] || null;
+}
+
+function ageLabel(days) {
+  if (days == null) return "";
+  if (days === 0) return "今日";
+  return `${days}天`;
+}
+
+function ageClass(days) {
+  if (days == null) return "text-base-content/35";
+  if (days <= 5) return "text-error";
+  if (days <= 20) return "text-warning";
+  return "text-base-content/55";
+}
+
+function PatternSignalCell({ hit, label, onSelect }) {
+  const active = Boolean(hit);
+  const age = hit?.age_days ?? null;
+  return (
+    <td
+      className={`min-w-16 text-center ${HISTORICAL_PATTERN_CELL_CLASS} ${active ? "cursor-pointer" : ""} ${ageClass(age)}`}
+      onClick={
+        active && onSelect
+          ? (event) => {
+              event.stopPropagation();
+              onSelect(hit);
+            }
+          : undefined
+      }
+    >
+      <div className="flex flex-col items-center leading-none">
+        <div className="flex items-center justify-center">
+          <Lamp
+            on={active}
+            kind={hit?.signal_kind}
+            title={
+              active
+                ? `${hit.pattern_name || label || "型態"} ${hit.event_date || ""} ${ageLabel(age)}`
+                : label || "型態"
+            }
+          />
+        </div>
+        {active ? <span className="mt-1 text-[10px] font-semibold">{ageLabel(age)}</span> : null}
+      </div>
+    </td>
+  );
+}
+
+function rowSortValue(row, key) {
+  if (String(key).startsWith("pattern:")) return row.pattern_hits?.get(String(key).slice(8))?.age_days;
+  return row[key];
+}
+
 function sortRows(rows, key, dir) {
   return [...rows].sort((a, b) => {
-    let va = a[key];
-    let vb = b[key];
-    if (va == null) va = key === "time" || key === "stock_id" ? "" : -Infinity;
-    if (vb == null) vb = key === "time" || key === "stock_id" ? "" : -Infinity;
+    let va = rowSortValue(a, key);
+    let vb = rowSortValue(b, key);
+    if (va == null) va = key === "time" || key === "stock_id" ? "" : dir > 0 ? Infinity : -Infinity;
+    if (vb == null) vb = key === "time" || key === "stock_id" ? "" : dir > 0 ? Infinity : -Infinity;
     if (typeof va === "string" || typeof vb === "string") {
       return dir * String(va).localeCompare(String(vb), "zh-Hant", { numeric: true });
     }
@@ -247,7 +397,6 @@ export default function App() {
   const [selectedEventKey, setSelectedEventKey] = useState("");
   const [chartContext, setChartContext] = useState({ kind: "manual" });
   const [chartIndicatorMode, setChartIndicatorMode] = useState(() => sessionStorage.getItem("chartIndicatorMode") || "macd");
-  const [patternDate, setPatternDate] = useState(() => initialSavedDate("patternDate"));
   const [vwapDate, setVwapDate] = useState(() => initialSavedDate("vwapDate"));
   const [timeframe] = useState(() => localStorage.getItem("chartTimeframe") || "1m");
   const [dayData, setDayData] = useState(null);
@@ -262,15 +411,16 @@ export default function App() {
   const [clock, setClock] = useState(formatTaipeiClock());
 
   const [patternTypes, setPatternTypes] = useState([]);
-  const [selectedPatternTypes, setSelectedPatternTypes] = useState(["triangle"]);
+  const [selectedPatternTypes, setSelectedPatternTypes] = useState(initialPatternFilters);
   const [patternLimit, setPatternLimit] = useState(120);
-  const [patternMinVol, setPatternMinVol] = useState(1000);
   const [patternRows, setPatternRows] = useState([]);
   const [patternLoading, setPatternLoading] = useState(false);
   const [patternError, setPatternError] = useState("");
-  const [patternSettingsOpen, setPatternSettingsOpen] = useState(false);
+  const [vwapMenuOpen, setVwapMenuOpen] = useState(false);
+  const [patternMenuOpen, setPatternMenuOpen] = useState(false);
   const pendingPatternJobRef = useRef("");
-  const patternSettingsRef = useRef(null);
+  const vwapMenuRef = useRef(null);
+  const patternMenuRef = useRef(null);
 
   const [universe, setUniverse] = useState(() => localStorage.getItem("vwapUniverse") || "daytrade");
   const [universeSets, setUniverseSets] = useState({ daytrade: new Set(), full: new Set(), names: new Map() });
@@ -283,16 +433,12 @@ export default function App() {
   const [vwapLoading, setVwapLoading] = useState(false);
   const [vwapError, setVwapError] = useState("");
   const [vwapSearch, setVwapSearch] = useState("");
-  const [repeatEvents, setRepeatEvents] = useState(() => sessionStorage.getItem("vwapRepeat") !== "0");
-  const [showAllCandidates, setShowAllCandidates] = useState(() => sessionStorage.getItem("vwapShowAll") === "1");
-  const [srOnly, setSrOnly] = useState(() => sessionStorage.getItem("vwapSrFilter") === "1");
-  const [macdOnly, setMacdOnly] = useState(() => sessionStorage.getItem("vwapMacdFilter") === "1");
-  const [obvOnly, setObvOnly] = useState(() => sessionStorage.getItem("vwapObvFilter") === "1");
-  const [activityFilters, setActivityFilters] = useState(() => ({
-    day_atr: sessionStorage.getItem(ACTIVITY_STORAGE_KEYS.day_atr) || "",
-    open5_rng: sessionStorage.getItem(ACTIVITY_STORAGE_KEYS.open5_rng) || "",
-    vol5_pr: sessionStorage.getItem(ACTIVITY_STORAGE_KEYS.vol5_pr) || "",
-  }));
+  const [repeatEvents, setRepeatEvents] = useState(() => initialSessionFlag("vwapRepeat", true));
+  const [showAllCandidates, setShowAllCandidates] = useState(() => initialSessionFlag("vwapShowAll", false));
+  const [srOnly, setSrOnly] = useState(() => initialSessionFlag("vwapSrFilter", true));
+  const [macdOnly, setMacdOnly] = useState(() => initialSessionFlag("vwapMacdFilter", false));
+  const [obvOnly, setObvOnly] = useState(() => initialSessionFlag("vwapObvFilter", false));
+  const [activityFilters, setActivityFilters] = useState(initialActivityFilters);
   const [vwapSort, setVwapSort] = useState({ key: "time", dir: -1 });
   const [obsStocks, setObsStocks] = useState(() => new Set(JSON.parse(localStorage.getItem("obsStocks") || "[]")));
   const [focusedPanel, setFocusedPanel] = useState("vwap");
@@ -306,16 +452,24 @@ export default function App() {
   const daySummary = useMemo(() => priceSummary(dayData?.candles), [dayData]);
   const rightSummary = useMemo(() => priceSummary(intradayData?.candles), [intradayData]);
   const isVwapChart = chartContext.kind === "vwap" || chartContext.kind === "obs";
-  const isPatternChart = chartContext.kind === "pattern";
-  const dayChartPatternType = isPatternChart ? chartContext.patternType || "none" : "none";
-  const dayChartLimit = isPatternChart ? chartContext.limit || patternLimit || 120 : 120;
-  const activeChartTimeframe = isVwapChart || isPatternChart ? "1m" : timeframe;
+  const dayChartPatternType = chartContext.patternType || "none";
+  const dayChartLimit = patternLimit || 120;
+  const activeChartTimeframe = isVwapChart ? "1m" : timeframe;
   const activeChartPatternType = "none";
-  const activeChartLimit = isPatternChart ? chartContext.limit || patternLimit || 120 : 120;
-  const activeChartDate = isPatternChart ? patternDate : isVwapChart ? vwapDate : vwapDate || patternDate;
+  const activeChartLimit = 120;
+  const activeChartDate = vwapDate;
   const activeChartLabel = TIMEFRAME_LABEL[activeChartTimeframe] || activeChartTimeframe;
   const rightChartVariant = activeChartTimeframe === "day" ? "day" : "intraday";
   const showIndicatorPane = rightChartVariant === "intraday";
+
+  useEffect(() => {
+    if (sessionStorage.getItem(VWAP_FILTER_DEFAULT_VERSION_KEY) === VWAP_FILTER_DEFAULT_VERSION) return;
+    setRepeatEvents(true);
+    setShowAllCandidates(false);
+    setSrOnly(true);
+    setMacdOnly(false);
+    setObvOnly(false);
+  }, []);
 
   useEffect(() => {
     stockIdRef.current = stockId;
@@ -324,17 +478,21 @@ export default function App() {
   }, [stockId, activeChartDate, vwapDate]);
 
   useEffect(() => {
-    if (!patternSettingsOpen) return undefined;
+    if (!vwapMenuOpen && !patternMenuOpen) return undefined;
 
     function closeOnOutsidePointer(event) {
-      if (!patternSettingsRef.current?.contains(event.target)) {
-        setPatternSettingsOpen(false);
+      if (vwapMenuOpen && !vwapMenuRef.current?.contains(event.target)) {
+        setVwapMenuOpen(false);
+      }
+      if (patternMenuOpen && !patternMenuRef.current?.contains(event.target)) {
+        setPatternMenuOpen(false);
       }
     }
 
     function closeOnEscape(event) {
       if (event.key === "Escape") {
-        setPatternSettingsOpen(false);
+        setVwapMenuOpen(false);
+        setPatternMenuOpen(false);
       }
     }
 
@@ -344,7 +502,7 @@ export default function App() {
       document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [patternSettingsOpen]);
+  }, [patternMenuOpen, vwapMenuOpen]);
 
   const loadCharts = useCallback(async () => {
     const sid = stockId.trim();
@@ -354,7 +512,8 @@ export default function App() {
     setIntradayError("");
     setIdxData(null);
     const forceLive = !activeChartDate || activeChartDate === today;
-    const chartForceLive = isPatternChart && activeChartDate ? false : forceLive;
+    const hasPatternOverlay = dayChartPatternType !== "none";
+    const chartForceLive = hasPatternOverlay && activeChartDate ? false : forceLive;
     const shouldFetchIdx = rightChartVariant === "intraday" && chartIndicatorMode === "idx" && sid !== DEFAULT_STOCK;
     const [dayResult, intradayResult, idxResult] = await Promise.allSettled([
       fetchJson(
@@ -411,18 +570,17 @@ export default function App() {
     chartIndicatorMode,
     dayChartLimit,
     dayChartPatternType,
-    isPatternChart,
     rightChartVariant,
     stockId,
     today,
   ]);
 
-  const selectStock = useCallback((sid, key = "", kind = "manual") => {
+  const selectStock = useCallback((sid, key = "", kind = "manual", chartMeta = {}) => {
     const next = String(sid);
     setStockId(next);
     setSelectedEventKey(key);
-    setChartContext({ kind });
-    if (kind === "vwap" || kind === "obs" || kind === "pattern") setFocusedPanel(kind);
+    setChartContext({ kind, ...chartMeta });
+    if (kind === "vwap" || kind === "obs") setFocusedPanel(kind);
   }, []);
 
   const loadVwapTables = useCallback(async () => {
@@ -469,10 +627,9 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem("chartStock", stockId);
-    localStorage.setItem("patternDate", patternDate);
     localStorage.setItem("vwapDate", vwapDate);
     localStorage.setItem("chartTimeframe", timeframe);
-  }, [stockId, patternDate, vwapDate, timeframe]);
+  }, [stockId, vwapDate, timeframe]);
 
   useEffect(() => {
     localStorage.setItem("vwapUniverse", universe);
@@ -484,7 +641,12 @@ export default function App() {
     sessionStorage.setItem("vwapSrFilter", srOnly ? "1" : "0");
     sessionStorage.setItem("vwapMacdFilter", macdOnly ? "1" : "0");
     sessionStorage.setItem("vwapObvFilter", obvOnly ? "1" : "0");
+    sessionStorage.setItem(VWAP_FILTER_DEFAULT_VERSION_KEY, VWAP_FILTER_DEFAULT_VERSION);
   }, [repeatEvents, showAllCandidates, srOnly, macdOnly, obvOnly]);
+
+  useEffect(() => {
+    sessionStorage.setItem("vwapPatternFilters", JSON.stringify(selectedPatternTypes));
+  }, [selectedPatternTypes]);
 
   useEffect(() => {
     sessionStorage.setItem("chartIndicatorMode", chartIndicatorMode);
@@ -494,6 +656,7 @@ export default function App() {
     for (const [key, storageKey] of Object.entries(ACTIVITY_STORAGE_KEYS)) {
       sessionStorage.setItem(storageKey, activityFilters[key] || "");
     }
+    sessionStorage.setItem(ACTIVITY_DEFAULT_VERSION_KEY, ACTIVITY_DEFAULT_VERSION);
   }, [activityFilters]);
 
   useEffect(() => {
@@ -571,17 +734,9 @@ export default function App() {
   }, [loadVwapTables]);
 
   useEffect(() => {
-    if (!selectedPatternTypes.length) {
-      setPatternRows([]);
-      setPatternLoading(false);
-      setPatternError("");
-      pendingPatternJobRef.current = "";
-      return;
-    }
-
     let stopped = false;
     let fallbackTimer = 0;
-    const patternType = selectedPatternTypes.includes("all") ? "all" : selectedPatternTypes.join(",");
+    const patternType = "all";
     async function submitPatternScan() {
       setPatternLoading(true);
       setPatternError("");
@@ -591,9 +746,8 @@ export default function App() {
           pattern_type: patternType,
           timeframe: PATTERN_TIMEFRAME,
           limit: String(patternLimit || 120),
-          min_vol_lots: String(patternMinVol || 0),
         });
-        if (patternDate) params.set("date", patternDate);
+        if (vwapDate) params.set("date", vwapDate);
         const data = await fetchJson(`/api/pattern/scan/submit?${params.toString()}`);
         if (stopped) return;
         pendingPatternJobRef.current = data.job_id;
@@ -624,7 +778,7 @@ export default function App() {
       stopped = true;
       window.clearTimeout(fallbackTimer);
     };
-  }, [selectedPatternTypes, patternLimit, patternMinVol, patternDate]);
+  }, [patternLimit, vwapDate]);
 
   useEffect(() => {
     const es = new EventSource(apiUrl("/stream"));
@@ -671,6 +825,47 @@ export default function App() {
     return out;
   }, [srRowsRaw]);
 
+  const patternColumns = useMemo(() => {
+    if (patternTypes.length) return patternTypes;
+    const seen = new Map();
+    for (const row of patternRows) {
+      const id = String(row.pattern_type || "");
+      if (id && !seen.has(id)) seen.set(id, { id, name: patternDisplayName(row) });
+    }
+    return [...seen.values()];
+  }, [patternRows, patternTypes]);
+
+  const patternsByStock = useMemo(() => {
+    const out = new Map();
+    for (const row of patternRows) {
+      const sid = String(row.stock_id);
+      const patternType = String(row.pattern_type || "");
+      if (!patternType) continue;
+      const eventDate = patternEventDate(row);
+      const enriched = {
+        ...row,
+        event_date: eventDate,
+        pattern_name: patternDisplayName(row),
+        signal_kind: patternSignalKind(row.pattern_type),
+        age_days: daysBetweenIso(eventDate, today),
+      };
+      let byType = out.get(sid);
+      if (!byType) {
+        byType = new Map();
+        out.set(sid, byType);
+      }
+      const prev = byType.get(patternType);
+      if (
+        !prev ||
+        (eventDate && eventDate > (prev.event_date || "")) ||
+        (eventDate === prev.event_date && Number(row.score || 0) > Number(prev.score || 0))
+      ) {
+        byType.set(patternType, enriched);
+      }
+    }
+    return out;
+  }, [patternRows, today]);
+
   const vwapRows = useMemo(() => {
     let source = [...vwapRowsRaw];
     if (showAllCandidates && allowedUniverse.size) {
@@ -697,6 +892,8 @@ export default function App() {
       const cutoff = row.time || nowHm();
       const macd = hitAtOrBefore(macdMap, row.stock_id, cutoff);
       const obv = hitAtOrBefore(obvMap, row.stock_id, cutoff);
+      const patternHits = patternsByStock.get(String(row.stock_id)) || new Map();
+      const pattern = bestPatternHit(patternHits, selectedPatternTypes);
       return {
         ...row,
         name: row.name || universeSets.names.get(String(row.stock_id)) || "",
@@ -705,6 +902,14 @@ export default function App() {
         macd_kind: macd?.kind || "",
         obv_on: obv ? 1 : 0,
         obv_kind: obv?.kind || "",
+        pattern_on: patternHits.size ? 1 : 0,
+        pattern_hits: patternHits,
+        pattern_primary: pattern || null,
+        pattern_type: pattern?.pattern_type || "",
+        pattern_name: pattern?.pattern_name || "",
+        pattern_kind: pattern?.signal_kind || "",
+        pattern_age_days: pattern?.age_days ?? null,
+        pattern_event_date: pattern?.event_date || "",
         chg_pct: chgMap[String(row.stock_id)],
       };
     });
@@ -727,6 +932,7 @@ export default function App() {
     if (srOnly) rows = rows.filter((row) => row.sr_on);
     if (macdOnly && Object.keys(macdMap).length) rows = rows.filter((row) => row.macd_on);
     if (obvOnly && Object.keys(obvMap).length) rows = rows.filter((row) => row.obv_on);
+    if (selectedPatternTypes.length) rows = rows.filter((row) => selectedPatternTypes.some((type) => row.pattern_hits?.has(type)));
     return sortRows(rows, vwapSort.key, vwapSort.dir);
   }, [
     activityFilters,
@@ -738,7 +944,9 @@ export default function App() {
     macdOnly,
     obvMap,
     obvOnly,
+    patternsByStock,
     repeatEvents,
+    selectedPatternTypes,
     showAllCandidates,
     srOnly,
     srRowsRaw,
@@ -757,6 +965,8 @@ export default function App() {
         const cutoff = row.time || nowHm();
         const macd = hitAtOrBefore(macdMap, row.stock_id, cutoff);
         const obv = hitAtOrBefore(obvMap, row.stock_id, cutoff);
+        const patternHits = patternsByStock.get(String(row.stock_id)) || new Map();
+        const pattern = bestPatternHit(patternHits, selectedPatternTypes);
         return {
           ...row,
           name: row.name || universeSets.names.get(String(row.stock_id)) || "",
@@ -765,11 +975,19 @@ export default function App() {
           macd_kind: macd?.kind || "",
           obv_on: obv ? 1 : 0,
           obv_kind: obv?.kind || "",
+          pattern_on: patternHits.size ? 1 : 0,
+          pattern_hits: patternHits,
+          pattern_primary: pattern || null,
+          pattern_type: pattern?.pattern_type || "",
+          pattern_name: pattern?.pattern_name || "",
+          pattern_kind: pattern?.signal_kind || "",
+          pattern_age_days: pattern?.age_days ?? null,
+          pattern_event_date: pattern?.event_date || "",
           chg_pct: chgMap[String(row.stock_id)],
         };
       })
       .sort((a, b) => String(a.stock_id).localeCompare(String(b.stock_id), "zh-Hant", { numeric: true }));
-  }, [chgMap, firstSrByStock, macdMap, obvMap, obsStocks, universeSets.names, vwapRowsRaw]);
+  }, [chgMap, firstSrByStock, macdMap, obvMap, obsStocks, patternsByStock, selectedPatternTypes, universeSets.names, vwapRowsRaw]);
 
   const selectedChartRow = useMemo(() => {
     if (!isVwapChart) return null;
@@ -799,28 +1017,23 @@ export default function App() {
         obvMap,
       })
     : "";
-  const dayPatternTitle = isPatternChart && dayData?.pattern_name ? `・${dayData.pattern_name}` : "";
+  const dayPatternTitle = dayChartPatternType !== "none" && dayData?.pattern_name ? `・${dayData.pattern_name}` : "";
   const srTitle = showIndicatorPane && extraSr ? "・壓力支撐" : "";
   const indicatorTitle = showIndicatorPane && chartIndicatorLabel ? `・${chartIndicatorLabel}` : "";
   const rightChartTitle = `${titleStock} ${activeChartLabel}${srTitle}${indicatorTitle}`;
-  const selectPatternRow = useCallback((row) => {
-    const sid = String(row.stock_id);
-    setStockId(sid);
-    setSelectedEventKey("");
-    setFocusedPanel("pattern");
-    setChartContext({
-      kind: "pattern",
-      patternType: row.pattern_type,
-      timeframe: PATTERN_TIMEFRAME,
-      limit: patternLimit,
-    });
-  }, [patternLimit]);
+
+  const selectMarketRow = useCallback(
+    (row, key = "", kind = "vwap", patternType = "", usePrimaryPattern = true) => {
+      const pattern = patternType ? row?.pattern_hits?.get(patternType) : usePrimaryPattern ? row?.pattern_primary : null;
+      const chartMeta = pattern ? { patternType: pattern.pattern_type, limit: patternLimit || 120 } : {};
+      selectStock(row.stock_id, key, kind, chartMeta);
+    },
+    [patternLimit, selectStock],
+  );
 
   function togglePatternType(id) {
     setSelectedPatternTypes((prev) => {
-      if (id === "all") return prev.includes("all") ? [] : ["all"];
-      const base = prev.filter((x) => x !== "all");
-      return base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
+      return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
     });
   }
 
@@ -835,10 +1048,14 @@ export default function App() {
   }
 
   function sortVwap(key) {
-    setVwapSort((prev) => (prev.key === key ? { key, dir: -prev.dir } : { key, dir: key === "stock_id" ? 1 : -1 }));
+    setVwapSort((prev) =>
+      prev.key === key
+        ? { key, dir: -prev.dir }
+        : { key, dir: key === "stock_id" || String(key).startsWith("pattern:") ? 1 : -1 },
+    );
   }
 
-  async function replayVwap() {
+  async function recalcTodayVwap() {
     const targetDate = vwapDate || today;
     if (targetDate !== today) {
       await loadVwapTables();
@@ -863,7 +1080,7 @@ export default function App() {
       setObvMap(obv.stocks || {});
       setChgMap(chg || {});
     } catch (error) {
-      setVwapError(error.message || "重現失敗");
+      setVwapError(error.message || "今日重算失敗");
     } finally {
       setVwapLoading(false);
     }
@@ -889,19 +1106,13 @@ export default function App() {
       if (tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || target?.isContentEditable) return;
 
       const direction = event.key === "ArrowDown" ? 1 : -1;
-      const rows = focusedPanel === "pattern" ? patternRows : focusedPanel === "obs" ? obsRows : vwapRows;
+      const rows = focusedPanel === "obs" ? obsRows : vwapRows;
       if (!rows.length) return;
 
       event.preventDefault();
 
       let index = -1;
-      if (focusedPanel === "pattern") {
-        index = rows.findIndex(
-          (row) =>
-            String(row.stock_id) === String(stockId) &&
-            (!isPatternChart || String(row.pattern_type || "") === String(chartContext.patternType || "")),
-        );
-      } else if (selectedEventKey) {
+      if (selectedEventKey) {
         index = rows.findIndex((row) => eventKey(row) === selectedEventKey);
       } else {
         index = rows.findIndex((row) => String(row.stock_id) === String(stockId));
@@ -912,11 +1123,7 @@ export default function App() {
       const next = rows[nextIndex];
       if (!next) return;
 
-      if (focusedPanel === "pattern") {
-        selectPatternRow(next);
-      } else {
-        selectStock(next.stock_id, eventKey(next), focusedPanel === "obs" ? "obs" : "vwap");
-      }
+      selectMarketRow(next, eventKey(next), focusedPanel === "obs" ? "obs" : "vwap", "", focusedPanel !== "obs");
 
       window.requestAnimationFrame(() => {
         document.querySelector(`[data-panel="${focusedPanel}"][data-row-index="${nextIndex}"]`)?.scrollIntoView({ block: "nearest" });
@@ -926,13 +1133,9 @@ export default function App() {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [
-    chartContext.patternType,
     focusedPanel,
-    isPatternChart,
     obsRows,
-    patternRows,
-    selectPatternRow,
-    selectStock,
+    selectMarketRow,
     selectedEventKey,
     stockId,
     vwapRows,
@@ -951,346 +1154,348 @@ export default function App() {
       </header>
 
       <main className="grid min-h-0 flex-1 grid-rows-[minmax(220px,45%)_minmax(260px,55%)] gap-2 p-2">
-        <div className="flex min-h-0 gap-2 overflow-x-auto overflow-y-hidden">
-          <Panel
-            title="型態掃描"
-            count={patternRows.length}
-            actions={patternLoading ? <span className="loading loading-spinner loading-xs text-primary" /> : null}
-            width={370}
-            focused={focusedPanel === "pattern"}
-            onFocusPanel={() => setFocusedPanel("pattern")}
-          >
-            <div className="flex flex-wrap items-start gap-1 border-b border-base-300 bg-base-200 p-2">
-              <input
-                type="date"
-                className="input input-bordered input-xs w-32 rounded"
-                value={patternDate}
-                title="基準日期，留空＝最新交易日"
-                onChange={(e) => setPatternDate(e.target.value)}
-              />
-              <details className="dropdown">
-                <summary className="btn btn-xs rounded">
-                  型態 {selectedPatternTypes.includes("all") ? "全部" : selectedPatternTypes.length || "未選"}
-                </summary>
-                <div className="menu dropdown-content z-20 mt-1 grid max-h-72 w-72 grid-cols-2 overflow-auto rounded border border-base-300 bg-base-200 p-2 shadow">
-                  <label className="label col-span-2 cursor-pointer justify-start gap-2 border-b border-base-300 pb-2 text-xs">
-                    <input
-                      type="checkbox"
-                      className="checkbox checkbox-primary checkbox-xs"
-                      checked={selectedPatternTypes.includes("all")}
-                      onChange={() => togglePatternType("all")}
-                    />
-                    <span>全部型態</span>
-                  </label>
-                  {patternTypes.map((type) => (
-                    <label key={type.id} className="label cursor-pointer justify-start gap-2 py-1 text-xs">
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-primary checkbox-xs"
-                        checked={!selectedPatternTypes.includes("all") && selectedPatternTypes.includes(type.id)}
-                        onChange={() => togglePatternType(type.id)}
-                      />
-                      <span className="truncate">{type.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </details>
-              <details
-                ref={patternSettingsRef}
-                className="dropdown dropdown-end ml-auto"
-                open={patternSettingsOpen}
-                onBlurCapture={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget)) {
-                    setPatternSettingsOpen(false);
-                  }
-                }}
-              >
-                <summary
-                  className="btn btn-square btn-xs rounded"
-                  title="型態掃描設定"
-                  aria-label="型態掃描設定"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    setPatternSettingsOpen((open) => !open);
-                  }}
-                >
-                  ☰
-                </summary>
-                <div className="dropdown-content z-20 mt-1 w-56 rounded border border-base-300 bg-base-200 p-3 shadow">
-                  <div className="mb-2 flex items-center justify-between border-b border-base-300 pb-2">
-                    <span className="text-xs font-semibold text-base-content/70">掃描設定</span>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-square btn-xs rounded"
-                      title="關閉"
-                      aria-label="關閉"
-                      onClick={() => setPatternSettingsOpen(false)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <label className="form-control w-full">
-                    <div className="label py-1">
-                      <span className="label-text text-xs">週期</span>
-                    </div>
-                    <select className="select select-bordered select-xs rounded" value={PATTERN_TIMEFRAME} disabled>
-                      <option value={PATTERN_TIMEFRAME}>{PATTERN_TIMEFRAME_LABEL}</option>
-                    </select>
-                  </label>
-                  <label className="form-control mt-2 w-full">
-                    <div className="label py-1">
-                      <span className="label-text text-xs">大棒根數</span>
-                    </div>
-                    <input
-                      type="number"
-                      className="input input-bordered input-xs rounded"
-                      value={patternLimit}
-                      min="20"
-                      max="500"
-                      step="10"
-                      onChange={(e) => setPatternLimit(Number(e.target.value) || 120)}
-                    />
-                  </label>
-                  <label className="form-control mt-2 w-full">
-                    <div className="label py-1">
-                      <span className="label-text text-xs">成交量張數</span>
-                    </div>
-                    <input
-                      type="number"
-                      className="input input-bordered input-xs rounded"
-                      value={patternMinVol}
-                      min="0"
-                      step="100"
-                      onChange={(e) => setPatternMinVol(Number(e.target.value) || 0)}
-                    />
-                  </label>
-                </div>
-              </details>
-            </div>
-            {patternError ? (
-              <div className="p-4 text-center text-sm text-error">{patternError}</div>
-            ) : patternLoading ? (
-              <div className="p-6 text-center text-sm text-base-content/50">掃描中...</div>
-            ) : patternRows.length ? (
-              <table className="table table-xs table-pin-rows">
-                <thead>
-                  <tr>
-                    <th>股票</th>
-                    <th>型態</th>
-                    <th>信心</th>
-                    <th>日期</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {patternRows.map((row, idx) => (
-                    <tr
-                      key={`${row.stock_id}-${row.pattern_type}-${idx}`}
-                      data-panel="pattern"
-                      data-row-index={idx}
-                      className={String(stockId) === String(row.stock_id) ? "bg-primary/15" : ""}
-                      onClick={() => selectPatternRow(row)}
-                    >
-                      <StockCell row={row} />
-                      <td>
-                        <div className="max-w-[96px] truncate text-xs">{row.pattern_name || row.pattern_type}</div>
-                        <div className="text-[10px] text-base-content/45">{row.sub_type || ""}</div>
-                      </td>
-                      <td>{row.score}</td>
-                      <td className="text-base-content/50">{row.date || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="p-6 text-center text-sm text-base-content/50">無符合條件的股票</div>
-            )}
-          </Panel>
-
+        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(300px,32%)] gap-2 overflow-hidden">
           <Panel
             title="VWAP突破"
             count={vwapRows.length}
-            actions={vwapLoading ? <span className="loading loading-spinner loading-xs text-primary" /> : null}
-            width={470}
+            actions={vwapLoading || patternLoading ? <span className="loading loading-spinner loading-xs text-primary" /> : null}
+            bodyClassName="flex flex-col overflow-hidden"
             focused={focusedPanel === "vwap"}
             onFocusPanel={() => setFocusedPanel("vwap")}
           >
-            <div className="flex flex-wrap gap-1 border-b border-base-300 bg-base-200 p-2">
-              <input
-                type="date"
-                className="input input-bordered input-xs w-32 rounded"
-                value={vwapDate}
-                title="留空＝今日補齊後繼續即時；選過去日期則凍結該日"
-                onChange={(e) => setVwapDate(e.target.value)}
-              />
-              <input
-                className="input input-bordered input-xs w-20 rounded uppercase"
-                placeholder="代號"
-                value={vwapSearch}
-                onChange={(e) => setVwapSearch(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && vwapRows[0]) selectStock(vwapRows[0].stock_id, eventKey(vwapRows[0]), "vwap");
-                }}
-              />
-              <select className="select select-bordered select-xs rounded" value={universe} onChange={(e) => setUniverse(e.target.value)}>
-                <option value="daytrade">當沖 {universeSets.daytrade.size ? `(${universeSets.daytrade.size})` : ""}</option>
-                <option value="full">全市場 {universeSets.full.size ? `(${universeSets.full.size})` : ""}</option>
-              </select>
-              <button className="btn btn-xs rounded" onClick={replayVwap}>
-                重現
-              </button>
-              <button className={`btn btn-xs rounded ${repeatEvents ? "btn-primary" : ""}`} onClick={() => setRepeatEvents((v) => !v)}>
-                重複
-              </button>
-              <button className={`btn btn-xs rounded ${srOnly ? "btn-primary" : ""}`} onClick={() => setSrOnly((v) => !v)}>
-                SR
-              </button>
-              <button className={`btn btn-xs rounded ${macdOnly ? "btn-primary" : ""}`} onClick={() => setMacdOnly((v) => !v)}>
-                MACD
-              </button>
-              <button className={`btn btn-xs rounded ${obvOnly ? "btn-primary" : ""}`} onClick={() => setObvOnly((v) => !v)}>
-                OBV
-              </button>
-              <button className={`btn btn-xs rounded ${showAllCandidates ? "btn-primary" : ""}`} onClick={toggleShowAllCandidates}>
-                全部候選股
-              </button>
-              {Object.entries(ACTIVITY_FILTERS).map(([key, config]) => (
-                <select
-                  key={key}
-                  className="select select-bordered select-xs rounded"
-                  value={activityFilters[key]}
-                  onChange={(e) => setActivityFilter(key, e.target.value)}
+            <div className="relative z-20 shrink-0 border-b border-base-300 bg-base-200">
+              <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.5rem] items-start gap-1 px-2 py-1">
+                <div className="flex min-w-0 w-full gap-1 overflow-x-auto pb-1">
+                  <input
+                    type="date"
+                    className="input input-bordered input-xs w-32 shrink-0 rounded"
+                    value={vwapDate}
+                    title="留空＝今日補齊後繼續即時；選過去日期則凍結該日"
+                    onChange={(e) => setVwapDate(e.target.value)}
+                  />
+                  <input
+                    className="input input-bordered input-xs w-20 shrink-0 rounded uppercase"
+                    placeholder="代號"
+                    value={vwapSearch}
+                    onChange={(e) => setVwapSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && vwapRows[0]) selectMarketRow(vwapRows[0], eventKey(vwapRows[0]), "vwap");
+                    }}
+                  />
+                  <button className="btn btn-xs shrink-0 rounded" onClick={recalcTodayVwap}>
+                    今日重算
+                  </button>
+                  <button className={`btn btn-xs shrink-0 rounded ${srOnly ? "btn-primary" : ""}`} onClick={() => setSrOnly((v) => !v)}>
+                    SR
+                  </button>
+                  <button className={`btn btn-xs shrink-0 rounded ${macdOnly ? "btn-primary" : ""}`} onClick={() => setMacdOnly((v) => !v)}>
+                    MACD
+                  </button>
+                  <button className={`btn btn-xs shrink-0 rounded ${obvOnly ? "btn-primary" : ""}`} onClick={() => setObvOnly((v) => !v)}>
+                    OBV
+                  </button>
+                </div>
+                <details
+                  ref={vwapMenuRef}
+                  className="dropdown dropdown-end relative z-30 w-6 justify-self-end"
+                  open={vwapMenuOpen}
+                  onBlurCapture={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                      setVwapMenuOpen(false);
+                    }
+                  }}
                 >
-                  <option value="">{config.label}</option>
-                  {config.options.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              ))}
-            </div>
-            {vwapError ? (
-              <div className="p-4 text-center text-sm text-error">{vwapError}</div>
-            ) : vwapRows.length ? (
-              <table className="table table-xs table-pin-rows">
-                <thead>
-                  <tr>
-                    <th className="cursor-pointer" onClick={() => sortVwap("stock_id")}>
-                      股票
-                    </th>
-                    <th className="cursor-pointer" onClick={() => sortVwap("chg_pct")}>
-                      漲幅
-                    </th>
-                    <th className="cursor-pointer text-center" onClick={() => sortVwap("sr_on")}>
-                      SR
-                    </th>
-                    <th className="cursor-pointer text-center" onClick={() => sortVwap("macd_on")}>
-                      MACD
-                    </th>
-                    <th className="cursor-pointer text-center" onClick={() => sortVwap("obv_on")}>
-                      OBV
-                    </th>
-                    <th className="cursor-pointer text-right" onClick={() => sortVwap("time")}>
-                      時間
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vwapRows.map((row, idx) => {
-                    const key = eventKey(row);
-                    const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id);
-                    return (
-                      <tr
-                        key={`${key}-${idx}`}
-                        data-panel="vwap"
-                        data-row-index={idx}
-                        className={selected ? "bg-primary/15" : ""}
-                        onClick={() => selectStock(row.stock_id, key, "vwap")}
-                        onDoubleClick={() => toggleObsStock(row.stock_id)}
+                  <summary
+                    className="btn btn-square btn-xs rounded"
+                    title="VWAP條件"
+                    aria-label="VWAP條件"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      setVwapMenuOpen((open) => !open);
+                    }}
+                  >
+                    ☰
+                  </summary>
+                  <div className="dropdown-content z-50 mt-1 max-h-44 w-60 overflow-y-auto rounded border border-base-300 bg-base-200 p-3 shadow">
+                    <div className="mb-2 flex items-center justify-between border-b border-base-300 pb-2">
+                      <span className="text-xs font-semibold text-base-content/70">VWAP條件</span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-square btn-xs rounded"
+                        title="關閉"
+                        aria-label="關閉"
+                        onClick={() => setVwapMenuOpen(false)}
                       >
-                        <StockCell row={row}>
-                          {row.direction ? (
-                            <div className={`mt-1 text-[10px] ${row.direction === "up" ? "text-error" : "text-success"}`}>
-                              {row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} (VWAP {Number(row.vwap).toFixed(2)})
-                            </div>
-                          ) : null}
-                        </StockCell>
-                        <td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>
-                          {row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}
-                        </td>
-                        <td className="text-center">
-                          <Lamp on={row.sr_on} kind="both" title="SR" />
-                        </td>
-                        <td className="text-center">
-                          <Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" />
-                        </td>
-                        <td className="text-center">
-                          <Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" />
-                        </td>
-                        <td className="text-right text-base-content/50">{hm(row.time)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        ×
+                      </button>
+                    </div>
+                    <label className="form-control mb-2 w-full">
+                      <div className="label py-1">
+                        <span className="label-text text-xs">股票清單</span>
+                      </div>
+                      <select className="select select-bordered select-xs rounded" value={universe} onChange={(e) => setUniverse(e.target.value)}>
+                        <option value="daytrade">當沖 {universeSets.daytrade.size ? `(${universeSets.daytrade.size})` : ""}</option>
+                        <option value="full">全市場 {universeSets.full.size ? `(${universeSets.full.size})` : ""}</option>
+                      </select>
+                    </label>
+                    <label className="label cursor-pointer justify-start gap-2 py-1 text-xs">
+                      <input type="checkbox" className="checkbox checkbox-primary checkbox-xs" checked={repeatEvents} onChange={() => setRepeatEvents((v) => !v)} />
+                      <span>重複事件</span>
+                    </label>
+                    <label className="label cursor-pointer justify-start gap-2 py-1 text-xs">
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-primary checkbox-xs"
+                        checked={showAllCandidates}
+                        onChange={toggleShowAllCandidates}
+                      />
+                      <span>全部候選股</span>
+                    </label>
+                    {Object.entries(ACTIVITY_FILTERS).map(([key, config]) => (
+                      <label key={key} className="form-control mt-2 w-full">
+                        <div className="label py-1">
+                          <span className="label-text text-xs">{config.label}</span>
+                        </div>
+                        <select
+                          className="select select-bordered select-xs rounded"
+                          value={activityFilters[key]}
+                          onChange={(e) => setActivityFilter(key, e.target.value)}
+                        >
+                          <option value="">不限</option>
+                          {config.options.map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              </div>
+              <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.5rem] items-start gap-1 border-t border-base-300/70 px-2 py-1">
+                <div className="flex min-w-0 w-full items-start gap-1 overflow-hidden">
+                  <div className="shrink-0 pt-1 text-[11px] font-semibold text-base-content/60">D1型態</div>
+                  <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1">
+                    {patternColumns.map((type) => (
+                      <button
+                        key={type.id}
+                        className={`btn btn-xs shrink-0 rounded ${selectedPatternTypes.includes(type.id) ? "btn-primary" : ""}`}
+                        title={selectedPatternTypes.includes(type.id) ? `取消${type.name}過濾` : `只看有${type.name}的股票`}
+                        onClick={() => togglePatternType(type.id)}
+                      >
+                        {type.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <details
+                  ref={patternMenuRef}
+                  className="dropdown dropdown-end relative z-30 w-6 justify-self-end"
+                  open={patternMenuOpen}
+                  onBlurCapture={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                      setPatternMenuOpen(false);
+                    }
+                  }}
+                >
+                  <summary
+                    className="btn btn-square btn-xs rounded"
+                    title="D1型態設定"
+                    aria-label="D1型態設定"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      setPatternMenuOpen((open) => !open);
+                    }}
+                  >
+                    ☰
+                  </summary>
+                  <div className="dropdown-content z-50 mt-1 max-h-36 w-56 overflow-y-auto rounded border border-base-300 bg-base-200 p-3 shadow">
+                    <div className="mb-2 flex items-center justify-between border-b border-base-300 pb-2">
+                      <span className="text-xs font-semibold text-base-content/70">D1型態</span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-square btn-xs rounded"
+                        title="關閉"
+                        aria-label="關閉"
+                        onClick={() => setPatternMenuOpen(false)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <button type="button" className="btn btn-xs mb-2 w-full rounded" onClick={() => setSelectedPatternTypes([])}>
+                      清除型態過濾
+                    </button>
+                    <label className="form-control w-full">
+                      <div className="label py-1">
+                        <span className="label-text text-xs">週期</span>
+                      </div>
+                      <select className="select select-bordered select-xs rounded" value={PATTERN_TIMEFRAME} disabled>
+                        <option value={PATTERN_TIMEFRAME}>{PATTERN_TIMEFRAME_LABEL}</option>
+                      </select>
+                    </label>
+                    <label className="form-control mt-2 w-full">
+                      <div className="label py-1">
+                        <span className="label-text text-xs">日K根數</span>
+                      </div>
+                      <input
+                        type="number"
+                        className="input input-bordered input-xs rounded"
+                        value={patternLimit}
+                        min="20"
+                        max="500"
+                        step="10"
+                        onChange={(e) => setPatternLimit(Number(e.target.value) || 120)}
+                      />
+                    </label>
+                  </div>
+                </details>
+              </div>
+            </div>
+            {patternError ? <div className="border-b border-base-300 px-3 py-1 text-xs text-warning">型態：{patternError}</div> : null}
+            {vwapError ? (
+              <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-error">{vwapError}</div>
+            ) : vwapRows.length ? (
+              <div className="min-h-0 flex-1 overflow-auto">
+                <table className="table table-xs table-pin-rows min-w-max">
+                  <thead>
+                    <tr>
+                      <th className="cursor-pointer" onClick={() => sortVwap("stock_id")}>
+                        股票
+                      </th>
+                      <th className="cursor-pointer" onClick={() => sortVwap("chg_pct")}>
+                        漲幅
+                      </th>
+                      <th className="cursor-pointer text-right" onClick={() => sortVwap("time")}>
+                        時間
+                      </th>
+                      <th className="cursor-pointer text-center" onClick={() => sortVwap("sr_on")}>
+                        SR
+                      </th>
+                      <th className="cursor-pointer text-center" onClick={() => sortVwap("macd_on")}>
+                        MACD
+                      </th>
+                      <th className="cursor-pointer text-center" onClick={() => sortVwap("obv_on")}>
+                        OBV
+                      </th>
+                      {patternColumns.map((type) => (
+                        <th
+                          key={type.id}
+                          className={`cursor-pointer text-center ${HISTORICAL_PATTERN_HEAD_CLASS}`}
+                          onClick={() => sortVwap(`pattern:${type.id}`)}
+                        >
+                          {type.name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vwapRows.map((row, idx) => {
+                      const key = eventKey(row);
+                      const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id);
+                      return (
+                        <tr
+                          key={`${key}-${idx}`}
+                          data-panel="vwap"
+                          data-row-index={idx}
+                          className={selected ? "bg-primary/15" : ""}
+                          onClick={() => selectMarketRow(row, key, "vwap")}
+                          onDoubleClick={() => toggleObsStock(row.stock_id)}
+                        >
+                          <StockCell row={row}>
+                            {row.direction ? (
+                              <div className={`mt-1 text-[10px] ${row.direction === "up" ? "text-error" : "text-success"}`}>
+                                {row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} (VWAP {Number(row.vwap).toFixed(2)})
+                              </div>
+                            ) : null}
+                          </StockCell>
+                          <td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>
+                            {row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}
+                          </td>
+                          <td className="text-right text-base-content/50">{hm(row.time)}</td>
+                          <td className="text-center">
+                            <Lamp on={row.sr_on} kind="both" title="SR" />
+                          </td>
+                          <td className="text-center">
+                            <Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" />
+                          </td>
+                          <td className="text-center">
+                            <Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" />
+                          </td>
+                          {patternColumns.map((type) => (
+                            <PatternSignalCell
+                              key={type.id}
+                              hit={row.pattern_hits?.get(type.id)}
+                              label={type.name}
+                              onSelect={() => selectMarketRow(row, key, "vwap", type.id)}
+                            />
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             ) : (
-              <div className="p-6 text-center text-sm text-base-content/50">該日尚無 VWAP / SR 訊號</div>
+              <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">該日尚無 VWAP / SR 訊號</div>
             )}
           </Panel>
 
           <Panel
             title="觀察"
             count={obsRows.length}
-            width={370}
+            bodyClassName="flex flex-col overflow-hidden"
             focused={focusedPanel === "obs"}
             onFocusPanel={() => setFocusedPanel("obs")}
           >
             {obsRows.length ? (
-              <table className="table table-xs table-pin-rows">
-                <thead>
-                  <tr>
-                    <th>股票</th>
-                    <th>漲幅</th>
-                    <th className="text-center">SR</th>
-                    <th className="text-center">MACD</th>
-                    <th className="text-center">OBV</th>
-                    <th className="text-right">時間</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {obsRows.map((row, idx) => {
-                    const key = eventKey(row);
-                    const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id);
-                    return (
-                      <tr
-                        key={row.stock_id}
-                        data-panel="obs"
-                        data-row-index={idx}
-                        className={selected ? "bg-primary/15" : ""}
-                        onClick={() => selectStock(row.stock_id, key, "obs")}
-                        onDoubleClick={() => toggleObsStock(row.stock_id)}
-                      >
-                        <StockCell row={row} />
-                        <td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>
-                          {row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}
-                        </td>
-                        <td className="text-center">
-                          <Lamp on={row.sr_on} kind="both" title="SR" />
-                        </td>
-                        <td className="text-center">
-                          <Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" />
-                        </td>
-                        <td className="text-center">
-                          <Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" />
-                        </td>
-                        <td className="text-right text-base-content/50">{hm(row.time)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <div className="min-h-0 flex-1 overflow-auto">
+                <table className="table table-xs table-pin-rows min-w-max">
+                  <thead>
+                    <tr>
+                      <th>股票</th>
+                      <th>漲幅</th>
+                      <th className="text-right">時間</th>
+                      <th className="text-center">SR</th>
+                      <th className="text-center">MACD</th>
+                      <th className="text-center">OBV</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {obsRows.map((row, idx) => {
+                      const key = eventKey(row);
+                      const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id);
+                      return (
+                        <tr
+                          key={row.stock_id}
+                          data-panel="obs"
+                          data-row-index={idx}
+                          className={selected ? "bg-primary/15" : ""}
+                          onClick={() => selectMarketRow(row, key, "obs", "", false)}
+                          onDoubleClick={() => toggleObsStock(row.stock_id)}
+                        >
+                          <StockCell row={row} />
+                          <td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>
+                            {row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}
+                          </td>
+                          <td className="text-right text-base-content/50">{hm(row.time)}</td>
+                          <td className="text-center">
+                            <Lamp on={row.sr_on} kind="both" title="SR" />
+                          </td>
+                          <td className="text-center">
+                            <Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" />
+                          </td>
+                          <td className="text-center">
+                            <Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             ) : (
-              <div className="p-6 text-center text-sm text-base-content/50">在 VWAP 突破框雙擊股票加入觀察</div>
+              <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">在 VWAP 突破框雙擊股票加入觀察</div>
             )}
           </Panel>
         </div>
@@ -1326,7 +1531,7 @@ export default function App() {
                 timeframe={activeChartTimeframe}
                 emptyMessage={`尚無${activeChartLabel}資料`}
                 showIndicatorPane={showIndicatorPane}
-                daySrMode={isPatternChart ? "segments" : "horizontal"}
+                daySrMode="horizontal"
                 indicatorMode={chartIndicatorMode}
                 indicatorStockId={stockId}
                 indicatorEventTime={indicatorEventTime}
