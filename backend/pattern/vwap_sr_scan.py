@@ -30,6 +30,17 @@ _scan_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vwap-replay")
 _scan_jobs: dict[tuple[str, str], Future] = {}
 
 
+def clear_caches() -> None:
+    """Clear replay caches after HF-synced historical parquet files change."""
+    global _names_cache
+    with _scan_lock:
+        _scan_cache.clear()
+        _m1_cache.clear()
+        _m1_bars.clear()
+        _sr_levels_cache.clear()
+        _names_cache = None
+
+
 def _hhmm(ts) -> str:
     t = pd.Timestamp(ts)
     return f"{t.hour:02d}:{t.minute:02d}"

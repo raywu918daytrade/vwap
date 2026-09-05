@@ -41,13 +41,18 @@ def _latest_market_db_check_date(now) -> str:
     return now.strftime("%Y-%m-%d")
 
 
-def sync_local_market_db_from_hf_if_stale() -> None:
+def sync_local_market_db_from_hf_if_stale() -> str:
     """Pull the latest market DB snapshot from HF when local daily data is stale.
 
     `live_trader` calls this during startup. The freshness check uses the D1
     completion flag for stock 0050 on the expected latest trading day. When that
     flag is missing, the local DB is probably behind the external HF dataset,
     so we mirror that dataset before realtime M1 collection begins.
+
+    Returns:
+        "synced" when HF download finished successfully, "fresh" when local
+        data already passed the freshness check, or "failed" when the download
+        failed and the caller should continue with existing local files.
     """
     from datetime import datetime, timedelta, timezone
 
@@ -60,7 +65,7 @@ def sync_local_market_db_from_hf_if_stale() -> None:
     done = _get_done_stocks(check_date)
     if "0050" in done:
         print(f"[HF同步檢查] 0050 {check_date} 的 d1 flag 已存在，本機資料新鮮，跳過下載", flush=True)
-        return
+        return "fresh"
 
     print(f"[HF同步檢查] 0050 {check_date} 沒有 d1 flag，本機資料可能落後，從 HF Hub 同步保留資料夾...", flush=True)
     try:
@@ -68,8 +73,27 @@ def sync_local_market_db_from_hf_if_stale() -> None:
 
         sync_market_db_from_hf(only=_MARKET_DB_SYNC_FOLDERS)
         print("[HF同步檢查] 下載完成", flush=True)
+        return "synced"
     except Exception as exc:
         print(f"[HF同步檢查] 下載失敗，改用現有本機資料繼續開機: {exc}", flush=True)
+        return "failed"
+
+
+def clear_market_query_caches() -> None:
+    """Clear in-memory query caches after HF overwrites historical DB files."""
+    from pattern.pattern_api import clear_pattern_cache, reload_universe_cache
+    from pattern.vwap_activity import clear_cache as clear_activity_cache
+    from pattern.vwap_macd_div import clear_cache as clear_macd_cache
+    from pattern.vwap_obv_div import clear_cache as clear_obv_cache
+    from pattern.vwap_sr_scan import clear_caches as clear_vwap_sr_caches
+
+    clear_pattern_cache()
+    reload_universe_cache()
+    clear_vwap_sr_caches()
+    clear_activity_cache()
+    clear_macd_cache()
+    clear_obv_cache()
+    print("[HF同步檢查] 歷史查詢快取已清空", flush=True)
 
 
 def refresh_fubon_subscription_universe(state) -> None:

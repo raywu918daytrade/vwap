@@ -23,6 +23,12 @@ _cache: dict[str, dict[str, dict]] = {}
 _lock = threading.Lock()
 
 
+def clear_cache() -> None:
+    """Clear cached activity metrics after HF-synced parquet files change."""
+    with _lock:
+        _cache.clear()
+
+
 def _round_or_none(x, n: int):
     if x is None or not np.isfinite(x):
         return None

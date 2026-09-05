@@ -29,6 +29,12 @@ _cache: dict[tuple[str, str], dict[str, dict]] = {}
 _lock = threading.Lock()
 
 
+def clear_cache() -> None:
+    """Clear cached MACD divergence results after HF sync."""
+    with _lock:
+        _cache.clear()
+
+
 def _epoch(ts) -> int:
     from api import tw_naive_to_epoch
 

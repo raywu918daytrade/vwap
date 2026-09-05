@@ -27,3 +27,7 @@ services:
         value: "13"
       - key: MARKET_CLOSE_MIN
         value: "30"
+      - key: HF_DAILY_SYNC_HOUR
+        value: "19"
+      - key: HF_DAILY_SYNC_MIN
+        value: "0"

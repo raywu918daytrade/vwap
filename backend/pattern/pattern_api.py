@@ -56,37 +56,48 @@ DETECTORS = {
     "macd_hist_bear": MacdHistBearDetector(),
 }
 
-# 從 db/tickers/tick_universe.parquet 一次載入股票集合與名稱對照
-try:
-    _uni_df = pd.read_parquet(
-        Path(__file__).parent.parent / "db/tickers/tick_universe.parquet",
-        columns=["stock_id", "name"],
-    )
-    TICK_UNIVERSE_SET = set(_uni_df["stock_id"].astype(str))
-    STOCK_NAME_MAP = {
-        str(sid): str(name).strip()
-        for sid, name in zip(_uni_df["stock_id"], _uni_df["name"])
-        if pd.notna(name) and str(name).strip()
-    }
-except Exception:
-    TICK_UNIVERSE_SET = set()
-    STOCK_NAME_MAP = {}
+def _read_tick_universe() -> tuple[set[str], Dict[str, str]]:
+    """Read the HF-synced day-trade universe and stock-name map."""
+    try:
+        df = pd.read_parquet(
+            Path(__file__).parent.parent / "db/tickers/tick_universe.parquet",
+            columns=["stock_id", "name"],
+        )
+        universe = set(df["stock_id"].astype(str))
+        names = {
+            str(sid): str(name).strip()
+            for sid, name in zip(df["stock_id"], df["name"])
+            if pd.notna(name) and str(name).strip()
+        }
+        return universe, names
+    except Exception:
+        return set(), {}
+
+
+def _read_full_universe() -> List[Dict[str, str]]:
+    """Read the HF-synced full stock universe used by the stock picker."""
+    try:
+        df = pd.read_parquet(
+            Path(__file__).parent.parent / "db/tickers/stock_universe_2000.parquet",
+            columns=["stock_id", "name"],
+        )
+        return [
+            {"stock_id": str(sid), "name": str(name).strip()}
+            for sid, name in zip(df["stock_id"], df["name"])
+            if pd.notna(name) and str(name).strip()
+        ]
+    except Exception:
+        return []
+
+
+# 從 db/tickers/tick_universe.parquet 載入股票集合與名稱對照。服務 24 小時
+# 常駐時，19:00 HF 同步後會呼叫 reload_universe_cache() 重讀這兩份檔案。
+TICK_UNIVERSE_SET, STOCK_NAME_MAP = _read_tick_universe()
 
 # 全市場股票清單（db/tickers/stock_universe_2000.parquet，~1900檔，含中文
 # 名稱），供前端「股票清單」欄的全市場選項用（見 GET /stocks/full）。跟
 # TICK_UNIVERSE_SET 是不同來源、不同數量的股票池，分開載入。
-try:
-    _full_uni_df = pd.read_parquet(
-        Path(__file__).parent.parent / "db/tickers/stock_universe_2000.parquet",
-        columns=["stock_id", "name"],
-    )
-    FULL_UNIVERSE_LIST = [
-        {"stock_id": str(sid), "name": str(name).strip()}
-        for sid, name in zip(_full_uni_df["stock_id"], _full_uni_df["name"])
-        if pd.notna(name) and str(name).strip()
-    ]
-except Exception:
-    FULL_UNIVERSE_LIST = []
+FULL_UNIVERSE_LIST = _read_full_universe()
 
 
 def _load_daytrade_list() -> List[Dict[str, str]]:
@@ -140,6 +151,13 @@ def _load_daytrade_list() -> List[Dict[str, str]]:
 # 記憶體快取 (In-Memory Cache)
 _SCAN_CACHE: Dict[tuple, Dict[str, Any]] = {}
 _DETAIL_CACHE: Dict[tuple, Dict[str, Any]] = {}
+
+
+def reload_universe_cache() -> None:
+    """Reload stock universes after HF overwrites db/tickers files."""
+    global TICK_UNIVERSE_SET, STOCK_NAME_MAP, FULL_UNIVERSE_LIST
+    TICK_UNIVERSE_SET, STOCK_NAME_MAP = _read_tick_universe()
+    FULL_UNIVERSE_LIST = _read_full_universe()
 
 
 def _horizontal_sr_lines(df: pd.DataFrame, to_epoch, stock_id: str) -> List[Dict[str, Any]]:

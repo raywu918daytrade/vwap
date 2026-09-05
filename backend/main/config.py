@@ -20,3 +20,8 @@ WATCHLIST_QUOTES = [
 # this, but quote push stops at the official close because prices are final.
 MARKET_CLOSE_HOUR = int(os.environ.get("MARKET_CLOSE_HOUR", "13"))
 MARKET_CLOSE_MIN = int(os.environ.get("MARKET_CLOSE_MIN", "30"))
+
+# Daily post-market HF sync time. The app stays online 24/7, so this replaces
+# the old "restart in the morning to pull fresh history" workflow.
+HF_DAILY_SYNC_HOUR = int(os.environ.get("HF_DAILY_SYNC_HOUR", "19"))
+HF_DAILY_SYNC_MIN = int(os.environ.get("HF_DAILY_SYNC_MIN", "0"))

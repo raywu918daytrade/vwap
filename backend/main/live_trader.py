@@ -27,7 +27,13 @@ from api import (
 from data.query import load_m1_live
 from main import collector as _collector
 from main import startup_data as _startup_data
-from main.config import MARKET_CLOSE_HOUR, MARKET_CLOSE_MIN, WATCHLIST_QUOTES
+from main.config import (
+    HF_DAILY_SYNC_HOUR,
+    HF_DAILY_SYNC_MIN,
+    MARKET_CLOSE_HOUR,
+    MARKET_CLOSE_MIN,
+    WATCHLIST_QUOTES,
+)
 from main.state import AppState
 
 _TW = timezone(timedelta(hours=8))
@@ -60,7 +66,9 @@ register_vwap_sr_catchup_hook(_on_vwap_sr_catchup)
 def _startup() -> None:
     """Sync local historical data from HF, then prepare realtime subscriptions."""
     try:
-        _startup_data.sync_local_market_db_from_hf_if_stale()
+        sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
+        if sync_status == "synced":
+            _clear_after_hf_sync()
         print("更新富邦即時訂閱清單...", flush=True)
         _startup_data.refresh_fubon_subscription_universe(state)
         print(f"  即時訂閱標的：{len(state.tickers)} 支", flush=True)
@@ -72,6 +80,49 @@ def _startup() -> None:
         _log_sys(f"啟動資料準備失敗: {exc}", "error")
     finally:
         _startup_done.set()
+
+
+def _clear_after_hf_sync() -> None:
+    """Refresh in-process caches after HF updates local historical data."""
+    global _last_vwap_catchup_date
+    _startup_data.clear_market_query_caches()
+    _prev_close_cache.clear()
+    _last_vwap_catchup_date = ""
+
+
+def _daily_hf_sync() -> None:
+    """Check HF for a fresh market DB once a day while the service stays online."""
+    last_sync_date = None
+    next_retry_at = None
+    while True:
+        now = datetime.now(_TW)
+        today = now.date()
+        scheduled = (HF_DAILY_SYNC_HOUR, HF_DAILY_SYNC_MIN)
+        retry_ready = next_retry_at is None or now >= next_retry_at
+        should_sync = (
+            _startup_done.is_set()
+            and last_sync_date != today
+            and (now.hour, now.minute) >= scheduled
+            and retry_ready
+        )
+        if should_sync:
+            hhmm = now.strftime("%H:%M")
+            print(f"[{hhmm}] 每日 HF 同步檢查：下載外部維護的歷史 market DB", flush=True)
+            sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
+            if sync_status == "synced":
+                _clear_after_hf_sync()
+                last_sync_date = today
+                next_retry_at = None
+                _log_sys("每日 HF 同步完成：已下載歷史資料並清空查詢快取")
+            elif sync_status == "fresh":
+                last_sync_date = today
+                next_retry_at = None
+                _log_sys("每日 HF 同步檢查完成：本機歷史資料已新鮮")
+            else:
+                next_retry_at = now + timedelta(minutes=30)
+                print(f"  每日 HF 同步失敗，將於 {next_retry_at.strftime('%H:%M')} 後重試", flush=True)
+                _log_sys("每日 HF 同步失敗，30 分鐘後重試", "error")
+        time.sleep(60)
 
 
 def _daily_refresh() -> None:
@@ -295,6 +346,7 @@ def _run_collector_after_startup() -> None:
 
 if __name__ == "__main__":
     threading.Thread(target=_startup, daemon=True).start()
+    threading.Thread(target=_daily_hf_sync, daemon=True).start()
     threading.Thread(target=_daily_refresh, daemon=True).start()
     threading.Thread(target=_run_collector_after_startup, daemon=True).start()
 
