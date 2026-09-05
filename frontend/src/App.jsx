@@ -7,8 +7,43 @@ import TradingViewChart, { indicatorLabel } from "./TradingViewChart.jsx";
 const DEFAULT_STOCK = "0050";
 const PATTERN_TIMEFRAME = "day";
 const PATTERN_TIMEFRAME_LABEL = "D1";
-const HISTORICAL_PATTERN_HEAD_CLASS = "bg-base-300/70 text-base-content/70";
-const HISTORICAL_PATTERN_CELL_CLASS = "bg-base-300/35";
+const PATTERN_TYPE_META = {
+  w_bottom: { side: "bull", rank: 0 },
+  head_shoulders_bottom: { side: "bull", rank: 1 },
+  abcd_bull: { side: "bull", rank: 10 },
+  cup_handle: { side: "bull", rank: 20 },
+  breakout_retest: { side: "bull", rank: 30 },
+  macd_hist_bull: { side: "bull", rank: 40 },
+  triangle: { side: "bull", rank: 50 },
+  m_top: { side: "bear", rank: 0 },
+  head_shoulders_top: { side: "bear", rank: 1 },
+  abcd_bear: { side: "bear", rank: 10 },
+  breakdown_retest: { side: "bear", rank: 20 },
+  macd_hist_bear: { side: "bear", rank: 30 },
+};
+const PATTERN_SIDE_ORDER = { bull: 0, bear: 1 };
+const PATTERN_GROUPS = [
+  { side: "bull", label: "多方" },
+  { side: "bear", label: "空方" },
+];
+const PATTERN_SIDE_STYLE = {
+  bull: {
+    group: "border-error/40 bg-error/5",
+    label: "text-error",
+    head: "bg-error/10 text-error",
+    cell: "bg-error/5",
+    buttonOn: "border-error bg-error/20 text-error hover:bg-error/25",
+    buttonOff: "border-error/25 bg-base-100/40 text-base-content/80 hover:border-error/50 hover:bg-error/10",
+  },
+  bear: {
+    group: "border-success/40 bg-success/5",
+    label: "text-success",
+    head: "bg-success/10 text-success",
+    cell: "bg-success/5",
+    buttonOn: "border-success bg-success/20 text-success hover:bg-success/25",
+    buttonOff: "border-success/25 bg-base-100/40 text-base-content/80 hover:border-success/50 hover:bg-success/10",
+  },
+};
 const ACTIVITY_FILTERS = {
   day_atr: {
     label: "ATR",
@@ -55,6 +90,46 @@ const ACTIVITY_DEFAULTS = {
 };
 const VWAP_FILTER_DEFAULT_VERSION = "2";
 const VWAP_FILTER_DEFAULT_VERSION_KEY = "vwapFilterDefaultVersion";
+
+function patternTypeId(type) {
+  return String(type?.id || type?.pattern_type || type || "");
+}
+
+function patternTypeName(type) {
+  return type?.name || type?.pattern_name || type?.pattern_type || type?.id || "型態";
+}
+
+function patternSide(type) {
+  const key = patternTypeId(type);
+  const meta = PATTERN_TYPE_META[key];
+  if (meta) return meta.side;
+  if (key.includes("bear") || key.includes("top") || key.includes("breakdown")) return "bear";
+  return "bull";
+}
+
+function patternRank(type) {
+  return PATTERN_TYPE_META[patternTypeId(type)]?.rank ?? 100;
+}
+
+function sortPatternTypes(types) {
+  return [...types].sort((a, b) => {
+    const sideCmp = PATTERN_SIDE_ORDER[patternSide(a)] - PATTERN_SIDE_ORDER[patternSide(b)];
+    if (sideCmp) return sideCmp;
+    const rankCmp = patternRank(a) - patternRank(b);
+    if (rankCmp) return rankCmp;
+    return patternTypeName(a).localeCompare(patternTypeName(b), "zh-Hant", { numeric: true });
+  });
+}
+
+function patternSideStyle(typeOrSide) {
+  const side = typeOrSide === "bear" || typeOrSide === "bull" ? typeOrSide : patternSide(typeOrSide);
+  return PATTERN_SIDE_STYLE[side] || PATTERN_SIDE_STYLE.bull;
+}
+
+function patternButtonClass(type, selected) {
+  const style = patternSideStyle(type);
+  return `btn btn-xs shrink-0 rounded border ${selected ? style.buttonOn : style.buttonOff}`;
+}
 
 function StatusBadge({ status }) {
   if (status === "connected") return <span className="badge badge-success badge-sm">已連線</span>;
@@ -282,9 +357,8 @@ function patternEventDate(row) {
 
 function patternSignalKind(patternType) {
   const key = String(patternType || "");
-  if (key.includes("bear") || key.includes("top") || key.includes("breakdown") || key === "m_top") return "bear";
   if (key === "triangle") return "both";
-  return "bull";
+  return patternSide(key) === "bear" ? "bear" : "bull";
 }
 
 function patternDisplayName(row) {
@@ -313,12 +387,13 @@ function ageClass(days) {
   return "text-base-content/55";
 }
 
-function PatternSignalCell({ hit, label, onSelect }) {
+function PatternSignalCell({ hit, label, onSelect, type }) {
   const active = Boolean(hit);
   const age = hit?.age_days ?? null;
+  const style = patternSideStyle(type || hit?.pattern_type);
   return (
     <td
-      className={`min-w-16 text-center ${HISTORICAL_PATTERN_CELL_CLASS} ${active ? "cursor-pointer" : ""} ${ageClass(age)}`}
+      className={`min-w-16 border-l border-base-300/40 text-center ${style.cell} ${active ? "cursor-pointer" : ""} ${ageClass(age)}`}
       onClick={
         active && onSelect
           ? (event) => {
@@ -826,14 +901,23 @@ export default function App() {
   }, [srRowsRaw]);
 
   const patternColumns = useMemo(() => {
-    if (patternTypes.length) return patternTypes;
+    if (patternTypes.length) return sortPatternTypes(patternTypes);
     const seen = new Map();
     for (const row of patternRows) {
       const id = String(row.pattern_type || "");
       if (id && !seen.has(id)) seen.set(id, { id, name: patternDisplayName(row) });
     }
-    return [...seen.values()];
+    return sortPatternTypes([...seen.values()]);
   }, [patternRows, patternTypes]);
+
+  const patternFilterGroups = useMemo(
+    () =>
+      PATTERN_GROUPS.map((group) => ({
+        ...group,
+        types: patternColumns.filter((type) => patternSide(type) === group.side),
+      })).filter((group) => group.types.length),
+    [patternColumns],
+  );
 
   const patternsByStock = useMemo(() => {
     const out = new Map();
@@ -1276,17 +1360,25 @@ export default function App() {
               <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.5rem] items-start gap-1 border-t border-base-300/70 px-2 py-1">
                 <div className="flex min-w-0 w-full items-start gap-1 overflow-hidden">
                   <div className="shrink-0 pt-1 text-[11px] font-semibold text-base-content/60">D1型態</div>
-                  <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1">
-                    {patternColumns.map((type) => (
-                      <button
-                        key={type.id}
-                        className={`btn btn-xs shrink-0 rounded ${selectedPatternTypes.includes(type.id) ? "btn-primary" : ""}`}
-                        title={selectedPatternTypes.includes(type.id) ? `取消${type.name}過濾` : `只看有${type.name}的股票`}
-                        onClick={() => togglePatternType(type.id)}
-                      >
-                        {type.name}
-                      </button>
-                    ))}
+                  <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
+                    {patternFilterGroups.map((group) => {
+                      const style = patternSideStyle(group.side);
+                      return (
+                        <div key={group.side} className={`flex shrink-0 items-center gap-1 rounded border px-1 py-0.5 ${style.group}`}>
+                          <span className={`shrink-0 px-1 text-[10px] font-semibold ${style.label}`}>{group.label}</span>
+                          {group.types.map((type) => (
+                            <button
+                              key={type.id}
+                              className={patternButtonClass(type, selectedPatternTypes.includes(type.id))}
+                              title={selectedPatternTypes.includes(type.id) ? `取消${type.name}過濾` : `只看有${type.name}的股票`}
+                              onClick={() => togglePatternType(type.id)}
+                            >
+                              {type.name}
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
                 <details
@@ -1378,15 +1470,18 @@ export default function App() {
                       <th className="cursor-pointer text-center" onClick={() => sortVwap("obv_on")}>
                         OBV
                       </th>
-                      {patternColumns.map((type) => (
-                        <th
-                          key={type.id}
-                          className={`cursor-pointer text-center ${HISTORICAL_PATTERN_HEAD_CLASS}`}
-                          onClick={() => sortVwap(`pattern:${type.id}`)}
-                        >
-                          {type.name}
-                        </th>
-                      ))}
+                      {patternColumns.map((type) => {
+                        const style = patternSideStyle(type);
+                        return (
+                          <th
+                            key={type.id}
+                            className={`cursor-pointer border-l border-base-300/40 text-center ${style.head}`}
+                            onClick={() => sortVwap(`pattern:${type.id}`)}
+                          >
+                            {type.name}
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
@@ -1425,6 +1520,7 @@ export default function App() {
                           {patternColumns.map((type) => (
                             <PatternSignalCell
                               key={type.id}
+                              type={type}
                               hit={row.pattern_hits?.get(type.id)}
                               label={type.name}
                               onSelect={() => selectMarketRow(row, key, "vwap", type.id)}
