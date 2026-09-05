@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: just1stock-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m main.live_trader
+    envVars:
+      - key: FUGLE
+        sync: false
+      - key: FUGLE_DAYTRADE
+        sync: false
+      - key: FUBON_ID
+        sync: false
+      - key: FUBON_API_KEY
+        sync: false
+      - key: FUBON_CERT_B64
+        sync: false
+      - key: FUBON_CERT_PASS
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+      - key: HF_REPO_ID
+        sync: false
+      - key: WATCHLIST_QUOTES
+        value: "0050"
+      - key: MARKET_CLOSE_HOUR
+        value: "13"
+      - key: MARKET_CLOSE_MIN
+        value: "30"

@@ -1,0 +1,83 @@
+name: Update Daily Data (m1/d1/adjustment_day/tick) and Sync to HF
+
+# 2026-08-13新增：取代舊的 update_m1.yml／update_day.yml。原本兩支各自獨立
+# 重下載一次m1/day K（用不同的股票清單、不同的節流設計），跟這支一起跑會
+# 對富邦/Fugle帳號重複打API、造成不必要的額外負擔，也容易兩邊股票清單
+# 對不上。改成單一workflow直接呼叫 scripts/update_daily.py（本地已驗證過
+# 的完整流程：m1/d1/adjustment_day/tick下載＋全部衍生資料建立），跑完後
+# 用 scripts/push_db_to_hf.py 把整個 db/ 鏡像同步上 HF Hub，一次到位。
+
+on:
+  # 2026-08-14：拿掉 schedule 排程——GitHub Actions 的 cron 觸發時間不保證
+  # 準時，官方文件本來就寫明高負載時段可能延遲甚至被跳過，使用者反映延遲
+  # 太久，改成外部cronjob呼叫 workflow_dispatch（例如
+  # `gh workflow run update_daily.yml -R raywu918daytrade/DAY_TRADE`，或
+  # 直接呼叫 GitHub REST API 的 workflow_dispatch 端點）觸發，時間點更
+  # 可控。原本排程是每天台北15:00（=07:00 UTC，不跨日）週一到週五，外部
+  # cronjob設定時間點可以比照這個邏輯。
+  workflow_dispatch:   # 允許手動/外部觸發
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment: DAY_TRADE
+    timeout-minutes: 180   # m1/d1/adjustment_day/tick全部跑完+建衍生資料，保留寬裕緩衝
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt huggingface_hub
+
+      # 2026-08-13加：fubon_neo（富邦官方SDK）不在PyPI上，requirements.txt
+      # 不能列它——那份是本機/GHA共用的，本機是macOS的wheel，這裡才需要
+      # Linux版，兩個平台tag不同，混在同一個requirements.txt裝不起來。
+      # wheel本身是富邦官方網站本來就公開提供下載的檔案，直接放進repo的
+      # wheels/ 資料夾、這裡單獨裝，不用另外搞private repo。
+      - name: Install fubon_neo (Linux wheel)
+        run: pip install wheels/fubon_neo-2.2.8-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+
+      # 2026-08-13加：GHA runner每次都是全新機器，db/不進版控，這裡checkout
+      # 完是空的。update_daily.py 裡大部分增量/快路徑邏輯（_last_stored_dates()、
+      # build_tick_adjust_factor.py/build_adjustment_factor.py 的全量重建、
+      # build_volume_profile.py/build_poc.py 的「輸出檔案是否已存在」判斷）
+      # 都需要本機已經有資料才能正確運作。⚠️ 這裡刻意呼叫
+      # scripts/download_hf_for_gha.py（GHA專用、只拉精簡子集），不是
+      # scripts/sync_market_db_from_hf.py（給live_trader開機或人手動同步本機DB用、預設整包全拉）——
+      # 一開始直接整包拉 db/（1199個檔案）實測在GHA上撞到HF Hub的429
+      # Too Many Requests，改成精簡子集後約362個檔案，兩支腳本刻意分開
+      # 是因為本機/GHA兩種情境該有的預設抓取範圍本來就不一樣，見
+      # scripts/download_hf_for_gha.py 檔頭的完整說明。
+      - name: Pull recent db/ subset from HF Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REPO_ID: ${{ vars.HF_REPO_ID }}
+        run: python -m scripts.download_hf_for_gha
+
+      - name: Run update_daily.py
+        env:
+          FUGLE: ${{ secrets.FUGLE }}
+          FUGLE_DAYTRADE: ${{ secrets.FUGLE_DAYTRADE }}
+          FUBON_ID: ${{ secrets.FUBON_ID }}
+          FUBON_API_KEY: ${{ secrets.FUBON_API_KEY }}
+          FUBON_CERT_B64: ${{ secrets.FUBON_CERT_B64 }}
+          FUBON_CERT_PASS: ${{ secrets.FUBON_CERT_PASS }}
+        run: python -m scripts.update_daily
+
+      - name: Push db/ to HF Hub
+        if: always()   # 就算 update_daily.py 中途某個步驟失敗，已下載到的部分也要推上去，不要整批遺失
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REPO_ID: ${{ vars.HF_REPO_ID }}
+        run: python -m scripts.push_db_to_hf

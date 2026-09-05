@@ -14,4 +14,4 @@
 **/venv/
 
 # Contains deployment secrets in this workspace
-just1stock_day_trade_web/render.yaml
+frontend/render.yaml
