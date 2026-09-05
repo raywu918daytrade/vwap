@@ -6,10 +6,9 @@ completion flag is behind the latest expected trading day. It can also be run
 manually when local historical data needs to catch up with the externally
 maintained HF dataset.
 
-By default this mirrors the whole `db/` directory from the HF dataset into the
-backend project. Pass `--only` to restrict the pull to selected `db/` children
-such as `m1`, `m5_std`, `d1`, `adjustment_day`, `tick`, `tickers`,
-`volume_profile`, or `poc_day`.
+By default this mirrors only the retained market DB folders used by the slim
+backend. Pass `--only` to override the pull with selected `db/` children such
+as `m1`, `m5_std`, `d1`, `adjustment_day`, or `tickers`.
 
 Required environment variables in `backend/.env`:
     HF_REPO_ID : Hugging Face dataset repository id
@@ -40,6 +39,18 @@ load_dotenv(_ROOT / ".env", override=True)
 HF_REPO_ID = os.environ.get("HF_REPO_ID", "")
 HF_TOKEN = os.environ.get("HF_TOKEN") or None
 
+DEFAULT_MARKET_DB_SYNC_FOLDERS = [
+    "m1",
+    "m5_std",
+    "d1",
+    "adjustment_day",
+    "tickers",
+    "adjustment_factor",
+    "m1_flags",
+    "d1_flags",
+    "adjustment_day_flags",
+]
+
 # 本機同步只下載 HF 已產出的 market DB，不重建候選股或分K衍生檔。
 # tick_universe.parquet 由外部資料生產流程產出並同步到 HF，所以這裡不可
 # 排除，否則 daytrade universe 會漂掉。
@@ -50,7 +61,8 @@ def sync_market_db_from_hf(only: list[str] | None = None, repo_id: str | None = 
     """Mirror the HF dataset's `db/` files into the local backend project.
 
     Args:
-        only: Optional list of `db/` child folder names to download.
+        only: Optional list of `db/` child folder names to download. When
+            omitted, downloads DEFAULT_MARKET_DB_SYNC_FOLDERS.
         repo_id: Optional one-off HF dataset repo override. When omitted, the
             value is read from `HF_REPO_ID` in `backend/.env`.
     """
@@ -58,12 +70,10 @@ def sync_market_db_from_hf(only: list[str] | None = None, repo_id: str | None = 
     if not repo_id:
         raise RuntimeError("請在 backend/.env 設定未註解的 HF_REPO_ID，或用 --repo-id 指定要下載的 repo")
 
-    if only:
-        allow_patterns = [f"db/{name}/*" for name in only]
-        print(f"從 HF Hub（{repo_id}）下載 db/ 的子集：{only} ...")
-    else:
-        allow_patterns = ["db/*"]
-        print(f"從 HF Hub（{repo_id}）下載整個 db/（全量，檔案數多時可能較久，甚至撞到 HF rate limit）...")
+    folders = only or DEFAULT_MARKET_DB_SYNC_FOLDERS
+    allow_patterns = [f"db/{name}/*" for name in folders]
+    label = "指定子集" if only else "預設保留子集"
+    print(f"從 HF Hub（{repo_id}）下載 db/ 的{label}：{folders} ...")
 
     # snapshot_download 本身就有本地快取比對（依檔案 etag/hash），已經下載過
     # 且雲端沒變動的檔案不會重複下載，適合每次都直接呼叫、不用自己維護

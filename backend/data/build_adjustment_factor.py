@@ -1,6 +1,6 @@
 """
 從 db/adjustment_day（Fugle 完整還原，含一般除權息）與 db/d1（原始）逐日比對，
-算出 pattern 系列（型態偵測、POC疊圖，見 data/adjustment_query.py）專用的
+算出 pattern 系列（型態偵測與圖表，見 data/adjustment_query.py）專用的
 「完整還原」調整係數，跟系統預設的 db/tick_adjust_factor（只還原拆股/合股）
 分開維護——理由見 data/adjustment_query.py 檔頭說明：pattern 型態偵測需要
 除息缺口也被抹平，否則會誤判轉折點（2026-08-02 用 1101 除息實測過影響幅度

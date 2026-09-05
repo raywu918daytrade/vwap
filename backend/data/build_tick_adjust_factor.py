@@ -1,9 +1,8 @@
 """
 從 db/d1（原始日K，見 data/day_data_loader.py::update_day()）自己的逐日跳空幅度，
-反推每支股票每天的拆股/合股調整係數，讓 db/m1／db/volume_profile／db/poc_day
+反推每支股票每天的拆股/合股調整係數，讓 db/m1／db/m3_std／db/m5_std／db/d1
 （都是原始價格，維持不動）能在查詢時（見 data/query.py 的 load_m1()/load_m3()/
-load_day()/load_volume_profile()/load_poc() 等）換算成還原後基準，不用改動這些
-既有資料本身。
+load_m5()/load_day() 等）換算成還原後基準，不用改動這些既有資料本身。
 
 ⚠️ 2026-08-02 語意：這支的 factor **只還原拆股/合股**，不還原一般現金/股票股利
 除權息。原因：一般除權息造成的價格下跌通常會「填息」，是真實發生過的價格波動，沒有

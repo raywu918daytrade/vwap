@@ -1,6 +1,6 @@
 """
-pattern 系列（型態偵測、POC疊圖）專用的
-「完整還原（含一般除權息）」查詢層，2026-08-03 新增。
+pattern 系列（型態偵測與圖表）專用的「完整還原（含一般除權息）」
+查詢層，2026-08-03 新增。
 
 系統預設的還原基準（data/query.py）只還原拆股/合股，一般除權息刻意不還原
 （除息會填息，是真實發生過的價格波動）。但實測發現：
@@ -22,9 +22,9 @@ pattern 系列（型態偵測、POC疊圖）專用的
     db/adjustment_factor/ 完整還原係數（見 data/build_adjustment_factor.py，
                            = db/adjustment_day close / db/d1 close，逐日比對，
                            不做拆股/合股門檻篩選，完整反映所有除權息事件）
-    db/m1／db/m3／db/m5／db/m3_std／db/m5_std／db/tick 衍生的
-    volume_profile／poc_day：都跟 data/query.py 一樣讀原始版本（data/raw_query.py），
-    只是套用這裡的完整還原係數，不是系統預設的拆股/合股限定係數。
+    db/m1／db/m3／db/m5／db/m3_std／db/m5_std：都跟 data/query.py 一樣讀
+    原始版本（data/raw_query.py），只是套用這裡的完整還原係數，不是系統
+    預設的拆股/合股限定係數。
 
 不負責下載或更新資料，只做讀取。
 """
@@ -40,8 +40,8 @@ _ROOT = Path(__file__).parent.parent
 
 
 def _adjust_volume_only(df: pd.DataFrame, stock_id: str | None, date: str | None, start_date: str | None) -> pd.DataFrame:
-    """把 df 的 volume 除以「系統預設、只還原拆股/合股」的 db/tick_adjust_factor
-    （不是這支檔案自己的 db/adjustment_factor），open/high/low/close 不動。
+    """若本機有 db/tick_adjust_factor，將 df 的 volume 除以拆股/合股 factor。
+    open/high/low/close 不動。
 
     背景（2026-08-03）：db/adjustment_day 是 Fugle 下載時帶 adjusted="true" 的
     完整還原日K，實測發現 Fugle 只調整價格、volume 完全沒動（0050拆股前後
@@ -244,57 +244,3 @@ def load_pattern_m5_std(
         start_date,
         end_date,
     )
-
-
-def load_pattern_volume_profile(
-    stock_id: str | None = None,
-    date: str | None = None,
-    start_date: str | None = None,
-) -> pd.DataFrame:
-    """load_volume_profile() 的「pattern 專用完整還原」版本
-    （data.raw_query.load_volume_profile() 是原始版本）。套用
-    db/adjustment_factor（完整還原，含一般除權息），不是系統預設的
-    db/tick_adjust_factor（只還原拆股/合股）。
-
-    round(2) 後重新 groupby 避免價位假重複：理由同
-    data/query.py::load_volume_profile() 的說明。"""
-    vp_df = raw_query.load_volume_profile(stock_id=stock_id, date=date, start_date=start_date)
-    if vp_df.empty:
-        return vp_df
-
-    factor_df = _load_adjustment_factor(stock_id, date, start_date)
-    vp_df = vp_df.merge(factor_df[["stock_id", "date", "factor"]], on=["stock_id", "date"], how="left")
-    vp_df["factor"] = vp_df["factor"].fillna(1.0)
-    vp_df["price"] = (vp_df["price"] * vp_df["factor"]).round(2).astype("float32")
-    vp_df = vp_df.groupby(["stock_id", "date", "price"], as_index=False)[
-        ["volume", "buy_volume", "sell_volume", "neutral_volume"]
-    ].sum()
-    return vp_df.sort_values(["stock_id", "date", "price"]).reset_index(drop=True)
-
-
-def load_pattern_poc(
-    stock_id: str | None = None,
-    date: str | None = None,
-    start_date: str | None = None,
-) -> pd.DataFrame:
-    """load_poc() 的「pattern 專用完整還原」版本（data.raw_query.load_poc()
-    是原始版本），說明同 load_pattern_volume_profile()。
-
-    poc/vah/val/pocs 都是價位，乘上當天完整還原係數換算；poc_volume/
-    total_volume/poc_count/profile_type 是量或分類欄位，不受價格調整影響，
-    原樣回傳。"""
-    poc_df = raw_query.load_poc(stock_id=stock_id, date=date, start_date=start_date)
-    if poc_df.empty:
-        return poc_df
-
-    factor_df = _load_adjustment_factor(stock_id, date, start_date)
-    poc_df = poc_df.merge(factor_df[["stock_id", "date", "factor"]], on=["stock_id", "date"], how="left")
-    poc_df["factor"] = poc_df["factor"].fillna(1.0)
-    poc_df["poc"] = (poc_df["poc"] * poc_df["factor"]).round(2).astype("float32")
-    poc_df["vah"] = (poc_df["vah"] * poc_df["factor"]).round(2).astype("float32")
-    poc_df["val"] = (poc_df["val"] * poc_df["factor"]).round(2).astype("float32")
-    poc_df["pocs"] = poc_df.apply(
-        lambda r: ",".join(f"{float(p) * r['factor']:.2f}" for p in str(r["pocs"]).split(",") if p),
-        axis=1,
-    )
-    return poc_df.drop(columns=["factor"]).sort_values(["stock_id", "date"]).reset_index(drop=True)

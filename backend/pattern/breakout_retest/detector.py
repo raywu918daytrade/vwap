@@ -80,14 +80,8 @@ class BreakoutRetestDetector(BasePatternDetector):
         df: pd.DataFrame,
         stock_id: str,
         timeframe: str,
-        poc_df: Optional[pd.DataFrame] = None,
     ) -> Optional[PatternResult]:
-        """對單一股票執行突破壓力回測型態檢測
-
-        poc_df: 選填，外部預先批次載入的 POC 資料（避免每支股票各自查一次）。
-        呼叫端要自己先用 data.adjustment_query.load_pattern_poc() 載入，不要
-        傳系統預設基準（data.query.load_poc()，只還原拆股/合股）或未調整過
-        的結果進來，否則會跟 df（K線，pattern 專用完整還原）基準對不上。"""
+        """對單一股票執行突破壓力回測型態檢測。"""
         if df.empty or len(df) < self.min_candles:
             return None
 
@@ -232,42 +226,6 @@ class BreakoutRetestDetector(BasePatternDetector):
         bm = best_match
         r_level = bm["r_level"]
 
-        # --- 檢測與 Volume Profile POC 的重疊共振 (Confluence) ---
-        matched_poc = None
-        poc_diff_pct = None
-        poc_confluence = False
-
-        try:
-            if poc_df is None:
-                from data.adjustment_query import load_pattern_poc
-                stock_poc_df = load_pattern_poc(stock_id=stock_id)
-            else:
-                stock_poc_df = poc_df[poc_df["stock_id"] == stock_id]
-
-            if not stock_poc_df.empty:
-                key_dates = {
-                    str(bm["p1"].date)[:10],
-                    str(bm["p2"].date)[:10],
-                    str(bm["p_retest_low"].date)[:10],
-                    str(latest_date)[:10],
-                }
-                sub_pocs = stock_poc_df[stock_poc_df["date"].astype(str).str[:10].isin(key_dates)]
-                if not sub_pocs.empty:
-                    candidate_pocs = []
-                    for p_str in sub_pocs["pocs"]:
-                        candidate_pocs.extend([float(p) for p in str(p_str).split(",") if p])
-                    if candidate_pocs:
-                        best_poc = min(candidate_pocs, key=lambda p: abs(r_level - p))
-                        diff_pct = (abs(r_level - best_poc) / r_level) * 100.0
-                        matched_poc = round(float(best_poc), 2)
-                        poc_diff_pct = round(float(diff_pct), 2)
-                        if diff_pct <= 2.0:
-                            poc_confluence = True
-                            # POC 雙重共振獎勵加分 (+5.0分，上限 100分)
-                            best_score = min(100.0, round(best_score + 5.0, 2))
-        except Exception:
-            pass
-
         # 建立趨勢線 (水平壓力/支撐線 R)
         line = TrendLine(
             start_index=bm["p1"].index,
@@ -296,9 +254,6 @@ class BreakoutRetestDetector(BasePatternDetector):
             "retest_low": round(float(bm["retest_low"]), 2),
             "latest_close": round(latest_close, 2),
             "resistance_diff_pct": round(float(abs(bm["p1"].price - bm["p2"].price) / min(bm["p1"].price, bm["p2"].price) * 100.0), 2),
-            "matched_poc": matched_poc,
-            "poc_diff_pct": poc_diff_pct,
-            "poc_confluence": poc_confluence,
         }
 
         return PatternResult(

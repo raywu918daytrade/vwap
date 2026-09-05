@@ -8,23 +8,6 @@ from __future__ import annotations
 
 from fubon.subscribe_list import build_and_save_subscribe_list
 
-_MARKET_DB_SYNC_FOLDERS = [
-    "m1",
-    "m5_std",
-    "d1",
-    "adjustment_day",
-    "tick",
-    "tickers",
-    "volume_profile",
-    "poc_day",
-    "tick_adjust_factor",
-    "adjustment_factor",
-    "m1_flags",
-    "d1_flags",
-    "adjustment_day_flags",
-    "tick_flags",
-]
-
 
 def _latest_market_db_check_date(now) -> str:
     """Return the trading date whose D1 flag should exist before live startup.
@@ -71,7 +54,7 @@ def sync_local_market_db_from_hf_if_stale() -> str:
     try:
         from scripts.sync_market_db_from_hf import sync_market_db_from_hf
 
-        sync_market_db_from_hf(only=_MARKET_DB_SYNC_FOLDERS)
+        sync_market_db_from_hf()
         print("[HF同步檢查] 下載完成", flush=True)
         return "synced"
     except Exception as exc:

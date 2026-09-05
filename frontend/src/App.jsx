@@ -307,8 +307,10 @@ export default function App() {
   const rightSummary = useMemo(() => priceSummary(intradayData?.candles), [intradayData]);
   const isVwapChart = chartContext.kind === "vwap" || chartContext.kind === "obs";
   const isPatternChart = chartContext.kind === "pattern";
-  const activeChartTimeframe = isVwapChart ? "1m" : isPatternChart ? chartContext.timeframe || PATTERN_TIMEFRAME : timeframe;
-  const activeChartPatternType = isPatternChart ? chartContext.patternType || "none" : "none";
+  const dayChartPatternType = isPatternChart ? chartContext.patternType || "none" : "none";
+  const dayChartLimit = isPatternChart ? chartContext.limit || patternLimit || 120 : 120;
+  const activeChartTimeframe = isVwapChart || isPatternChart ? "1m" : timeframe;
+  const activeChartPatternType = "none";
   const activeChartLimit = isPatternChart ? chartContext.limit || patternLimit || 120 : 120;
   const activeChartDate = isPatternChart ? patternDate : isVwapChart ? vwapDate : vwapDate || patternDate;
   const activeChartLabel = TIMEFRAME_LABEL[activeChartTimeframe] || activeChartTimeframe;
@@ -355,14 +357,22 @@ export default function App() {
     const chartForceLive = isPatternChart && activeChartDate ? false : forceLive;
     const shouldFetchIdx = rightChartVariant === "intraday" && chartIndicatorMode === "idx" && sid !== DEFAULT_STOCK;
     const [dayResult, intradayResult, idxResult] = await Promise.allSettled([
-      fetchJson(patternDetailPath(sid, { timeframe: "day", date: activeChartDate, limit: 120, forceLive })),
+      fetchJson(
+        patternDetailPath(sid, {
+          patternType: dayChartPatternType,
+          timeframe: "day",
+          date: activeChartDate,
+          limit: dayChartLimit,
+          forceLive: chartForceLive,
+        }),
+      ),
       fetchJson(
         patternDetailPath(sid, {
           patternType: activeChartPatternType,
           timeframe: activeChartTimeframe,
           date: activeChartDate,
           limit: activeChartLimit,
-          fullDay: isVwapChart || (!isPatternChart && activeChartTimeframe !== "day"),
+          fullDay: rightChartVariant === "intraday",
           forceLive: chartForceLive,
         }),
       ),
@@ -399,8 +409,9 @@ export default function App() {
     activeChartTimeframe,
     activeChartDate,
     chartIndicatorMode,
+    dayChartLimit,
+    dayChartPatternType,
     isPatternChart,
-    isVwapChart,
     rightChartVariant,
     stockId,
     today,
@@ -788,10 +799,10 @@ export default function App() {
         obvMap,
       })
     : "";
-  const patternTitle = isPatternChart && intradayData?.pattern_name ? `・${intradayData.pattern_name}` : "";
+  const dayPatternTitle = isPatternChart && dayData?.pattern_name ? `・${dayData.pattern_name}` : "";
   const srTitle = showIndicatorPane && extraSr ? "・壓力支撐" : "";
   const indicatorTitle = showIndicatorPane && chartIndicatorLabel ? `・${chartIndicatorLabel}` : "";
-  const rightChartTitle = `${titleStock} ${activeChartLabel}${patternTitle}${srTitle}${indicatorTitle}`;
+  const rightChartTitle = `${titleStock} ${activeChartLabel}${srTitle}${indicatorTitle}`;
   const selectPatternRow = useCallback((row) => {
     const sid = String(row.stock_id);
     setStockId(sid);
@@ -1286,7 +1297,7 @@ export default function App() {
 
         <div className="grid min-h-0 gap-2 lg:grid-cols-[minmax(360px,42%)_minmax(0,1fr)]">
           <ChartPanel
-            title={`${titleStock} 日K${activeChartDate ? `・${activeChartDate.slice(5).replace("-", "/")}` : ""}`}
+            title={`${titleStock} 日K${dayPatternTitle}${activeChartDate ? `・${activeChartDate.slice(5).replace("-", "/")}` : ""}`}
             loading={loadingCharts}
             error={dayError}
             actions={<PriceChange summary={daySummary} />}
@@ -1314,7 +1325,6 @@ export default function App() {
                 variant={rightChartVariant}
                 timeframe={activeChartTimeframe}
                 emptyMessage={`尚無${activeChartLabel}資料`}
-                showVolumeProfile
                 showIndicatorPane={showIndicatorPane}
                 daySrMode={isPatternChart ? "segments" : "horizontal"}
                 indicatorMode={chartIndicatorMode}

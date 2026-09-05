@@ -35,8 +35,6 @@ from pattern.macd_hist_bear.detector import MacdHistBearDetector
 from pattern.macd_hist_bull.detector import MacdHistBullDetector
 from pattern.triangle.detector import TriangleDetector
 from pattern.w_bottom.detector import WBottomDetector
-from data.adjustment_query import load_pattern_volume_profile
-from data.build_poc import compute_poc_dataframe
 
 router = APIRouter(prefix="/api/pattern", tags=["技術型態"])
 PATTERN_SCAN_TIMEFRAME = "day"
@@ -534,7 +532,7 @@ def get_pattern_detail(
     stock_id: str,
     pattern_type: str = Query(
         "triangle",
-        description="型態種類: triangle, w_bottom, m_top, abcd_bull, abcd_bear, head_shoulders_bottom, cup_handle, macd_hist_bull, macd_hist_bear；或 none（只回 K 線／VWAP／POC，不跑型態偵測——股票清單欄型態全關時用）",
+        description="型態種類: triangle, w_bottom, m_top, abcd_bull, abcd_bear, head_shoulders_bottom, cup_handle, macd_hist_bull, macd_hist_bear；或 none（只回 K 線／VWAP，不跑型態偵測——股票清單欄型態全關時用）",
     ),
     timeframe: str = Query("day", description="圖表週期: 1m, 3m, 5m, day；pattern_type 非 none 時只支援 D1/day"),
     date: Optional[str] = Query(None, description="基準日期 (YYYY-MM-DD)"),
@@ -557,7 +555,7 @@ def get_pattern_detail(
     if hasattr(force_live, "default"):
         force_live = force_live.default
 
-    # none：不跑偵測器，只回蜡烛／VWAP／volume profile／POC（股票清單型態全關、
+    # none：不跑偵測器，只回 K 線／VWAP（股票清單型態全關、
     # 或盤中圖只要日K水位疊加時的 intraday 底圖）。
     skip_pattern = pattern_type in (None, "", "none")
     if not skip_pattern and pattern_type not in DETECTORS:
@@ -649,55 +647,6 @@ def get_pattern_detail(
         except Exception:
             sr_lines_output = []
 
-    # 載入「整個可視K線範圍」的 Volume Profile & POC 籌碼數據（2026-08-01改：
-    # 原本只查K線視窗最後一天，跟使用者實際打開的視窗範圍（例如120天）完全
-    # 脫鉤，數值看起來不合理、橫條圖也擠成一團貼在單日POC旁邊。現在改成把
-    # df_candles 涵蓋的整段日期範圍內、每個價位的量都加總起來，再用跟
-    # build_poc.py 同一套演算法重新算這個範圍專屬的 POC/VAH/VAL——不能直接
-    # 沿用 db/poc_day 的每日precompute值，那是單日的，範圍一拉大就對不上）
-    volume_profile_output = []
-    poc_data_output = None
-
-    try:
-        if not df_candles.empty:
-            range_start = df_candles["date"].iloc[0].strftime("%Y-%m-%d")
-            range_end = df_candles["date"].iloc[-1].strftime("%Y-%m-%d")
-            vp_df = load_pattern_volume_profile(stock_id=stock_id, start_date=range_start)
-            if not vp_df.empty:
-                vp_df = vp_df[(vp_df["date"] >= range_start) & (vp_df["date"] <= range_end)]
-
-            if not vp_df.empty:
-                agg = (
-                    vp_df.groupby("price", as_index=False)[["volume", "buy_volume", "sell_volume", "neutral_volume"]]
-                    .sum()
-                    .sort_values("price")
-                )
-                for _, r in agg.iterrows():
-                    volume_profile_output.append({
-                        "price": float(r["price"]),
-                        "volume": int(r["volume"]),
-                        "buy_volume": int(r["buy_volume"]),
-                        "sell_volume": int(r["sell_volume"]),
-                        "neutral_volume": int(r["neutral_volume"]),
-                    })
-
-                agg_for_poc = agg.assign(stock_id=stock_id, date="range")
-                poc_df = compute_poc_dataframe(agg_for_poc)
-                if not poc_df.empty:
-                    r_poc = poc_df.iloc[0]
-                    poc_data_output = {
-                        "poc": float(r_poc["poc"]),
-                        "pocs": str(r_poc["pocs"]),
-                        "poc_volume": int(r_poc["poc_volume"]),
-                        "poc_count": int(r_poc["poc_count"]),
-                        "profile_type": str(r_poc["profile_type"]),
-                        "vah": float(r_poc["vah"]),
-                        "val": float(r_poc["val"]),
-                        "total_volume": int(r_poc["total_volume"]),
-                    }
-    except Exception:
-        pass
-
     result = {
         "stock_id": stock_id,
         "stock_name": STOCK_NAME_MAP.get(str(stock_id), str(stock_id)),
@@ -709,8 +658,6 @@ def get_pattern_detail(
         "vwap": vwap_output,
         "pattern": pattern_output,
         "sr_lines": sr_lines_output,
-        "volume_profile": volume_profile_output,
-        "poc_data": poc_data_output,
     }
 
     _DETAIL_CACHE[cache_key] = result

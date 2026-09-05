@@ -31,7 +31,7 @@ npm run dev
 - 型態框：`/api/pattern/types`、`/api/pattern/scan/submit`，結果由 `/stream` 回傳
 - VWAP框：`/vwap_sr_replay`、`/vwap_breakout/today`、`/sr_vwap_cross/today`、`/vwap_activity`、`/vwap_macd_div`、`/vwap_obv_div`
 - 觀察框：前端 localStorage 保存觀察股票，沿用 VWAP/SR/MACD/OBV 顯示
-- K線圖：`/api/pattern/{stock_id}/detail` 提供日K、M1K、型態線、轉折點、VWAP、日壓力支撐、Volume Profile、POC/VAH/VAL 疊圖；VWAP/觀察列另保留 MACD、OBV、0050 子面板
+- K線圖：`/api/pattern/{stock_id}/detail` 提供日K、M1K、型態線、轉折點、VWAP、日壓力支撐疊圖；VWAP/觀察列另保留 MACD、OBV、0050 子面板
 - 歷史資料同步：`backend/scripts/sync_market_db_from_hf.py` 從外部維護的 Hugging Face dataset 下載 `db/`
 - HF 同步：`backend/main/startup_data.py` 會視本機 D1 flag 新鮮度呼叫 HF 同步；`backend/main/live_trader.py` 在服務常駐時預設每天 19:00 再檢查一次。本專案不再負責每日資料更新或上傳 HF
 - 即時連線：`backend/fubon/marketdata_ws.py`

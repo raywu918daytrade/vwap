@@ -10,8 +10,6 @@ const COLORS = {
   up: "#f85149",
   down: "#3fb950",
   vwap: "#d2a8ff",
-  poc: "#d29922",
-  value: "#58a6ff",
 };
 
 const MACD_KIND_TITLE = { bull: "柱體底背離", bear: "柱體頂背離", both: "底+頂背離" };
@@ -139,13 +137,6 @@ function addLatestHorizontalSrLines(series, lines, prefix = "") {
   addPriceLine(series, support, `${prefix}支撐`, COLORS.down, 2);
 }
 
-function addPocLines(series, pocData, prefix = "") {
-  if (!pocData) return;
-  addPriceLine(series, pocData.poc, `${prefix}POC`, COLORS.poc, 2);
-  addPriceLine(series, pocData.vah, `${prefix}VAH`, COLORS.value, 1, LineStyle.Dashed);
-  addPriceLine(series, pocData.val, `${prefix}VAL`, COLORS.value, 1, LineStyle.Dashed);
-}
-
 function intradayPriceBounds(candles) {
   let low = Infinity;
   let high = -Infinity;
@@ -157,18 +148,6 @@ function intradayPriceBounds(candles) {
   const mid = (low + high) / 2;
   const pad = Math.max(high - low, mid * 0.05);
   return { low: low - pad, high: high + pad };
-}
-
-function priceNearBounds(price, bounds) {
-  const value = Number(price);
-  return bounds && Number.isFinite(value) && value >= bounds.low && value <= bounds.high;
-}
-
-function addBoundedPocLines(series, pocData, bounds, prefix = "") {
-  if (!pocData) return;
-  if (priceNearBounds(pocData.poc, bounds)) addPriceLine(series, pocData.poc, `${prefix}POC`, COLORS.poc, 2);
-  if (priceNearBounds(pocData.vah, bounds)) addPriceLine(series, pocData.vah, `${prefix}VAH`, COLORS.value, 1, LineStyle.Dashed);
-  if (priceNearBounds(pocData.val, bounds)) addPriceLine(series, pocData.val, `${prefix}VAL`, COLORS.value, 1, LineStyle.Dashed);
 }
 
 function priceOnTrendLine(line, time) {
@@ -227,82 +206,6 @@ function addPatternLines(chart, lines) {
       { time: Number(line.end_time), value: Number(line.end_price) },
     ]);
   }
-}
-
-class VolumeProfilePrimitive {
-  constructor() {
-    this.levels = [];
-    this.pocPrice = null;
-    this.lastBarTime = null;
-    this.chart = null;
-    this.series = null;
-    this.requestUpdate = null;
-    this.views = [{ renderer: () => new VolumeProfileRenderer(this) }];
-  }
-
-  attached({ chart, series, requestUpdate }) {
-    this.chart = chart;
-    this.series = series;
-    this.requestUpdate = requestUpdate;
-  }
-
-  detached() {
-    this.chart = null;
-    this.series = null;
-  }
-
-  setData(levels, pocPrice, lastBarTime) {
-    this.levels = levels || [];
-    this.pocPrice = pocPrice ?? null;
-    this.lastBarTime = lastBarTime ?? null;
-    this.requestUpdate?.();
-  }
-
-  updateAllViews() {}
-
-  paneViews() {
-    return this.views;
-  }
-}
-
-class VolumeProfileRenderer {
-  constructor(source) {
-    this.source = source;
-  }
-
-  draw(target) {
-    const { chart, series, levels, pocPrice, lastBarTime } = this.source;
-    if (!series || !levels.length) return;
-    const maxVolume = Math.max(...levels.map((level) => Number(level.volume) || 0));
-    if (!maxVolume) return;
-    target.useBitmapCoordinateSpace((scope) => {
-      const ctx = scope.context;
-      const paneWidth = scope.bitmapSize.width;
-      const lastX = lastBarTime != null ? chart?.timeScale().timeToCoordinate(lastBarTime) : null;
-      const marginStart = lastX != null ? lastX * scope.horizontalPixelRatio + 4 * scope.horizontalPixelRatio : paneWidth * 0.85;
-      const maxBarWidth = Math.max(20, paneWidth - marginStart);
-      const barHeight = Math.max(2, 2 * scope.verticalPixelRatio);
-      for (const level of levels) {
-        const y = series.priceToCoordinate(Number(level.price));
-        if (y == null) continue;
-        const yPix = y * scope.verticalPixelRatio;
-        const width = Math.max(2, ((Number(level.volume) || 0) / maxVolume) * maxBarWidth);
-        const isPoc = pocPrice != null && Math.abs(Number(level.price) - Number(pocPrice)) < 0.001;
-        const buyDominant = Number(level.buy_volume) >= Number(level.sell_volume);
-        ctx.fillStyle = isPoc ? "rgba(210,153,34,.9)" : buyDominant ? "rgba(248,81,73,.5)" : "rgba(63,185,80,.5)";
-        ctx.fillRect(paneWidth - width, yPix - barHeight / 2, width, barHeight);
-      }
-    });
-  }
-}
-
-function addVolumeProfile(series, chart, volumeProfile, pocPrice, lastBarTime, isFullDay) {
-  if (!volumeProfile?.length || typeof series.attachPrimitive !== "function") return;
-  if (!isFullDay) chart.timeScale().applyOptions({ rightOffset: 18 });
-  const primitive = new VolumeProfilePrimitive();
-  series.attachPrimitive(primitive);
-  const levels = [...volumeProfile].sort((a, b) => Number(b.volume || 0) - Number(a.volume || 0)).slice(0, 200);
-  primitive.setData(levels, pocPrice, lastBarTime);
 }
 
 function padFullDay(chart, candles, timeframe) {
@@ -582,7 +485,6 @@ export default function TradingViewChart({
   variant,
   timeframe,
   emptyMessage,
-  showVolumeProfile = false,
   showIndicatorPane = false,
   showVolume = true,
   daySrMode = "horizontal",
@@ -615,27 +517,12 @@ export default function TradingViewChart({
       const endTime = plottedCandles[plottedCandles.length - 1]?.time ?? sourceCandles[sourceCandles.length - 1]?.time;
       const bounds = intradayPriceBounds(sourceCandles);
       if (!data.pattern?.lines?.length && !extraSr) addProjectedSrLines(chart, dayLevels?.sr_lines, startTime, endTime, bounds, "日");
-      addBoundedPocLines(candleSeries, dayLevels?.poc_data, bounds, "日");
       addHorizontalSrLines(candleSeries, extraSr);
-      if (showVolumeProfile) {
-        addVolumeProfile(
-          candleSeries,
-          chart,
-          data.volume_profile,
-          dayLevels?.poc_data?.poc ?? data.poc_data?.poc,
-          plottedCandles[plottedCandles.length - 1]?.time ?? sourceCandles[sourceCandles.length - 1]?.time,
-          isFullDay,
-        );
-      }
       fullDaySlotCount = padFullDay(chart, plottedCandles, timeframe);
     } else {
       if (!data.pattern?.lines?.length) {
         if (daySrMode === "segments") addPatternLines(chart, data.sr_lines);
         else addLatestHorizontalSrLines(candleSeries, data.sr_lines);
-      }
-      addPocLines(candleSeries, data.poc_data);
-      if (showVolumeProfile) {
-        addVolumeProfile(candleSeries, chart, data.volume_profile, data.poc_data?.poc, plottedCandles[plottedCandles.length - 1]?.time, false);
       }
       chart.timeScale().fitContent();
       chart.timeScale().applyOptions({ rightOffset: 20 });
@@ -689,7 +576,6 @@ export default function TradingViewChart({
     daySrMode,
     showIndicatorPane,
     showVolume,
-    showVolumeProfile,
     variant,
     timeframe,
   ]);

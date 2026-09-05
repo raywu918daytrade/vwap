@@ -211,9 +211,8 @@ pattern/
    - 突破衝高後出現拉回，$Low_{retest}$ 回測貼近壓力線 $R$（高於 $R \times (1 - 1.5\%)$ 且低於 $R \times (1 + 2.5\%)$），原壓力轉換為有效支撐。
    - 最新收盤價守在支撐線附近（不低於 $R \times (1 - 1.5\%)$ 且不高於 $R \times 1.06$），處於支撐有守、醞釀下一波起漲的靜待方向狀態。
 
-### 品質與近現性評分 (Score 0~100) 與 POC 籌碼共振：
+### 品質與近現性評分 (Score 0~100)：
 - 壓力點對齊精準度 (25 分) + 突破力道分數 (25 分) + 回測觸及支撐精準度 (25 分) + **回測與當前 K 線近現性 (最高 25 分)**。
-- **POC 籌碼雙重共振獎勵 (Confluence Boost)**：自動與 `db/poc_day/` 比對，若橫向壓力線與成交量最集中 POC 價位距離差距 $\le 2.0\%$，自動給予 +5 分評分加權（最高 100 分），並在 `details` 回傳 `matched_poc`, `poc_diff_pct`, `poc_confluence: true`。
 
 ---
 
@@ -231,9 +230,8 @@ pattern/
    - 殺低跌破後出現弱勢反彈，$High_{retest}$ 反彈貼近支撐線 $S$（高於 $S \times (1 - 2.5\%)$ 且低於 $S \times (1 + 1.5\%)$），原支撐轉換為有效壓力。
    - 最新收盤價被壓制在壓力線下方（不低於 $S \times 0.94$ 且不高於 $S \times (1 + 1.5\%)$），處於壓力有壓、醞釀下一波起跌的靜待方向狀態。
 
-### 品質與近現性評分 (Score 0~100) 與 POC 籌碼共振：
+### 品質與近現性評分 (Score 0~100)：
 - 支撐點對齊精準度 (25 分) + 跌破力道分數 (25 分) + 反彈觸及壓力精準度 (25 分) + **反彈與當前 K 線近現性 (最高 25 分)**。
-- **POC 籌碼雙重共振獎勵 (Confluence Boost)**：自動與 `db/poc_day/` 比對，若橫向支撐線與成交量最集中 POC 價位距離差距 $\le 2.0\%$，自動給予 +5 分評分加權（最高 100 分），並在 `details` 回傳 `matched_poc`, `poc_diff_pct`, `poc_confluence: true`。
 
 ---
 
@@ -276,20 +274,18 @@ pattern/
 - **回傳內容**：符合條件的股票清單，包含 `pattern_types` 與 `results` 平舖陣列。每筆匹配結果包含 `stock_name` / `name`（股票中文名稱，例如 `"台積電"`）與 `in_tick_universe: true`。若同一股票符合多個型態，會保留各自獨立的型態匹配項目，並按信心分數全域遞減排序。
 
 ### 3. `GET /api/pattern/{stock_id}/detail`
-- **用途**：取得單一股票的 K 線歷史數據、型態繪圖座標、當日 Volume Profile 成交量分布與 POC / VAH / VAL 數據。
+- **用途**：取得單一股票的 K 線歷史數據、型態繪圖座標、VWAP 與日壓力支撐水位。
 - **查詢參數**：`pattern_type`, `timeframe`, `date`, `limit`。`pattern_type=none` 時可用於純圖表 K 線；要跑型態偵測時只支援 `timeframe=day`。
 - **回傳內容**：
   - `stock_id`: 股票代號（例如 `"2330"`）。
   - `stock_name`: 股票中文名稱（例如 `"台積電"`）。
-  - `in_tick_universe`: 布林值（例如 `true` / `false`），標示該股票是否屬於 400 檔 Tick Universe 逐筆成交個股。
+  - `in_tick_universe`: 布林值（例如 `true` / `false`），標示該股票是否屬於當沖候選清單。
   - `pattern_type` & `pattern_name`: 型態英文 ID 與中文名稱（例如 `"head_shoulders_top"` 與 `"頭肩頂"`）。
   - `candles`: K 線陣列，`time` 欄位已依 `CLAUDE.md` 規範轉換為台北本地時間 UTC Timestamp 秒數。
   - `pattern`:
     - `pattern_name`: 型態中文名稱。
     - `pivots`: 波段高低點轉折陣列 `[{ time, price, type: "peak"/"trough" }]`
     - `lines`: 上下軌趨勢線線段座標 `[{ start_time, start_price, end_time, end_price, slope, line_type: "resistance"/"support" }]`
-  - `volume_profile`: 當日價位成交量分布陣列 `[{ "price": 2200.0, "volume": 5615, "buy_volume": 4717, "sell_volume": 898, "neutral_volume": 0 }, ...]` (非 tick universe 股票回傳 `[]`)
-  - `poc_data`: 當日 POC 籌碼數據 `{ "poc": 2205.0, "pocs": "2205.00,2230.00", "poc_volume": 10619, "poc_count": 2, "profile_type": "multi", "vah": 2235.0, "val": 2205.0, "total_volume": 44144 }` (非 tick universe 股票回傳 `null`)
 
 ### 4. `POST /api/pattern/cache/clear`
 - **用途**：手動清空記憶體中的 Pattern 掃描與詳情快取。
