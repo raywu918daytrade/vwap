@@ -29,6 +29,7 @@ from main import collector as _collector
 from main import startup_data as _startup_data
 from main.config import (
     CACHE_PREWARM_CHART_ROWS,
+    CACHE_PREWARM_CHART_DATES,
     CACHE_PREWARM_DAY_ATR,
     CACHE_PREWARM_MONTHS,
     CACHE_PREWARM_STOCKS,
@@ -116,6 +117,7 @@ def _start_cache_prewarm(reason: str) -> None:
             print(f"[快取預熱] 觸發來源：{reason}", flush=True)
             prewarm_historical_caches(
                 month_limit=CACHE_PREWARM_MONTHS,
+                chart_date_limit=CACHE_PREWARM_CHART_DATES,
                 chart_rows=CACHE_PREWARM_CHART_ROWS,
                 chart_stocks=CACHE_PREWARM_STOCKS,
                 activity_filters={

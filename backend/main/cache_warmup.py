@@ -31,6 +31,7 @@ def _recent_offline_dates(month_limit: int) -> list[str]:
 def prewarm_historical_caches(
     *,
     month_limit: int,
+    chart_date_limit: int,
     chart_rows: int,
     chart_stocks: list[str],
     activity_filters: dict[str, float],
@@ -59,10 +60,11 @@ def prewarm_historical_caches(
 
     print(
         f"[快取預熱] 開始：最近 {month_limit} 個月、{len(dates)} 個日期，"
-        f"每日預設條件最多 {chart_rows} 檔圖表；由最新日期往前預熱",
+        f"最新 {chart_date_limit} 個日期預熱圖表，每日預設條件最多 {chart_rows} 檔；"
+        "由最新日期往前預熱",
         flush=True,
     )
-    for date in dates:
+    for index, date in enumerate(dates):
         t0 = perf_counter()
         try:
             bundle = read_vwap_signals(date, stock_ids=stock_ids) or {}
@@ -74,33 +76,34 @@ def prewarm_historical_caches(
                 fixed_chart_stocks,
                 activity_filters,
                 chart_rows,
-            )
-            for stock_id in warm_stocks:
-                try:
-                    get_pattern_detail(
-                        stock_id,
-                        pattern_type="none",
-                        timeframe="day",
-                        date=date,
-                        limit=120,
-                        full_day=False,
-                        force_live=False,
-                    )
-                    get_pattern_detail(
-                        stock_id,
-                        pattern_type="none",
-                        timeframe="1m",
-                        date=date,
-                        limit=120,
-                        full_day=True,
-                        force_live=False,
-                    )
-                    charts += 2
-                except Exception as exc:
-                    errors += 1
-                    print(f"  [快取預熱] {date} {stock_id} 圖表略過: {exc}", flush=True)
+            ) if index < chart_date_limit else []
+            if warm_stocks:
+                for stock_id in warm_stocks:
+                    try:
+                        get_pattern_detail(
+                            stock_id,
+                            pattern_type="none",
+                            timeframe="day",
+                            date=date,
+                            limit=120,
+                            full_day=False,
+                            force_live=False,
+                        )
+                        get_pattern_detail(
+                            stock_id,
+                            pattern_type="none",
+                            timeframe="1m",
+                            date=date,
+                            limit=120,
+                            full_day=True,
+                            force_live=False,
+                        )
+                        charts += 2
+                    except Exception as exc:
+                        errors += 1
+                        print(f"  [快取預熱] {date} {stock_id} 圖表略過: {exc}", flush=True)
             print(
-                f"  [快取預熱] {date} 完成：{len(warm_stocks)} 檔 ({perf_counter() - t0:.1f}s)",
+                f"  [快取預熱] {date} 完成：圖表 {len(warm_stocks)} 檔 ({perf_counter() - t0:.1f}s)",
                 flush=True,
             )
         except Exception as exc:

@@ -29,6 +29,7 @@ HF_DAILY_SYNC_MIN = int(os.environ.get("HF_DAILY_SYNC_MIN", "0"))
 # Warm the most common historical reads after startup/HF sync so the first user
 # page load does not pay the parquet cold-read cost on small cloud instances.
 CACHE_PREWARM_MONTHS = max(0, min(3, int(os.environ.get("CACHE_PREWARM_MONTHS", "3"))))
+CACHE_PREWARM_CHART_DATES = int(os.environ.get("CACHE_PREWARM_CHART_DATES", "1"))
 CACHE_PREWARM_CHART_ROWS = int(os.environ.get("CACHE_PREWARM_CHART_ROWS", "32"))
 CACHE_PREWARM_STOCKS = [
     s.strip()
