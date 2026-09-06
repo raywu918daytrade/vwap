@@ -7,9 +7,11 @@ universe=daytrade|full 對齊 GET /api/pattern/stocks/daytrade、/stocks/full。
 
 from __future__ import annotations
 
+import ctypes
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+import gc
 
 import numpy as np
 import pandas as pd
@@ -22,12 +24,24 @@ _scan_cache: dict[tuple[str, str], tuple[list, list]] = {}
 _m1_cache: dict[tuple[str, str], pd.DataFrame] = {}
 _m1_bars: dict[tuple[str, str], int] = {}
 _sr_levels_cache: dict[str, dict[str, tuple[float | None, float | None]]] = {}
+_prev_close_cache: dict[str, dict[str, float]] = {}
+_chg_cache: dict[tuple[str, str], dict[str, float]] = {}
 _names_cache: dict[str, str] | None = None
 # RLock：scan_date 持鎖時還會再進 load_day_m1。MACD 共用這把鎖，同一日 m1 只讀一次。
 _scan_lock = threading.RLock()
 # 掃描放背景執行緒：Django／瀏覽器超時斷線後仍繼續，下一點重現才能接到結果。
 _scan_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vwap-replay")
 _scan_jobs: dict[tuple[str, str], Future] = {}
+_M1_CACHE_LIMIT = 1
+
+
+def _trim_memory() -> None:
+    """Ask Linux glibc to return freed pandas/pyarrow arenas to the OS."""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 
 def clear_caches() -> None:
@@ -38,7 +52,22 @@ def clear_caches() -> None:
         _m1_cache.clear()
         _m1_bars.clear()
         _sr_levels_cache.clear()
+        _prev_close_cache.clear()
+        _chg_cache.clear()
         _names_cache = None
+
+
+def _remember_m1(key: tuple[str, str], m1: pd.DataFrame) -> None:
+    """Keep only the currently viewed historical M1 day in memory."""
+    _m1_cache[key] = m1
+    while len(_m1_cache) > _M1_CACHE_LIMIT:
+        oldest = next(iter(_m1_cache))
+        if oldest == key:
+            break
+        _m1_cache.pop(oldest, None)
+    if len(_m1_cache) > _M1_CACHE_LIMIT:
+        _m1_cache.pop(next(iter(_m1_cache)), None)
+    _trim_memory()
 
 
 def _hhmm(ts) -> str:
@@ -118,6 +147,7 @@ def _from_pattern_m1(date_str: str) -> pd.DataFrame:
     讀進記憶體再調整，第一次從 Dropbox 拉月檔很容易超時、前端就當沒資料。"""
     from data import raw_query
     from data.adjustment_query import _adjust_ohlc
+    import pyarrow as pa
     import pyarrow.dataset as ds
 
     start = pd.Timestamp(date_str)
@@ -126,18 +156,27 @@ def _from_pattern_m1(date_str: str) -> pd.DataFrame:
     if not paths:
         return pd.DataFrame()
     dataset = ds.dataset(paths, format="parquet")
-    df = pd.DataFrame()
+    columns = ["stock_id", "date", "open", "high", "low", "close", "volume"]
     try:
-        import pyarrow as pa
+        date_type = dataset.schema.field("date").type
+        if pa.types.is_string(date_type) or pa.types.is_large_string(date_type):
+            filt = (ds.field("date") >= f"{date_str} 00:00:00") & (
+                ds.field("date") < end.strftime("%Y-%m-%d 00:00:00")
+            )
+        else:
+            filt = (ds.field("date") >= pa.scalar(start.to_pydatetime())) & (
+                ds.field("date") < pa.scalar(end.to_pydatetime())
+            )
 
-        df = dataset.to_table(
-            filter=(ds.field("date") >= pa.scalar(start.to_pydatetime()))
-            & (ds.field("date") < pa.scalar(end.to_pydatetime()))
-        ).to_pandas()
+        table = dataset.to_table(
+            filter=filt,
+            columns=columns,
+        )
     except Exception:
-        df = pd.DataFrame()
-    if df is None or df.empty:
-        df = dataset.to_table().to_pandas()
+        return pd.DataFrame(columns=columns)
+    if table.num_rows == 0:
+        return pd.DataFrame(columns=columns)
+    df = table.to_pandas()
     df = df.copy()
     df["stock_id"] = df["stock_id"].astype(str)
     df["date"] = pd.to_datetime(df["date"], format="mixed")
@@ -170,7 +209,9 @@ def load_day_m1(date_str: str, universe: str = "daytrade") -> pd.DataFrame:
     key = (date_str, universe)
     with _scan_lock:
         if date_str != today and key in _m1_cache:
-            return _m1_cache[key]
+            m1 = _m1_cache.pop(key)
+            _m1_cache[key] = m1
+            return m1
         if date_str == today:
             m1 = _from_m1_live(date_str)
             if m1.empty:
@@ -179,8 +220,8 @@ def load_day_m1(date_str: str, universe: str = "daytrade") -> pd.DataFrame:
             m1 = _from_pattern_m1(date_str)
         m1 = _filter_m1(m1, universe)
         _m1_bars[key] = 0 if m1 is None or m1.empty else int(len(m1))
-        if date_str != today and not m1.empty:
-            _m1_cache[key] = m1
+        if date_str != today:
+            _remember_m1(key, m1)
         return m1
 
 
@@ -395,7 +436,7 @@ def _scan_date_body(date_str: str, universe: str) -> tuple[list, list]:
     prev_close_map = prev_close_for_date(date_str)
     result = scan_day_events(m1, levels, _name_map(), prev_close_map)
     today = pd.Timestamp.now(tz="Asia/Taipei").strftime("%Y-%m-%d")
-    if date_str != today and not m1.empty:
+    if date_str != today:
         with _scan_lock:
             _scan_cache[(date_str, universe)] = result
     return result
@@ -409,31 +450,53 @@ def prev_close_for_date(date_str: str) -> dict[str, float]:
     """每股在 date_str 之前最後一筆日K收盤（前一交易日收盤）。從
     last_chg_map() 抽出來獨立成一支函式，讓 events_for_group() 的跳空穿越
     偵測（見該函式2026-08-19的說明）也能重用同一套，不用重複寫一次。"""
+    with _scan_lock:
+        cached = _prev_close_cache.get(date_str)
+        if cached is not None:
+            return cached
+
     from data.adjustment_query import load_pattern_day
 
     hist_start = (pd.Timestamp(date_str) - pd.Timedelta(days=20)).strftime("%Y-%m-%d")
     day = load_pattern_day(start_date=hist_start, end_date=date_str)
     if day is None or day.empty:
-        return {}
+        result: dict[str, float] = {}
+        with _scan_lock:
+            _prev_close_cache[date_str] = result
+        return result
     day = day.copy()
     day["stock_id"] = day["stock_id"].astype(str)
     day["date"] = pd.to_datetime(day["date"], format="mixed")
     before = day[day["date"] < pd.Timestamp(date_str)]
     if before.empty:
-        return {}
-    return (
-        before.sort_values("date")
-        .groupby("stock_id", sort=False)["close"]
-        .last()
-        .astype(float)
-        .to_dict()
-    )
+        result = {}
+    else:
+        result = (
+            before.sort_values("date")
+            .groupby("stock_id", sort=False)["close"]
+            .last()
+            .astype(float)
+            .to_dict()
+        )
+    with _scan_lock:
+        _prev_close_cache[date_str] = result
+    return result
 
 
 def last_chg_map(date_str: str, universe: str = "daytrade") -> dict[str, float]:
     """每股最新 1 分收相對昨收漲跌幅（%）。重現／catchup 用。"""
+    universe = normalize_universe(universe)
+    key = (date_str, universe)
+    today = pd.Timestamp.now(tz="Asia/Taipei").strftime("%Y-%m-%d")
+    with _scan_lock:
+        if date_str != today and key in _chg_cache:
+            return _chg_cache[key]
+
     m1 = load_day_m1(date_str, universe=universe)
     if m1 is None or m1.empty:
+        if date_str != today:
+            with _scan_lock:
+                _chg_cache[key] = {}
         return {}
     m1 = m1.copy()
     m1["stock_id"] = m1["stock_id"].astype(str)
@@ -450,6 +513,9 @@ def last_chg_map(date_str: str, universe: str = "daytrade") -> dict[str, float]:
         if not np.isfinite(close):
             continue
         out[str(sid)] = round((float(close) / float(pc) - 1.0) * 100, 2)
+    if date_str != today:
+        with _scan_lock:
+            _chg_cache[key] = out
     return out
 
 

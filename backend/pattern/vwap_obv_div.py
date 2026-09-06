@@ -266,7 +266,8 @@ def metrics_for_date(date_str: str, universe: str = "daytrade") -> dict[str, dic
         if date_str != today and key in _cache:
             return _cache[key]
         result = _compute(date_str, universe=universe)
-        # 空 map 也可能是 m1 還沒讀到，不 cache，讓下一點重現再試。
-        if date_str != today and result:
+        # 過去日期的 m1 來自 HF 歷史檔，空結果也穩定；cache 起來避免週末/
+        # 尚未保留的日期反覆讀同一個月檔。今天才需要每次重算。
+        if date_str != today:
             _cache[key] = result
         return result

@@ -691,7 +691,7 @@ export default function App() {
         const qs = new URLSearchParams({ date: vwapDate, universe });
         const [replay, activity, macd, obv] = await Promise.all([
           fetchJson(`/vwap_sr_replay?${qs.toString()}`),
-          fetchJson(`/vwap_activity?date=${encodeURIComponent(vwapDate)}`),
+          fetchJson(`/vwap_activity?${qs.toString()}`),
           fetchJson(`/vwap_macd_div?${qs.toString()}`),
           fetchJson(`/vwap_obv_div?${qs.toString()}`),
         ]);
@@ -707,7 +707,7 @@ export default function App() {
           fetchJson("/vwap_breakout/today"),
           fetchJson("/sr_vwap_cross/today"),
           fetchJson("/vwap_chg"),
-          fetchJson("/vwap_activity"),
+          fetchJson(`/vwap_activity?${qs.toString()}`),
           fetchJson(`/vwap_macd_div?${qs.toString()}`),
           fetchJson(`/vwap_obv_div?${qs.toString()}`),
         ]);
@@ -1178,7 +1178,7 @@ export default function App() {
       const data = await fetchJson("/vwap_sr_catchup");
       const qs = new URLSearchParams({ universe });
       const [activity, macd, obv, chg] = await Promise.all([
-        fetchJson("/vwap_activity"),
+        fetchJson(`/vwap_activity?${qs.toString()}`),
         fetchJson(`/vwap_macd_div?${qs.toString()}`),
         fetchJson(`/vwap_obv_div?${qs.toString()}`),
         fetchJson("/vwap_chg"),

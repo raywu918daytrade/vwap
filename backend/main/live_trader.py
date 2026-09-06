@@ -67,7 +67,7 @@ def _startup() -> None:
     """Sync local historical data from HF, then prepare realtime subscriptions."""
     try:
         sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
-        if sync_status == "synced":
+        if sync_status in ("synced", "signals_synced"):
             _clear_after_hf_sync()
         print("更新富邦即時訂閱清單...", flush=True)
         _startup_data.refresh_fubon_subscription_universe(state)
@@ -109,11 +109,11 @@ def _daily_hf_sync() -> None:
             hhmm = now.strftime("%H:%M")
             print(f"[{hhmm}] 每日 HF 同步檢查：下載外部維護的歷史 market DB", flush=True)
             sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
-            if sync_status == "synced":
+            if sync_status in ("synced", "signals_synced"):
                 _clear_after_hf_sync()
                 last_sync_date = today
                 next_retry_at = None
-                _log_sys("每日 HF 同步完成：已下載歷史資料並清空查詢快取")
+                _log_sys("每日 HF 同步完成：已下載歷史/離線訊號資料並清空查詢快取")
             elif sync_status == "fresh":
                 last_sync_date = today
                 next_retry_at = None

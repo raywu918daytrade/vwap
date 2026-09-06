@@ -1,0 +1,12 @@
+services:
+  backend:
+    cpus: 1.0
+    mem_limit: 700m
+    ports:
+      - "${BACKEND_PORT:-18000}:8000"
+
+  web:
+    cpus: 0.25
+    mem_limit: 128m
+    ports:
+      - "${HTTP_PORT:-18080}:80"

@@ -12,7 +12,8 @@ history folders (`m1`, `m5_std`) are limited to the latest 24 monthly parquet
 files. Local live M1 files (`m1_live`) are not downloaded from HF, but are
 pruned to the latest 14 trading-date files after scheduled sync checks. Pass
 `--only` to override the pull with selected `db/` children such as `m1`,
-`m5_std`, `d1`, `adjustment_day`, `pattern_scan`, or `tickers`.
+`m5_std`, `d1`, `adjustment_day`, `pattern_scan`, `vwap_activity`, or
+`tickers`.
 Runtime logs are kept in their original folders: `logs/` for app/API logs and
 `log/` for broker SDK logs. They are pruned after scheduled sync checks and are
 not part of HF market DB synchronization.
@@ -61,6 +62,7 @@ DEFAULT_MARKET_DB_SYNC_FOLDERS = [
     "adjustment_factor",
     "tick_adjust_factor",
     "pattern_scan",
+    "vwap_activity",
     "m1_flags",
     "d1_flags",
     "adjustment_day_flags",

@@ -9,18 +9,28 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime, time as dtime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow.dataset as ds
 
+_ROOT = Path(__file__).resolve().parent.parent
 _TW = timezone(timedelta(hours=8))
 _ENTRY = dtime(9, 5)
 _LOOKBACK = 20
 _MIN_HIST = 10
 _ATR_N = 14
 
-_cache: dict[str, dict[str, dict]] = {}
+_cache: dict[tuple[str, str], dict[str, dict]] = {}
 _lock = threading.Lock()
+
+
+def _is_weekend(date_str: str) -> bool:
+    try:
+        return pd.Timestamp(date_str).weekday() >= 5
+    except Exception:
+        return False
 
 
 def clear_cache() -> None:
@@ -49,7 +59,20 @@ def _day_atr14(day: pd.DataFrame) -> pd.DataFrame:
     return day
 
 
-def _open5_from_m1(date_str: str) -> pd.DataFrame:
+def _stock_ids_for_universe(universe: str | None) -> tuple[str, set[str]]:
+    from pattern.vwap_sr_scan import normalize_universe, stock_ids_for_universe
+
+    normalized = normalize_universe(universe)
+    return normalized, stock_ids_for_universe(normalized)
+
+
+def _filter_stock_ids(df: pd.DataFrame, stock_ids: set[str]) -> pd.DataFrame:
+    if not stock_ids or df is None or df.empty:
+        return df
+    return df[df["stock_id"].astype(str).isin(stock_ids)].reset_index(drop=True)
+
+
+def _open5_from_m1(date_str: str, stock_ids: set[str]) -> pd.DataFrame:
     """盤中 m5_std 還沒今天 09:05 時，用 m1_live 09:01–09:05 合成一根。"""
     from data.query import load_m1_live
 
@@ -59,6 +82,9 @@ def _open5_from_m1(date_str: str) -> pd.DataFrame:
         return empty
     m1 = m1.copy()
     m1["stock_id"] = m1["stock_id"].astype(str)
+    m1 = _filter_stock_ids(m1, stock_ids)
+    if m1.empty:
+        return empty
     m1["date"] = pd.to_datetime(m1["date"], format="mixed")
     t = m1["date"].dt.time
     m1 = m1[(t >= dtime(9, 1)) & (t <= _ENTRY)]
@@ -75,6 +101,57 @@ def _open5_from_m1(date_str: str) -> pd.DataFrame:
     ).reset_index()
     out["stock_id"] = out["stock_id"].astype(str)
     return out
+
+
+def _load_m5_905(date_str: str, hist_start: str) -> pd.DataFrame:
+    """Read only each trading day's 09:05 M5 bar for activity PR.
+
+    `load_m5_std(start_date=...)` materializes every 5-minute bar in the
+    lookback window. On a 1GB Oracle VM that is the difference between a small
+    lookup and a request that can starve the API worker.
+    """
+    columns = ["stock_id", "date", "open", "high", "low", "volume"]
+    empty = pd.DataFrame(columns=[*columns, "day"])
+    try:
+        from data import raw_query
+        from data.query import _adjust_ohlc
+
+        paths = raw_query._dataset_paths(_ROOT / "db/m5_std", hist_start, date_str)
+        if not paths:
+            return empty
+        timestamps = [
+            pd.Timestamp(day).replace(hour=9, minute=5).to_pydatetime()
+            for day in pd.date_range(hist_start, date_str, freq="D")
+        ]
+        table = ds.dataset(paths, format="parquet").to_table(
+            filter=ds.field("date").isin(timestamps),
+            columns=columns,
+        )
+        if table.num_rows == 0:
+            return empty
+        m5 = table.to_pandas()
+        m5 = _adjust_ohlc(m5, hist_start)
+    except Exception:
+        from data.query import load_m5_std
+
+        m5 = load_m5_std(start_date=hist_start)
+
+    if m5 is None or m5.empty:
+        return empty
+    m5 = m5.copy()
+    m5["stock_id"] = m5["stock_id"].astype(str)
+    m5["date"] = pd.to_datetime(m5["date"], format="mixed")
+    end_excl = pd.Timestamp(date_str) + pd.Timedelta(days=1)
+    m5 = m5[
+        (m5["date"] >= pd.Timestamp(hist_start))
+        & (m5["date"] < end_excl)
+        & (m5["date"].dt.hour == 9)
+        & (m5["date"].dt.minute == 5)
+    ]
+    if m5.empty:
+        return empty
+    m5["day"] = m5["date"].dt.strftime("%Y-%m-%d")
+    return m5.drop_duplicates(["stock_id", "day"], keep="last").reset_index(drop=True)
 
 
 def _vol5_pr_map(
@@ -117,10 +194,12 @@ def _as_open_map(df: pd.DataFrame) -> pd.Series:
     return d.set_index("stock_id")["open"].astype(float)
 
 
-def _compute(date_str: str) -> dict[str, dict]:
+def compute_activity_metrics(date_str: str, universe: str = "full") -> dict[str, dict]:
+    """Compute activity metrics from historical inputs for offline jobs."""
     from data.adjustment_query import load_pattern_day
-    from data.query import load_m5_std
 
+    universe, stock_ids = _stock_ids_for_universe(universe)
+    del universe
     hist_start = (pd.Timestamp(date_str) - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
     end_excl = pd.Timestamp(date_str) + pd.Timedelta(days=1)
 
@@ -130,6 +209,7 @@ def _compute(date_str: str) -> dict[str, dict]:
     if not day.empty:
         day = day.copy()
         day["stock_id"] = day["stock_id"].astype(str)
+        day = _filter_stock_ids(day, stock_ids)
         day["date"] = pd.to_datetime(day["date"], format="mixed")
         day["day"] = day["date"].dt.strftime("%Y-%m-%d")
         day = day[(day["date"] < end_excl) & (day["open"] > 0)]
@@ -143,22 +223,9 @@ def _compute(date_str: str) -> dict[str, dict]:
             if not today_day.empty:
                 open_d = _as_open_map(today_day)
 
-    m5 = load_m5_std(start_date=hist_start)
-    m5_905 = pd.DataFrame(columns=["stock_id", "date", "day", "open", "high", "low", "volume"])
-    if m5 is not None and not m5.empty:
-        m5 = m5.copy()
-        m5["stock_id"] = m5["stock_id"].astype(str)
-        m5["date"] = pd.to_datetime(m5["date"], format="mixed")
-        m5 = m5[
-            (m5["date"] < end_excl)
-            & (m5["date"].dt.hour == 9)
-            & (m5["date"].dt.minute == 5)
-        ]
-        if not m5.empty:
-            m5["day"] = m5["date"].dt.strftime("%Y-%m-%d")
-            m5_905 = m5.drop_duplicates(["stock_id", "day"], keep="last")
+    m5_905 = _filter_stock_ids(_load_m5_905(date_str, hist_start), stock_ids)
 
-    extra = _open5_from_m1(date_str)
+    extra = _open5_from_m1(date_str, stock_ids)
     today_m5 = m5_905[m5_905["day"] == date_str] if not m5_905.empty else m5_905
     if today_m5 is not None and not today_m5.empty:
         today_bar = today_m5[["stock_id", "open", "high", "low", "volume"]].copy()
@@ -213,13 +280,32 @@ def _compute(date_str: str) -> dict[str, dict]:
     return out
 
 
-def metrics_for_date(date_str: str) -> dict[str, dict]:
+def metrics_for_date(date_str: str, universe: str = "daytrade") -> dict[str, dict]:
+    universe, stock_ids = _stock_ids_for_universe(universe)
+    key = (date_str, universe)
     today = datetime.now(_TW).strftime("%Y-%m-%d")
     with _lock:
-        if date_str != today and date_str in _cache:
-            return _cache[date_str]
-    result = _compute(date_str)
+        if date_str != today and key in _cache:
+            return _cache[key]
+
+    from pattern.activity_store import has_activity_store, read_vwap_activity
+
+    offline = read_vwap_activity(date_str, stock_ids=stock_ids)
+    if offline is not None:
+        if offline or date_str != today or _is_weekend(date_str):
+            if date_str != today:
+                with _lock:
+                    _cache[key] = offline
+            return offline
+    if date_str != today and has_activity_store():
+        with _lock:
+            _cache[key] = {}
+        return {}
+    if date_str == today and _is_weekend(date_str):
+        return {}
+
+    result = compute_activity_metrics(date_str, universe)
     if date_str != today:
         with _lock:
-            _cache[date_str] = result
+            _cache[key] = result
     return result

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from fubon.subscribe_list import build_and_save_subscribe_list
 
+_OFFLINE_SIGNAL_FOLDERS = ["pattern_scan", "vwap_activity"]
+
 
 def _latest_market_db_check_date(now) -> str:
     """Return the trading date whose D1 flag should exist before live startup.
@@ -33,9 +35,11 @@ def sync_local_market_db_from_hf_if_stale() -> str:
     so we mirror that dataset before realtime M1 collection begins.
 
     Returns:
-        "synced" when HF download finished successfully, "fresh" when local
-        data already passed the freshness check, or "failed" when the download
-        failed and the caller should continue with existing local files.
+        "synced" when the full HF download finished successfully,
+        "signals_synced" when raw market DB was fresh but small offline signal
+        shards were refreshed, "fresh" when no download was needed, or "failed"
+        when the download failed and the caller should continue with existing
+        local files.
     """
     from datetime import datetime, timedelta, timezone
 
@@ -48,8 +52,9 @@ def sync_local_market_db_from_hf_if_stale() -> str:
     done = _get_done_stocks(check_date)
     if "0050" in done:
         print(f"[HF同步檢查] 0050 {check_date} 的 d1 flag 已存在，本機資料新鮮，跳過下載", flush=True)
+        signal_synced = sync_offline_signal_shards_from_hf()
         prune_local_runtime_history()
-        return "fresh"
+        return "signals_synced" if signal_synced else "fresh"
 
     print(f"[HF同步檢查] 0050 {check_date} 沒有 d1 flag，本機資料可能落後，從 HF Hub 同步保留資料夾...", flush=True)
     try:
@@ -62,6 +67,19 @@ def sync_local_market_db_from_hf_if_stale() -> str:
         print(f"[HF同步檢查] 下載失敗，改用現有本機資料繼續開機: {exc}", flush=True)
         prune_local_runtime_history()
         return "failed"
+
+
+def sync_offline_signal_shards_from_hf() -> bool:
+    """Pull small GHA-produced signal shards even when raw market DB is fresh."""
+    try:
+        from scripts.sync_market_db_from_hf import sync_market_db_from_hf
+
+        sync_market_db_from_hf(only=_OFFLINE_SIGNAL_FOLDERS, prune=False)
+        print("[HF同步檢查] 離線訊號檔已同步", flush=True)
+        return True
+    except Exception as exc:
+        print(f"[HF同步檢查] 離線訊號檔同步失敗，沿用現有檔案: {exc}", flush=True)
+        return False
 
 
 def clear_market_query_caches() -> None:

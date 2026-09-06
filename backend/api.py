@@ -444,11 +444,11 @@ def vwap_sr_replay(date: str, universe: str = "daytrade"):
 
 
 @app.get("/vwap_activity", tags=["VWAP"], summary="VWAP 篩選用活動度資料")
-def vwap_activity(date: Optional[str] = None):
+def vwap_activity(date: Optional[str] = None, universe: str = "daytrade"):
     date_str = date or datetime.now(_TW).strftime("%Y-%m-%d")
     from pattern.vwap_activity import metrics_for_date
 
-    return {"date": date_str, "stocks": metrics_for_date(date_str)}
+    return {"date": date_str, "stocks": metrics_for_date(date_str, universe=universe)}
 
 
 @app.get("/vwap_macd_div", tags=["VWAP"], summary="MACD 柱體背離")

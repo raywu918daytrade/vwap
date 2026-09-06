@@ -1,4 +1,4 @@
-name: Build D1 Pattern Scan
+name: Build Offline Signals
 
 on:
   schedule:
@@ -16,12 +16,12 @@ on:
         type: string
 
 concurrency:
-  group: d1-pattern-scan
+  group: offline-signals
   cancel-in-progress: false
 
 jobs:
-  build-pattern-scan:
-    name: Build and upload D1 pattern scan
+  build-offline-signals:
+    name: Build and upload offline signal shards
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -47,20 +47,34 @@ jobs:
 
       - name: Download market DB inputs
         working-directory: backend
+        shell: bash
         run: |
+          set -euo pipefail
+          SYNC_INTRADAY_MONTHS=4
+          if [[ "${INIT_MONTHS:-}" =~ ^[0-9]+$ ]]; then
+            SYNC_INTRADAY_MONTHS=$((INIT_MONTHS + 3))
+            if [ "${SYNC_INTRADAY_MONTHS}" -lt 6 ]; then
+              SYNC_INTRADAY_MONTHS=6
+            fi
+          fi
           python -m scripts.sync_market_db_from_hf \
-            --only d1 adjustment_day tickers adjustment_factor tick_adjust_factor pattern_scan d1_flags adjustment_day_flags \
+            --only m5_std d1 adjustment_day tickers adjustment_factor tick_adjust_factor pattern_scan vwap_activity d1_flags adjustment_day_flags \
+            --intraday-months "${SYNC_INTRADAY_MONTHS}" \
             --no-prune
 
-      - name: Build and upload scan parquet
+      - name: Build and upload offline parquet
         working-directory: backend
         shell: bash
         run: |
           set -euo pipefail
           if [ -n "${INIT_MONTHS:-}" ]; then
             python -m scripts.build_pattern_scan --init-months "${INIT_MONTHS}" --upload
+            python -m scripts.build_vwap_activity --init-months "${INIT_MONTHS}" --upload
           elif [ -n "${TARGET_DATE:-}" ]; then
             python -m scripts.build_pattern_scan --date "${TARGET_DATE}" --upload
+            python -m scripts.build_vwap_activity --date "${TARGET_DATE}" --upload
           else
-            python -m scripts.build_pattern_scan --date "$(TZ=Asia/Taipei date +%F)" --upload
+            TARGET="$(TZ=Asia/Taipei date +%F)"
+            python -m scripts.build_pattern_scan --date "${TARGET}" --upload
+            python -m scripts.build_vwap_activity --date "${TARGET}" --upload
           fi
