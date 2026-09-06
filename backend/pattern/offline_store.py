@@ -27,6 +27,7 @@ PATTERN_SCAN_COLUMNS = [
     "event_date",
     "payload_json",
 ]
+PATTERN_SCAN_SUMMARY_COLUMNS = [column for column in PATTERN_SCAN_COLUMNS if column != "payload_json"]
 
 
 def _month_path(date_str: str) -> Path:
@@ -83,6 +84,28 @@ def _payload_from_row(row: pd.Series) -> dict[str, Any]:
     return payload
 
 
+def _summary_from_row(row: pd.Series) -> dict[str, Any]:
+    """Build the small row shape used by scan lists.
+
+    Chart overlays use `read_pattern_for_stock()` to load `payload_json` only
+    for the selected stock/pattern. Keeping scan lists summary-only avoids
+    sending pivots/lines for every match on every date switch.
+    """
+    stock_name = _clean_text(row.get("stock_name", ""))
+    return {
+        "scan_date": _date_key(row.get("scan_date", "")),
+        "stock_id": _clean_text(row.get("stock_id", "")),
+        "stock_name": stock_name,
+        "name": stock_name,
+        "pattern_type": _clean_text(row.get("pattern_type", "")),
+        "pattern_name": _clean_text(row.get("pattern_name", "")),
+        "timeframe": _clean_text(row.get("timeframe", "day")) or "day",
+        "score": float(row.get("score", 0) or 0),
+        "event_date": _date_key(row.get("event_date", "")),
+        "in_tick_universe": True,
+    }
+
+
 def available_scan_dates() -> list[str]:
     """Return all scan dates present in local monthly parquet shards."""
     dates: set[str] = set()
@@ -101,6 +124,8 @@ def read_pattern_scan(
     date: str | None,
     pattern_types: Iterable[str],
     min_score: float = 60.0,
+    *,
+    include_payload: bool = True,
 ) -> tuple[str | None, list[dict[str, Any]]]:
     """Read precomputed pattern rows for one trading date.
 
@@ -119,8 +144,9 @@ def read_pattern_scan(
     if not path.exists():
         return date, []
 
+    columns = None if include_payload else PATTERN_SCAN_SUMMARY_COLUMNS
     try:
-        df = pd.read_parquet(path)
+        df = pd.read_parquet(path, columns=columns)
     except Exception:
         return date, []
     if df.empty:
@@ -136,7 +162,8 @@ def read_pattern_scan(
         return date, []
 
     df = df.sort_values(["score", "stock_id", "pattern_type"], ascending=[False, True, True])
-    return date, [_payload_from_row(row) for _, row in df.iterrows()]
+    row_factory = _payload_from_row if include_payload else _summary_from_row
+    return date, [row_factory(row) for _, row in df.iterrows()]
 
 
 def read_pattern_for_stock(
@@ -146,13 +173,34 @@ def read_pattern_for_stock(
     min_score: float = 60.0,
 ) -> dict[str, Any] | None:
     """Return one precomputed pattern payload for chart overlay."""
-    scan_date, rows = read_pattern_scan(date, [pattern_type], min_score=min_score)
-    del scan_date
-    sid = str(stock_id)
-    matches = [row for row in rows if str(row.get("stock_id")) == sid]
-    if not matches:
+    if not date:
+        dates = available_scan_dates()
+        date = dates[-1] if dates else None
+    if not date:
         return None
-    return sorted(matches, key=lambda row: float(row.get("score") or 0), reverse=True)[0]
+    date = _date_key(date)
+
+    path = _month_path(date)
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_parquet(path)
+    except Exception:
+        return None
+    if df.empty:
+        return None
+
+    sid = str(stock_id)
+    df["scan_date"] = df["scan_date"].astype(str).str[:10]
+    df = df[df["scan_date"] == date]
+    df = df[df["pattern_type"].astype(str) == str(pattern_type)]
+    df = df[df["stock_id"].astype(str) == sid]
+    if min_score is not None:
+        df = df[pd.to_numeric(df["score"], errors="coerce").fillna(0) >= float(min_score)]
+    if df.empty:
+        return None
+    df = df.sort_values(["score"], ascending=[False])
+    return _payload_from_row(df.iloc[0])
 
 
 def write_pattern_scan(date: str, rows: list[dict[str, Any]]) -> Path:

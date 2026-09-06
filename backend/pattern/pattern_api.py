@@ -384,7 +384,12 @@ def scan_patterns(
     timeframe = _normalize_scan_timeframe(timeframe)
     del limit
     selected_types = _selected_pattern_types(pattern_type)
-    scan_date, matches = read_pattern_scan(date, selected_types, min_score=float(min_score))
+    scan_date, matches = read_pattern_scan(
+        date,
+        selected_types,
+        min_score=float(min_score),
+        include_payload=False,
+    )
 
     result = {
         "pattern_type": pattern_type,
