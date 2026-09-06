@@ -1461,17 +1461,10 @@ export default function App() {
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [
-    focusedPanel,
-    obsRows,
-    selectMarketRow,
-    selectedEventKey,
-    stockId,
-    vwapRows,
-  ]);
+  }, [focusedPanel, obsRows, selectMarketRow, selectedEventKey, stockId, vwapRows]);
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-base-100 font-mono text-base-content">
+    <div className="flex min-h-dvh flex-col overflow-x-hidden bg-base-100 font-mono text-base-content lg:h-dvh lg:overflow-hidden">
       <header className="border-b border-base-300 bg-base-200">
         <div className="flex min-h-12 flex-wrap items-center justify-between gap-2 px-3 py-2">
           <div className="flex items-center gap-3">
@@ -1494,7 +1487,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-rows-[minmax(220px,45%)_minmax(260px,55%)] gap-2 p-2">
+      <main className="grid min-h-0 flex-1 grid-rows-[minmax(220px,45%)_auto] gap-2 p-2 lg:grid-rows-[minmax(220px,45%)_minmax(260px,55%)]">
         <div className="grid min-h-0 grid-cols-1 overflow-hidden">
           <Panel
             title={SIGNAL_LABEL}
@@ -1530,78 +1523,28 @@ export default function App() {
                     OBV
                   </button>
                 </div>
-                <details
-                  ref={vwapMenuRef}
-                  className="dropdown dropdown-end relative z-30 w-6 justify-self-end"
-                  open={vwapMenuOpen}
-                  onBlurCapture={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget)) {
-                      setVwapMenuOpen(false);
-                    }
-                  }}
-                >
-                  <summary
-                    className="btn btn-square btn-xs rounded"
-                    title={`${SIGNAL_LABEL}條件`}
-                    aria-label={`${SIGNAL_LABEL}條件`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      setVwapMenuOpen((open) => !open);
-                    }}
-                  >
-                    ☰
-                  </summary>
+                <details ref={vwapMenuRef} className="dropdown dropdown-end relative z-30 w-6 justify-self-end" open={vwapMenuOpen}>
+                  <summary className="btn btn-square btn-xs rounded" title={`${SIGNAL_LABEL}條件`} aria-label={`${SIGNAL_LABEL}條件`} onClick={(event) => { event.preventDefault(); setVwapMenuOpen((open) => !open); }}>☰</summary>
                   <div className="dropdown-content z-50 mt-1 max-h-44 w-60 overflow-y-auto rounded border border-base-300 bg-base-200 p-3 shadow">
                     <div className="mb-2 flex items-center justify-between border-b border-base-300 pb-2">
                       <span className="text-xs font-semibold text-base-content/70">{SIGNAL_LABEL}條件</span>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-square btn-xs rounded"
-                        title="關閉"
-                        aria-label="關閉"
-                        onClick={() => setVwapMenuOpen(false)}
-                      >
-                        ×
-                      </button>
+                      <button type="button" className="btn btn-ghost btn-square btn-xs rounded" title="關閉" aria-label="關閉" onClick={() => setVwapMenuOpen(false)}>×</button>
                     </div>
                     <label className="form-control mb-2 w-full">
-                      <div className="label py-1">
-                        <span className="label-text text-xs">股票清單</span>
-                      </div>
+                      <div className="label py-1"><span className="label-text text-xs">股票清單</span></div>
                       <select className="select select-bordered select-xs rounded" value={universe} onChange={(e) => setUniverse(e.target.value)}>
                         <option value="daytrade">當沖 {universeSets.daytrade.size ? `(${universeSets.daytrade.size})` : ""}</option>
                         <option value="full">全市場 {universeSets.full.size ? `(${universeSets.full.size})` : ""}</option>
                       </select>
                     </label>
-                    <label className="label cursor-pointer justify-start gap-2 py-1 text-xs">
-                      <input type="checkbox" className="checkbox checkbox-primary checkbox-xs" checked={repeatEvents} onChange={() => setRepeatEvents((v) => !v)} />
-                      <span>重複事件</span>
-                    </label>
-                    <label className="label cursor-pointer justify-start gap-2 py-1 text-xs">
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-primary checkbox-xs"
-                        checked={showAllCandidates}
-                        onChange={toggleShowAllCandidates}
-                      />
-                      <span>全部候選股</span>
-                    </label>
+                    <label className="label cursor-pointer justify-start gap-2 py-1 text-xs"><input type="checkbox" className="checkbox checkbox-primary checkbox-xs" checked={repeatEvents} onChange={() => setRepeatEvents((v) => !v)} /><span>重複事件</span></label>
+                    <label className="label cursor-pointer justify-start gap-2 py-1 text-xs"><input type="checkbox" className="checkbox checkbox-primary checkbox-xs" checked={showAllCandidates} onChange={toggleShowAllCandidates} /><span>全部候選股</span></label>
                     {Object.entries(ACTIVITY_FILTERS).map(([key, config]) => (
                       <label key={key} className="form-control mt-2 w-full">
-                        <div className="label py-1">
-                          <span className="label-text text-xs">{config.label}</span>
-                        </div>
-                        <select
-                          className="select select-bordered select-xs rounded"
-                          value={activityFilters[key]}
-                          onChange={(e) => setActivityFilter(key, e.target.value)}
-                        >
+                        <div className="label py-1"><span className="label-text text-xs">{config.label}</span></div>
+                        <select className="select select-bordered select-xs rounded" value={activityFilters[key]} onChange={(e) => setActivityFilter(key, e.target.value)}>
                           <option value="">不限</option>
-                          {config.options.map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
-                            </option>
-                          ))}
+                          {config.options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                         </select>
                       </label>
                     ))}
@@ -1614,317 +1557,55 @@ export default function App() {
                   <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
                     {patternFilterGroups.map((group) => {
                       const style = patternSideStyle(group.side);
-                      return (
-                        <div key={group.side} className={`flex shrink-0 items-center gap-1 rounded border px-1 py-0.5 ${style.group}`}>
-                          <span className={`shrink-0 px-1 text-[10px] font-semibold ${style.label}`}>{group.label}</span>
-                          {group.types.map((type) => (
-                            <button
-                              key={type.id}
-                              className={patternButtonClass(type, selectedPatternTypes.includes(type.id))}
-                              title={selectedPatternTypes.includes(type.id) ? `取消${type.name}過濾` : `只看有${type.name}的股票`}
-                              onClick={() => togglePatternType(type.id)}
-                            >
-                              {type.name}
-                            </button>
-                          ))}
-                        </div>
-                      );
+                      return <div key={group.side} className={`flex shrink-0 items-center gap-1 rounded border px-1 py-0.5 ${style.group}`}>
+                        <span className={`shrink-0 px-1 text-[10px] font-semibold ${style.label}`}>{group.label}</span>
+                        {group.types.map((type) => <button key={type.id} className={patternButtonClass(type, selectedPatternTypes.includes(type.id))} title={selectedPatternTypes.includes(type.id) ? `取消${type.name}過濾` : `只看有${type.name}的股票`} onClick={() => togglePatternType(type.id)}>{type.name}</button>)}
+                      </div>;
                     })}
                   </div>
                 </div>
-                <details
-                  ref={patternMenuRef}
-                  className="dropdown dropdown-end relative z-30 w-6 justify-self-end"
-                  open={patternMenuOpen}
-                  onBlurCapture={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget)) {
-                      setPatternMenuOpen(false);
-                    }
-                  }}
-                >
-                  <summary
-                    className="btn btn-square btn-xs rounded"
-                    title="D1型態設定"
-                    aria-label="D1型態設定"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      setPatternMenuOpen((open) => !open);
-                    }}
-                  >
-                    ☰
-                  </summary>
+                <details ref={patternMenuRef} className="dropdown dropdown-end relative z-30 w-6 justify-self-end" open={patternMenuOpen}>
+                  <summary className="btn btn-square btn-xs rounded" title="D1型態設定" aria-label="D1型態設定" onClick={(event) => { event.preventDefault(); setPatternMenuOpen((open) => !open); }}>☰</summary>
                   <div className="dropdown-content z-50 mt-1 max-h-36 w-56 overflow-y-auto rounded border border-base-300 bg-base-200 p-3 shadow">
-                    <div className="mb-2 flex items-center justify-between border-b border-base-300 pb-2">
-                      <span className="text-xs font-semibold text-base-content/70">D1型態</span>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-square btn-xs rounded"
-                        title="關閉"
-                        aria-label="關閉"
-                        onClick={() => setPatternMenuOpen(false)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                    <button type="button" className="btn btn-xs mb-2 w-full rounded" onClick={() => setSelectedPatternTypes([])}>
-                      清除型態過濾
-                    </button>
-                    <label className="form-control w-full">
-                      <div className="label py-1">
-                        <span className="label-text text-xs">週期</span>
-                      </div>
-                      <select className="select select-bordered select-xs rounded" value={PATTERN_TIMEFRAME} disabled>
-                        <option value={PATTERN_TIMEFRAME}>{PATTERN_TIMEFRAME_LABEL}</option>
-                      </select>
-                    </label>
-                    <label className="form-control mt-2 w-full">
-                      <div className="label py-1">
-                        <span className="label-text text-xs">日K根數</span>
-                      </div>
-                      <input
-                        type="number"
-                        className="input input-bordered input-xs rounded"
-                        value={patternLimit}
-                        min="20"
-                        max="500"
-                        step="10"
-                        onChange={(e) => setPatternLimit(Number(e.target.value) || 120)}
-                      />
-                    </label>
+                    <div className="mb-2 flex items-center justify-between border-b border-base-300 pb-2"><span className="text-xs font-semibold text-base-content/70">D1型態</span><button type="button" className="btn btn-ghost btn-square btn-xs rounded" title="關閉" aria-label="關閉" onClick={() => setPatternMenuOpen(false)}>×</button></div>
+                    <button type="button" className="btn btn-xs mb-2 w-full rounded" onClick={() => setSelectedPatternTypes([])}>清除型態過濾</button>
+                    <label className="form-control w-full"><div className="label py-1"><span className="label-text text-xs">週期</span></div><select className="select select-bordered select-xs rounded" value={PATTERN_TIMEFRAME} disabled><option value={PATTERN_TIMEFRAME}>{PATTERN_TIMEFRAME_LABEL}</option></select></label>
+                    <label className="form-control mt-2 w-full"><div className="label py-1"><span className="label-text text-xs">日K根數</span></div><input type="number" className="input input-bordered input-xs rounded" value={patternLimit} min="20" max="500" step="10" onChange={(e) => setPatternLimit(Number(e.target.value) || 120)} /></label>
                   </div>
                 </details>
               </div>
             </div>
             {patternError ? <div className="border-b border-base-300 px-3 py-1 text-xs text-warning">型態：{patternError}</div> : null}
-            {vwapError ? (
-              <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-error">{vwapError}</div>
-            ) : vwapRows.length ? (
+            {vwapError ? <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-error">{vwapError}</div> : vwapRows.length ? (
               <div className="min-h-0 flex-1 overflow-auto">
                 <table className="table table-xs table-pin-rows min-w-max">
-                  <thead>
-                    <tr>
-                      <th className="cursor-pointer" onClick={() => sortVwap("stock_id")}>
-                        股票
-                      </th>
-                      <th className="cursor-pointer" onClick={() => sortVwap("chg_pct")}>
-                        漲幅
-                      </th>
-                      <th className="cursor-pointer text-right" onClick={() => sortVwap("time")}>
-                        時間
-                      </th>
-                      <th className="cursor-pointer text-center" onClick={() => sortVwap("sr_on")}>
-                        SR
-                      </th>
-                      <th className="cursor-pointer text-center" onClick={() => sortVwap("macd_on")}>
-                        MACD
-                      </th>
-                      <th className="cursor-pointer text-center" onClick={() => sortVwap("obv_on")}>
-                        OBV
-                      </th>
-                      {patternColumns.map((type) => {
-                        const style = patternSideStyle(type);
-                        const checked = selectedPatternTypes.includes(type.id);
-                        return (
-                          <th
-                            key={type.id}
-                            className={`cursor-pointer border-l border-base-300/40 text-center ${style.head}`}
-                            onClick={() => sortVwap(`pattern:${type.id}`)}
-                          >
-                            <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
-                              <span>{type.name}</span>
-                              <input
-                                type="checkbox"
-                                className="checkbox checkbox-xs"
-                                checked={checked}
-                                title={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`}
-                                aria-label={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`}
-                                onClick={(event) => event.stopPropagation()}
-                                onChange={(event) => {
-                                  event.stopPropagation();
-                                  togglePatternType(type.id);
-                                }}
-                              />
-                            </div>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vwapRows.map((row, idx) => {
-                      const key = eventKey(row);
-                      const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id);
-                      return (
-                        <tr
-                          key={`${key}-${idx}`}
-                          data-panel="vwap"
-                          data-row-index={idx}
-                          className={selected ? "bg-primary/15" : ""}
-                          onClick={() => selectMarketRow(row, key, "vwap")}
-                          onDoubleClick={() => toggleObsStock(row.stock_id)}
-                        >
-                          <StockCell row={row}>
-                            {row.direction ? (
-                              <div className={`mt-1 text-[10px] ${row.direction === "up" ? "text-error" : "text-success"}`}>
-                                {row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} ({BASELINE_LABEL} {Number(row.vwap).toFixed(2)})
-                              </div>
-                            ) : null}
-                          </StockCell>
-                          <td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>
-                            {row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}
-                          </td>
-                          <td className="text-right text-base-content/50">{hm(row.time)}</td>
-                          <td className="text-center">
-                            <Lamp on={row.sr_on} kind="both" title="SR" />
-                          </td>
-                          <td className="text-center">
-                            <Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" />
-                          </td>
-                          <td className="text-center">
-                            <Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" />
-                          </td>
-                          {patternColumns.map((type) => (
-                            <PatternSignalCell
-                              key={type.id}
-                              type={type}
-                              hit={row.pattern_hits?.get(type.id)}
-                              label={type.name}
-                              onSelect={() => selectMarketRow(row, key, "vwap", type.id)}
-                            />
-                          ))}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
+                  <thead><tr>
+                    <th className="cursor-pointer" onClick={() => sortVwap("stock_id")}>股票</th><th className="cursor-pointer" onClick={() => sortVwap("chg_pct")}>漲幅</th><th className="cursor-pointer text-right" onClick={() => sortVwap("time")}>時間</th><th className="cursor-pointer text-center" onClick={() => sortVwap("sr_on")}>SR</th><th className="cursor-pointer text-center" onClick={() => sortVwap("macd_on")}>MACD</th><th className="cursor-pointer text-center" onClick={() => sortVwap("obv_on")}>OBV</th>
+                    {patternColumns.map((type) => { const style = patternSideStyle(type); const checked = selectedPatternTypes.includes(type.id); return <th key={type.id} className={`cursor-pointer border-l border-base-300/40 text-center ${style.head}`} onClick={() => sortVwap(`pattern:${type.id}`)}><div className="flex items-center justify-center gap-1.5 whitespace-nowrap"><span>{type.name}</span><input type="checkbox" className="checkbox checkbox-xs" checked={checked} title={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`} aria-label={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); togglePatternType(type.id); }} /></div></th>; })}
+                  </tr></thead>
+                  <tbody>{vwapRows.map((row, idx) => { const key = eventKey(row); const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id); return <tr key={`${key}-${idx}`} data-panel="vwap" data-row-index={idx} className={selected ? "bg-primary/15" : ""} onClick={() => selectMarketRow(row, key, "vwap")} onDoubleClick={() => toggleObsStock(row.stock_id)}><StockCell row={row}>{row.direction ? <div className={`mt-1 text-[10px] ${row.direction === "up" ? "text-error" : "text-success"}`}>{row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} ({BASELINE_LABEL} {Number(row.vwap).toFixed(2)})</div> : null}</StockCell><td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>{row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}</td><td className="text-right text-base-content/50">{hm(row.time)}</td><td className="text-center"><Lamp on={row.sr_on} kind="both" title="SR" /></td><td className="text-center"><Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" /></td><td className="text-center"><Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" /></td>{patternColumns.map((type) => <PatternSignalCell key={type.id} type={type} hit={row.pattern_hits?.get(type.id)} label={type.name} onSelect={() => selectMarketRow(row, key, "vwap", type.id)} />)}</tr>; })}</tbody>
                 </table>
               </div>
-            ) : (
-              <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">該日尚無盤中 / SR 訊號</div>
-            )}
+            ) : <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">該日尚無盤中 / SR 訊號</div>}
           </Panel>
         </div>
 
         <div className="grid min-h-0 gap-2 lg:grid-cols-[minmax(360px,42%)_minmax(0,1fr)]">
-          <ChartPanel
-            title={`${titleStock} 日K${dayPatternTitle}${activeChartDate ? `・${activeChartDate.slice(5).replace("-", "/")}` : ""}`}
-            loading={loadingCharts}
-            error={dayError}
-            actions={<PriceChange summary={daySummary} />}
-          >
-            <TradingViewChart data={dayData} variant="day" emptyMessage="尚無日K資料" showVolume={false} />
-          </ChartPanel>
+          <div className="min-h-[320px] sm:min-h-[380px] lg:min-h-0">
+            <ChartPanel title={`${titleStock} 日K${dayPatternTitle}${activeChartDate ? `・${activeChartDate.slice(5).replace("-", "/")}` : ""}`} loading={loadingCharts} error={dayError} actions={<PriceChange summary={daySummary} />}>
+              <TradingViewChart data={dayData} variant="day" emptyMessage="尚無日K資料" showVolume={false} />
+            </ChartPanel>
+          </div>
 
-          <ChartPanel
-            title={rightChartTitle}
-            loading={loadingCharts}
-            error={intradayError}
-            actions={
-              <>
-                <ChartIndicatorControls value={chartIndicatorMode} onChange={setChartIndicatorMode} />
-                <PriceChange summary={rightSummary} />
-              </>
-            }
-          >
-            <div className="h-full min-h-0">
-              <TradingViewChart
-                data={intradayData}
-                dayLevels={dayData}
-                extraSr={extraSr}
-                idxData={idxData}
-                variant={rightChartVariant}
-                timeframe={activeChartTimeframe}
-                emptyMessage={`尚無${activeChartLabel}資料`}
-                showIndicatorPane={showIndicatorPane}
-                daySrMode="horizontal"
-                indicatorMode={chartIndicatorMode}
-                indicatorStockId={stockId}
-                indicatorEventTime={indicatorEventTime}
-                macdMap={macdMap}
-                obvMap={obvMap}
-              />
-            </div>
-          </ChartPanel>
+          <div className="min-h-[360px] sm:min-h-[440px] lg:min-h-0">
+            <ChartPanel title={rightChartTitle} loading={loadingCharts} error={intradayError} actions={<><ChartIndicatorControls value={chartIndicatorMode} onChange={setChartIndicatorMode} /><PriceChange summary={rightSummary} /></>}>
+              <div className="h-full min-h-0"><TradingViewChart data={intradayData} dayLevels={dayData} extraSr={extraSr} idxData={idxData} variant={rightChartVariant} timeframe={activeChartTimeframe} emptyMessage={`尚無${activeChartLabel}資料`} showIndicatorPane={showIndicatorPane} daySrMode="horizontal" indicatorMode={chartIndicatorMode} indicatorStockId={stockId} indicatorEventTime={indicatorEventTime} macdMap={macdMap} obvMap={obvMap} /></div>
+            </ChartPanel>
+          </div>
         </div>
       </main>
 
-      {watchDrawerOpen ? (
-        <>
-          <button
-            type="button"
-            className="fixed inset-0 z-40 cursor-default bg-black/35"
-            aria-label="關閉觀察清單"
-            onClick={closeWatchDrawer}
-          />
-          <aside
-            ref={watchDrawerRef}
-            tabIndex={-1}
-            className="fixed right-0 top-0 z-50 flex h-dvh w-[min(420px,calc(100vw-1rem))] flex-col border-l border-base-300 bg-base-100 shadow-2xl"
-            aria-label="觀察清單"
-            onFocusCapture={() => setFocusedPanel("obs")}
-            onMouseDown={() => setFocusedPanel("obs")}
-          >
-            <div className="flex min-h-12 items-center justify-between border-b border-base-300 bg-base-200 px-3">
-              <div className="min-w-0 truncate text-sm font-semibold text-primary">
-                觀察 <span className="font-normal text-base-content/45">({obsRows.length})</span>
-              </div>
-              <button type="button" className="btn btn-ghost btn-square btn-xs rounded" title="關閉" aria-label="關閉" onClick={closeWatchDrawer}>
-                ×
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto">
-              {obsRows.length ? (
-                <table className="table table-xs table-pin-rows min-w-max">
-                  <thead>
-                    <tr>
-                      <th>股票</th>
-                      <th>漲幅</th>
-                      <th className="text-right">時間</th>
-                      <th className="text-center">SR</th>
-                      <th className="text-center">MACD</th>
-                      <th className="text-center">OBV</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {obsRows.map((row, idx) => {
-                      const key = eventKey(row);
-                      const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id);
-                      return (
-                        <tr
-                          key={row.stock_id}
-                          data-panel="obs"
-                          data-row-index={idx}
-                          className={selected ? "bg-primary/15" : ""}
-                          onClick={() => selectMarketRow(row, key, "obs", "", false)}
-                          onDoubleClick={() => toggleObsStock(row.stock_id)}
-                        >
-                          <StockCell row={row} />
-                          <td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>
-                            {row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}
-                          </td>
-                          <td className="text-right text-base-content/50">{hm(row.time)}</td>
-                          <td className="text-center">
-                            <Lamp on={row.sr_on} kind="both" title="SR" />
-                          </td>
-                          <td className="text-center">
-                            <Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" />
-                          </td>
-                          <td className="text-center">
-                            <Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="flex h-full items-center justify-center p-6 text-center text-sm text-base-content/50">
-                  在盤中訊號框雙擊股票加入觀察
-                </div>
-              )}
-            </div>
-          </aside>
-        </>
-      ) : null}
+      {watchDrawerOpen ? <><button type="button" className="fixed inset-0 z-40 cursor-default bg-black/35" aria-label="關閉觀察清單" onClick={closeWatchDrawer} /><aside ref={watchDrawerRef} tabIndex={-1} className="fixed right-0 top-0 z-50 flex h-dvh w-[min(420px,calc(100vw-1rem))] flex-col border-l border-base-300 bg-base-100 shadow-2xl" aria-label="觀察清單" onFocusCapture={() => setFocusedPanel("obs")} onMouseDown={() => setFocusedPanel("obs")}><div className="flex min-h-12 items-center justify-between border-b border-base-300 bg-base-200 px-3"><div className="min-w-0 truncate text-sm font-semibold text-primary">觀察 <span className="font-normal text-base-content/45">({obsRows.length})</span></div><button type="button" className="btn btn-ghost btn-square btn-xs rounded" title="關閉" aria-label="關閉" onClick={closeWatchDrawer}>×</button></div><div className="min-h-0 flex-1 overflow-auto">{obsRows.length ? <table className="table table-xs table-pin-rows min-w-max"><thead><tr><th>股票</th><th>漲幅</th><th className="text-right">時間</th><th className="text-center">SR</th><th className="text-center">MACD</th><th className="text-center">OBV</th></tr></thead><tbody>{obsRows.map((row, idx) => { const key = eventKey(row); const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id); return <tr key={row.stock_id} data-panel="obs" data-row-index={idx} className={selected ? "bg-primary/15" : ""} onClick={() => selectMarketRow(row, key, "obs", "", false)} onDoubleClick={() => toggleObsStock(row.stock_id)}><StockCell row={row} /><td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>{row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}</td><td className="text-right text-base-content/50">{hm(row.time)}</td><td className="text-center"><Lamp on={row.sr_on} kind="both" title="SR" /></td><td className="text-center"><Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" /></td><td className="text-center"><Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" /></td></tr>; })}</tbody></table> : <div className="flex h-full items-center justify-center p-6 text-center text-sm text-base-content/50">在盤中訊號框雙擊股票加入觀察</div>}</div></aside></> : null}
     </div>
   );
 }
