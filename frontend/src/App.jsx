@@ -726,12 +726,14 @@ export default function App() {
   const [watchDrawerOpen, setWatchDrawerOpen] = useState(false);
   const [focusedPanel, setFocusedPanel] = useState("vwap");
   const [signalLoadedKey, setSignalLoadedKey] = useState("");
+  const [selectedChartDate, setSelectedChartDate] = useState(() => vwapDate);
 
   const stockIdRef = useRef(stockId);
   const activeChartDateRef = useRef("");
   const vwapDateRef = useRef(vwapDate);
   const signalLoadSeqRef = useRef(0);
   const chartLoadSeqRef = useRef(0);
+  const idxCacheRef = useRef(new Map());
   const today = useMemo(() => taipeiTodayIso(), [clock]);
   const stockName = dayData?.stock_name || intradayData?.stock_name || "";
   const titleStock = stockName && stockName !== stockId ? `${stockId} ${stockName}` : stockId;
@@ -809,100 +811,105 @@ export default function App() {
 
   const loadCharts = useCallback(async () => {
     const sid = stockId.trim();
-    if (!sid) return;
+    if (!sid || selectedChartDate !== activeChartDate) return;
     const requestId = chartLoadSeqRef.current + 1;
     chartLoadSeqRef.current = requestId;
     const isCurrent = () => requestId === chartLoadSeqRef.current;
     setLoadingCharts(true);
     setDayError("");
     setIntradayError("");
-    setIdxData(null);
     const forceLive = !activeChartDate || activeChartDate === today;
     const hasPatternOverlay = dayChartPatternType !== "none";
     const chartForceLive = hasPatternOverlay && activeChartDate ? false : forceLive;
-    const shouldFetchIdx = rightChartVariant === "intraday" && chartIndicatorMode === "idx" && sid !== DEFAULT_STOCK;
-    try {
-      try {
-        const dayResult = await fetchJson(
-          patternDetailPath(sid, {
-            patternType: dayChartPatternType,
-            timeframe: "day",
-            date: activeChartDate,
-            limit: dayChartLimit,
-            forceLive: chartForceLive,
-          }),
-        );
-        if (!isCurrent()) return;
-        setDayData(dayResult);
-      } catch (error) {
+
+    const dayPromise = fetchJson(
+      patternDetailPath(sid, {
+        patternType: dayChartPatternType,
+        timeframe: "day",
+        date: activeChartDate,
+        limit: dayChartLimit,
+        forceLive: chartForceLive,
+      }),
+    )
+      .then((result) => {
+        if (isCurrent()) setDayData(result);
+      })
+      .catch((error) => {
         if (!isCurrent()) return;
         setDayData(null);
         setDayError(error?.message || "日K載入失敗");
-      }
+      });
 
-      try {
-        const intradayResult = await fetchJson(
-          patternDetailPath(sid, {
-            patternType: activeChartPatternType,
-            timeframe: activeChartTimeframe,
-            date: activeChartDate,
-            limit: activeChartLimit,
-            fullDay: rightChartVariant === "intraday",
-            forceLive: chartForceLive,
-          }),
-        );
-        if (!isCurrent()) return;
-        setIntradayData(intradayResult);
-      } catch (error) {
+    const intradayPromise = fetchJson(
+      patternDetailPath(sid, {
+        patternType: activeChartPatternType,
+        timeframe: activeChartTimeframe,
+        date: activeChartDate,
+        limit: activeChartLimit,
+        fullDay: rightChartVariant === "intraday",
+        forceLive: chartForceLive,
+      }),
+    )
+      .then((result) => {
+        if (isCurrent()) setIntradayData(result);
+      })
+      .catch((error) => {
         if (!isCurrent()) return;
         setIntradayData(null);
         setIntradayError(error?.message || `${activeChartLabel}載入失敗`);
-      }
+      });
 
-      if (shouldFetchIdx) {
-        try {
-          const idxResult = await fetchJson(
-            patternDetailPath(DEFAULT_STOCK, {
-              timeframe: activeChartTimeframe,
-              date: activeChartDate,
-              limit: activeChartLimit,
-              fullDay: true,
-              forceLive: chartForceLive,
-            }),
-          );
-          if (!isCurrent()) return;
-          setIdxData(idxResult);
-        } catch {
-          if (!isCurrent()) return;
-          setIdxData(null);
-        }
-      } else if (isCurrent()) {
-        setIdxData(null);
-      }
-    } finally {
-      if (isCurrent()) setLoadingCharts(false);
-    }
+    await Promise.allSettled([dayPromise, intradayPromise]);
+    if (isCurrent()) setLoadingCharts(false);
   }, [
     activeChartLabel,
     activeChartLimit,
     activeChartPatternType,
     activeChartTimeframe,
     activeChartDate,
-    chartIndicatorMode,
     dayChartLimit,
     dayChartPatternType,
     rightChartVariant,
+    selectedChartDate,
     stockId,
     today,
   ]);
+
+  const loadDateIndex = useCallback(async () => {
+    if (rightChartVariant !== "intraday" || chartIndicatorMode !== "idx") {
+      setIdxData(null);
+      return;
+    }
+    const key = `${activeChartDate || "today"}:${activeChartTimeframe}`;
+    const cached = idxCacheRef.current.get(key);
+    if (cached) {
+      setIdxData(cached);
+      return;
+    }
+    try {
+      const result = await fetchJson(
+        patternDetailPath(DEFAULT_STOCK, {
+          timeframe: activeChartTimeframe,
+          date: activeChartDate,
+          limit: activeChartLimit,
+          fullDay: true,
+        }),
+      );
+      idxCacheRef.current.set(key, result);
+      setIdxData(result);
+    } catch {
+      setIdxData(null);
+    }
+  }, [activeChartDate, activeChartLimit, activeChartTimeframe, chartIndicatorMode, rightChartVariant]);
 
   const selectStock = useCallback((sid, key = "", kind = "manual", chartMeta = {}) => {
     const next = String(sid);
     setStockId(next);
     setSelectedEventKey(key);
+    setSelectedChartDate(vwapDate);
     setChartContext({ kind, ...chartMeta });
     if (kind === "vwap" || kind === "obs") setFocusedPanel(kind);
-  }, []);
+  }, [vwapDate]);
 
   const loadVwapTables = useCallback(async () => {
     const requestId = signalLoadSeqRef.current + 1;
@@ -971,13 +978,25 @@ export default function App() {
   }, [obsStocks]);
 
   useEffect(() => {
+    loadDateIndex();
+  }, [loadDateIndex]);
+
+  useEffect(() => {
+    chartLoadSeqRef.current += 1;
+    setSelectedEventKey("");
+    setDayData(null);
+    setIntradayData(null);
+    setDayError("");
+    setIntradayError("");
+    setLoadingCharts(false);
+  }, [vwapDate]);
+
+  useEffect(() => {
     if (isVwapChart && signalLoadedKey !== signalLoadKey) return undefined;
-    const delayMs = isVwapChart ? 350 : 0;
-    const timer = window.setTimeout(() => {
-      loadCharts();
-    }, delayMs);
-    return () => window.clearTimeout(timer);
-  }, [isVwapChart, loadCharts, reloadSeq, signalLoadedKey, signalLoadKey]);
+    if (selectedChartDate !== activeChartDate) return undefined;
+    loadCharts();
+    return undefined;
+  }, [activeChartDate, isVwapChart, loadCharts, reloadSeq, selectedChartDate, signalLoadedKey, signalLoadKey]);
 
   useEffect(() => {
     let stopped = false;
