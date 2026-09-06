@@ -25,7 +25,7 @@ def _recent_offline_dates(month_limit: int) -> list[str]:
 
     latest = pd.Timestamp(dates[-1])
     start = (latest - pd.DateOffset(months=month_limit)).strftime("%Y-%m-%d")
-    return [date for date in dates if date >= start]
+    return list(reversed([date for date in dates if date >= start]))
 
 
 def prewarm_historical_caches(
@@ -59,7 +59,7 @@ def prewarm_historical_caches(
 
     print(
         f"[快取預熱] 開始：最近 {month_limit} 個月、{len(dates)} 個日期，"
-        f"每日預設條件最多 {chart_rows} 檔圖表",
+        f"每日預設條件最多 {chart_rows} 檔圖表；由最新日期往前預熱",
         flush=True,
     )
     for date in dates:
