@@ -12,6 +12,11 @@ Pattern Recognition API Endpoints (FastAPI Router)
 - POST /api/pattern/cache/clear      手動清空快取
 """
 
+import gzip
+import hashlib
+import json
+import os
+import shutil
 import uuid
 from typing import Any, Dict, List, Optional
 from pathlib import Path
@@ -208,6 +213,82 @@ def _load_daytrade_list() -> List[Dict[str, str]]:
 # 記憶體快取 (In-Memory Cache)
 _SCAN_CACHE: Dict[tuple, Dict[str, Any]] = {}
 _DETAIL_CACHE: Dict[tuple, Dict[str, Any]] = {}
+_DETAIL_DISK_CACHE_DIR = Path(os.environ.get(
+    "PATTERN_DETAIL_CACHE_DIR",
+    Path(__file__).parent.parent / ".cache/pattern_detail",
+))
+_DETAIL_DISK_CACHE_ENABLED = os.environ.get("PATTERN_DETAIL_DISK_CACHE", "1").lower() not in {"0", "false", "no"}
+
+
+def _month_file_mtime(path: Path) -> str:
+    try:
+        return str(int(path.stat().st_mtime_ns))
+    except OSError:
+        return "missing"
+
+
+def _historical_detail_version(timeframe: str, date: str, pattern_type: str) -> str:
+    """Cheap version token for persisted historical detail cache invalidation."""
+    month = str(date)[:7].replace("-", "_")
+    timeframe_dir = {
+        "1m": "m1",
+        "3m": "m3_std",
+        "5m": "m5_std",
+        "day": "adjustment_day",
+    }.get(timeframe, timeframe)
+    paths = [
+        Path(__file__).parent.parent / f"db/{timeframe_dir}/{month}.parquet",
+        Path(__file__).parent.parent / f"db/m1_live/{str(date)[:10]}.parquet",
+        Path(__file__).parent.parent / f"db/adjustment_factor/{month}.parquet",
+        Path(__file__).parent.parent / f"db/vwap_signals/{month}.parquet",
+    ]
+    if pattern_type not in (None, "", "none"):
+        paths.append(Path(__file__).parent.parent / f"db/pattern_scan/d1/{month}.parquet")
+    return "historical:" + "|".join(f"{p.name}:{_month_file_mtime(p)}" for p in paths)
+
+
+def _detail_disk_cache_path(cache_key: tuple) -> Path:
+    raw = json.dumps(cache_key, ensure_ascii=True, default=str, separators=(",", ":"))
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    date_part = str(cache_key[3] or "latest").replace("/", "-")
+    return _DETAIL_DISK_CACHE_DIR / date_part / digest[:2] / f"{digest}.json.gz"
+
+
+def _read_detail_disk_cache(cache_key: tuple) -> Optional[Dict[str, Any]]:
+    if not _DETAIL_DISK_CACHE_ENABLED or cache_key[3] == "latest":
+        return None
+    path = _detail_disk_cache_path(cache_key)
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        return None
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+
+
+def _write_detail_disk_cache(cache_key: tuple, payload: Dict[str, Any]) -> None:
+    if not _DETAIL_DISK_CACHE_ENABLED or cache_key[3] == "latest":
+        return
+    path = _detail_disk_cache_path(cache_key)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with gzip.open(path, "wt", encoding="utf-8", compresslevel=4) as fh:
+            json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        pass
+
+
+def _clear_detail_disk_cache() -> int:
+    if not _DETAIL_DISK_CACHE_DIR.exists():
+        return 0
+    count = sum(1 for p in _DETAIL_DISK_CACHE_DIR.rglob("*.json.gz") if p.is_file())
+    shutil.rmtree(_DETAIL_DISK_CACHE_DIR, ignore_errors=True)
+    return count
 
 
 def reload_universe_cache() -> None:
@@ -317,14 +398,18 @@ def _horizontal_sr_lines(df: pd.DataFrame, to_epoch, stock_id: str) -> List[Dict
 
 @router.post("/cache/clear", summary="手動清空 Pattern 快取")
 def clear_pattern_cache() -> Dict[str, Any]:
-    """清空記憶體中的 Pattern 掃描與詳情快取。"""
+    """清空記憶體與磁碟中的 Pattern 掃描與詳情快取。"""
     scan_count = len(_SCAN_CACHE)
     detail_count = len(_DETAIL_CACHE)
+    disk_count = _clear_detail_disk_cache()
     _SCAN_CACHE.clear()
     _DETAIL_CACHE.clear()
     return {
         "ok": True,
-        "message": f"已清空快取 (scan 快取: {scan_count} 筆, detail 快取: {detail_count} 筆)",
+        "message": (
+            f"已清空快取 (scan 快取: {scan_count} 筆, "
+            f"detail 記憶體快取: {detail_count} 筆, detail 磁碟快取: {disk_count} 筆)"
+        ),
     }
 
 
@@ -493,7 +578,7 @@ def get_pattern_detail(
     # 歷史日期資料由 HF 同步後清快取，不需要每次先讀 2330 取版本戳。
     # 那個預讀在 Oracle 小主機上會和頁面刷新時的 detail 請求互相搶 IO。
     latest_ts = (
-        f"historical:{str(date)[:10]}"
+        _historical_detail_version(timeframe, str(date)[:10], pattern_type if not skip_pattern else "none")
         if date and not force_live
         else get_latest_candle_timestamp(timeframe=timeframe, date=date)
     )
@@ -501,6 +586,11 @@ def get_pattern_detail(
 
     if not force_live and cache_key in _DETAIL_CACHE:
         return _DETAIL_CACHE[cache_key]
+    if not force_live:
+        disk_payload = _read_detail_disk_cache(cache_key)
+        if disk_payload is not None:
+            _DETAIL_CACHE[cache_key] = disk_payload
+            return disk_payload
 
     df_candles = get_stock_candles(stock_id=stock_id, timeframe=timeframe, date=date, limit=limit, full_day=full_day)
     if df_candles.empty:
@@ -593,4 +683,6 @@ def get_pattern_detail(
     }
 
     _DETAIL_CACHE[cache_key] = result
+    if not force_live:
+        _write_detail_disk_cache(cache_key, result)
     return result

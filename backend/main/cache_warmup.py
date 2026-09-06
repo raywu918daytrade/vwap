@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from time import perf_counter
+from time import perf_counter, sleep
 
 
 def _recent_offline_dates(month_limit: int) -> list[str]:
@@ -31,10 +31,12 @@ def _recent_offline_dates(month_limit: int) -> list[str]:
 def prewarm_historical_caches(
     *,
     month_limit: int,
+    chart_month_limit: int,
     chart_date_limit: int,
     chart_rows: int,
     chart_stocks: list[str],
     activity_filters: dict[str, float],
+    chart_pause_sec: float = 0.0,
     universe: str = "daytrade",
 ) -> dict[str, int]:
     """Warm recent list and default chart caches after HF sync.
@@ -52,6 +54,7 @@ def prewarm_historical_caches(
     from pattern.vwap_sr_scan import stock_ids_for_universe
 
     dates = _recent_offline_dates(month_limit)
+    chart_dates = _chart_dates(dates, chart_month_limit, chart_date_limit)
     stock_ids = stock_ids_for_universe(universe)
     fixed_chart_stocks = list(dict.fromkeys(str(sid) for sid in chart_stocks if str(sid).strip()))
     charts = 0
@@ -59,56 +62,72 @@ def prewarm_historical_caches(
     started = perf_counter()
 
     print(
-        f"[快取預熱] 開始：最近 {month_limit} 個月、{len(dates)} 個日期，"
-        f"最新 {chart_date_limit} 個日期預熱圖表，每日預設條件最多 {chart_rows} 檔；"
-        "由最新日期往前預熱",
+        f"[快取預熱] 開始：清單最近 {month_limit} 個月 / {len(dates)} 個日期；"
+        f"圖表最近 {chart_month_limit} 個月 / {len(chart_dates)} 個日期；"
+        f"每日預設條件最多 {chart_rows} 檔；由最新日期往前預熱",
         flush=True,
     )
-    for index, date in enumerate(dates):
+    for date in dates:
+        t0 = perf_counter()
+        try:
+            read_vwap_signals(date, stock_ids=stock_ids)
+            metrics_for_date(date, universe=universe)
+            scan_patterns(pattern_type="all", timeframe="day", date=date, min_score=60.0, limit=120)
+            print(
+                f"  [快取預熱] {date} 清單完成 ({perf_counter() - t0:.1f}s)",
+                flush=True,
+            )
+        except Exception as exc:
+            errors += 1
+            print(f"  [快取預熱] {date} 清單失敗: {exc}", flush=True)
+
+    if chart_dates:
+        print("[快取預熱] 清單階段完成，開始分批預熱 K 圖 detail", flush=True)
+    for date in chart_dates:
         t0 = perf_counter()
         try:
             bundle = read_vwap_signals(date, stock_ids=stock_ids) or {}
             activity = metrics_for_date(date, universe=universe)
-            scan_patterns(pattern_type="all", timeframe="day", date=date, min_score=60.0, limit=120)
             warm_stocks = _chart_stocks_for_date(
                 bundle,
                 activity,
                 fixed_chart_stocks,
                 activity_filters,
                 chart_rows,
-            ) if index < chart_date_limit else []
-            if warm_stocks:
-                for stock_id in warm_stocks:
-                    try:
-                        get_pattern_detail(
-                            stock_id,
-                            pattern_type="none",
-                            timeframe="day",
-                            date=date,
-                            limit=120,
-                            full_day=False,
-                            force_live=False,
-                        )
-                        get_pattern_detail(
-                            stock_id,
-                            pattern_type="none",
-                            timeframe="1m",
-                            date=date,
-                            limit=120,
-                            full_day=True,
-                            force_live=False,
-                        )
-                        charts += 2
-                    except Exception as exc:
-                        errors += 1
-                        print(f"  [快取預熱] {date} {stock_id} 圖表略過: {exc}", flush=True)
+            )
+            for stock_id in warm_stocks:
+                try:
+                    get_pattern_detail(
+                        stock_id,
+                        pattern_type="none",
+                        timeframe="day",
+                        date=date,
+                        limit=120,
+                        full_day=False,
+                        force_live=False,
+                    )
+                    get_pattern_detail(
+                        stock_id,
+                        pattern_type="none",
+                        timeframe="1m",
+                        date=date,
+                        limit=120,
+                        full_day=True,
+                        force_live=False,
+                    )
+                    charts += 2
+                except Exception as exc:
+                    errors += 1
+                    print(f"  [快取預熱] {date} {stock_id} 圖表略過: {exc}", flush=True)
+                if chart_pause_sec > 0:
+                    sleep(chart_pause_sec)
             print(
-                f"  [快取預熱] {date} 完成：圖表 {len(warm_stocks)} 檔 ({perf_counter() - t0:.1f}s)",
+                f"  [快取預熱] {date} 圖表完成：{len(warm_stocks)} 檔 ({perf_counter() - t0:.1f}s)",
                 flush=True,
             )
         except Exception as exc:
             errors += 1
-            print(f"  [快取預熱] {date} 失敗: {exc}", flush=True)
+            print(f"  [快取預熱] {date} 圖表失敗: {exc}", flush=True)
 
     elapsed = perf_counter() - started
     print(
@@ -116,6 +135,20 @@ def prewarm_historical_caches(
         flush=True,
     )
     return {"dates": len(dates), "charts": charts, "errors": errors}
+
+
+def _chart_dates(dates: list[str], month_limit: int, date_limit: int) -> list[str]:
+    if month_limit <= 0 or not dates:
+        return []
+
+    import pandas as pd
+
+    latest = pd.Timestamp(dates[0])
+    start = (latest - pd.DateOffset(months=month_limit)).strftime("%Y-%m-%d")
+    selected = [date for date in dates if date >= start]
+    if date_limit > 0:
+        selected = selected[:date_limit]
+    return selected
 
 
 def _chart_stocks_for_date(
