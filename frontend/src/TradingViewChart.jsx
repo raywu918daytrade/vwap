@@ -13,9 +13,10 @@ const COLORS = {
 };
 
 const MACD_KIND_TITLE = { bull: "柱體底背離", bear: "柱體頂背離", both: "底+頂背離" };
-const OBV_KIND_TITLE = { bull: "OBV底背離", bear: "OBV頂背離", both: "OBV底+頂背離" };
+const OBV_KIND_TITLE = { bull: "OBV底背離", bear: "OBV頂背離", both: "OBV底背離+頂背離" };
 
 function baseOptions(container, variant) {
+  const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
   return {
     width: Math.max(container.clientWidth, 320),
     height: Math.max(container.clientHeight, 280),
@@ -23,6 +24,12 @@ function baseOptions(container, variant) {
     grid: { vertLines: { color: COLORS.grid }, horzLines: { color: COLORS.grid } },
     crosshair: { mode: CrosshairMode.Normal },
     rightPriceScale: { borderColor: COLORS.border },
+    handleScroll: isMobile
+      ? { mouseWheel: false, pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false }
+      : true,
+    handleScale: isMobile
+      ? { axisPressedMouseMove: false, mouseWheel: false, pinch: false, axisDoubleClickReset: false }
+      : true,
     localization: {
       timeFormatter: (t) => {
         const date = new Date(Number(t) * 1000);
