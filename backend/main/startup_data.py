@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fubon.subscribe_list import build_and_save_subscribe_list
 
-_OFFLINE_SIGNAL_FOLDERS = ["pattern_scan", "vwap_activity"]
+_OFFLINE_SIGNAL_FOLDERS = ["pattern_scan", "vwap_activity", "vwap_signals"]
 
 
 def _latest_market_db_check_date(now) -> str:
@@ -24,6 +24,25 @@ def _latest_market_db_check_date(now) -> str:
     if now.weekday() >= 5 or (now.hour, now.minute) < (13, 30):
         return _expected_prior_trading_day(now)
     return now.strftime("%Y-%m-%d")
+
+
+def latest_market_db_check_date(now=None) -> str:
+    """Public wrapper for the date that daily HF sync should be fresh through."""
+    if now is None:
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone(timedelta(hours=8)))
+    return _latest_market_db_check_date(now)
+
+
+def offline_signal_date_available(date_str: str) -> bool:
+    """Return whether the GHA-produced signal bundle exists locally."""
+    try:
+        from pattern.vwap_signal_store import available_signal_dates
+
+        return str(date_str)[:10] in set(available_signal_dates())
+    except Exception:
+        return False
 
 
 def sync_local_market_db_from_hf_if_stale() -> str:
@@ -88,10 +107,12 @@ def clear_market_query_caches() -> None:
     from pattern.vwap_activity import clear_cache as clear_activity_cache
     from pattern.vwap_macd_div import clear_cache as clear_macd_cache
     from pattern.vwap_obv_div import clear_cache as clear_obv_cache
+    from pattern.vwap_signal_store import clear_cache as clear_signal_store_cache
     from pattern.vwap_sr_scan import clear_caches as clear_vwap_sr_caches
 
     clear_pattern_cache()
     reload_universe_cache()
+    clear_signal_store_cache()
     clear_vwap_sr_caches()
     clear_activity_cache()
     clear_macd_cache()

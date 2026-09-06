@@ -109,7 +109,15 @@ def _daily_hf_sync() -> None:
             hhmm = now.strftime("%H:%M")
             print(f"[{hhmm}] 每日 HF 同步檢查：下載外部維護的歷史 market DB", flush=True)
             sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
-            if sync_status in ("synced", "signals_synced"):
+            expected_signal_date = _startup_data.latest_market_db_check_date(now)
+            if sync_status in ("synced", "signals_synced", "fresh") and not _startup_data.offline_signal_date_available(expected_signal_date):
+                next_retry_at = now + timedelta(minutes=30)
+                print(
+                    f"  尚未看到 {expected_signal_date} 的離線盤勢訊號，將於 {next_retry_at.strftime('%H:%M')} 後重試",
+                    flush=True,
+                )
+                _log_sys(f"每日 HF 同步尚未取得 {expected_signal_date} 離線盤勢訊號，30 分鐘後重試", "warning")
+            elif sync_status in ("synced", "signals_synced"):
                 _clear_after_hf_sync()
                 last_sync_date = today
                 next_retry_at = None

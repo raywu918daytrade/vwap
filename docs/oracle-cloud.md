@@ -118,11 +118,16 @@ repo，也不要放 `GITHUB_DAY_TRADE` token。
 .github/workflows/build-pattern-scan.yml
 ```
 
-離線訊號 workflow 預設每天台北時間 19:00 執行，會產生當天 D1 型態與
-`09:05` activity（ATR / 5分幅 / 量PR）並上傳到 HF。第一次初始化最近三個月時，
+離線訊號 workflow 預設每天台北時間 19:00 執行，會產生當天 D1 型態、
+`09:05` activity（ATR / 5分幅 / 量PR），以及歷史查表用的
+VWAP/SR/MACD/OBV/chg bundle，並上傳到 HF。第一次初始化最近三個月時，
 可以手動 dispatch 並填 `init_months=3`；也可以在本機跑
 `python -m scripts.build_pattern_scan --init-months 3 --upload` 與
-`python -m scripts.build_vwap_activity --init-months 3 --upload`。
+`python -m scripts.build_vwap_activity --init-months 3 --upload`、
+`python -m scripts.build_vwap_signals --init-months 3 --upload`。
+
+Oracle backend 也預設 19:00 同步 HF；若 GHA 還沒把當天 `vwap_signals`
+上傳完成，backend 會保留這次同步未完成狀態，30 分鐘後自動重試。
 
 GitHub repo 需要設定這些 Secrets / Variables：
 
@@ -295,6 +300,7 @@ runtime 目錄用 bind mount 留在 VM：
 - `db/m1`, `db/m5_std`：rolling 24 個月份。
 - `db/pattern_scan/d1`：離線 D1 型態掃描結果，按月 parquet shard 全量保留。
 - `db/vwap_activity`：離線 09:05 activity 結果，按月 parquet shard 全量保留。
+- `db/vwap_signals`：離線 VWAP/SR/MACD/OBV/chg 結果，按月 parquet shard 全量保留。
 - `db/m1_live`：最近 14 個交易檔。
 - `log`：最近 7 個日曆天。
 - `logs`：最近 14 個日曆天。
@@ -326,17 +332,19 @@ docker compose -f docker-compose.oracle.yml logs -f backend
 docker compose -f docker-compose.oracle.yml exec backend python -m scripts.sync_market_db_from_hf
 
 # 只同步離線查表資料
-docker compose -f docker-compose.oracle.yml exec backend python -m scripts.sync_market_db_from_hf --only pattern_scan vwap_activity
+docker compose -f docker-compose.oracle.yml exec backend python -m scripts.sync_market_db_from_hf --only pattern_scan vwap_activity vwap_signals
 
 # 本機第一次初始化最近 3 個月 D1 型態並上傳 HF
 cd backend
 python -m scripts.build_pattern_scan --init-months 3 --upload
 python -m scripts.build_vwap_activity --init-months 3 --upload
+python -m scripts.build_vwap_signals --init-months 3 --upload
 
 # 本機或 GitHub Actions 手動補單日離線訊號
 cd backend
 python -m scripts.build_pattern_scan --date 2026-09-04 --upload
 python -m scripts.build_vwap_activity --date 2026-09-04 --upload
+python -m scripts.build_vwap_signals --date 2026-09-04 --upload
 
 # 手動調成保留 36 個月分K
 docker compose -f docker-compose.oracle.yml exec backend python -m scripts.sync_market_db_from_hf --intraday-months 36
@@ -370,4 +378,4 @@ du -sh backend/db backend/log backend/logs backend/.cache
 - 1GB RAM 偏緊，建議保留 2GB swap；build 或 HF sync 時尤其有幫助。
 - 公開 IP `129.225.130.75` 若不是 Reserved Public IP，重開機後有機會改變。
 - 目前只有 HTTP。要 HTTPS 可以接 Cloudflare、Caddy，或在 OCI 上另外放反向代理。
-- 第一輪 HF sync 會下載 rolling 24 個月的 `m1` / `m5_std`，第一次啟動會比平常久；離線訊號只下載 `pattern_scan` / `vwap_activity` 小檔時會快很多。
+- 第一輪 HF sync 會下載 rolling 24 個月的 `m1` / `m5_std`，第一次啟動會比平常久；離線訊號只下載 `pattern_scan` / `vwap_activity` / `vwap_signals` 小檔時會快很多。

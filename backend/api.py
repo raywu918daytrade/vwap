@@ -324,6 +324,27 @@ def _scan_vwap_sr(date_str: str, universe: str = "daytrade") -> tuple[list, list
     return list(reversed(vwap)), list(reversed(sr))
 
 
+def _today_str() -> str:
+    return datetime.now(_TW).strftime("%Y-%m-%d")
+
+
+def _historical_vwap_bundle(date_str: str, universe: str = "daytrade") -> dict:
+    """Read HF-synced historical intraday signals for API responses."""
+    from pattern.vwap_signal_store import read_vwap_signals
+    from pattern.vwap_sr_scan import stock_ids_for_universe
+
+    bundle = read_vwap_signals(date_str, stock_ids=stock_ids_for_universe(universe))
+    return bundle or {
+        "vwap": [],
+        "sr": [],
+        "macd": {},
+        "obv": {},
+        "chg": {},
+        "sr_levels": {},
+        "m1_bars": 0,
+    }
+
+
 def _catchup_today_into_memory() -> tuple[list, list]:
     global _vwap_macd_live, _vwap_obv_live, _vwap_chg
     today = datetime.now(_TW).strftime("%Y-%m-%d")
@@ -409,6 +430,8 @@ def vwap_chg_today():
 @app.get("/vwap_breakout/today", tags=["VWAP"], summary="VWAP 突破/跌破清單")
 def vwap_breakout_today(date: Optional[str] = None, universe: str = "daytrade"):
     if date:
+        if str(date)[:10] != _today_str():
+            return _historical_vwap_bundle(str(date)[:10], universe=universe)["vwap"]
         vwap, _ = _scan_vwap_sr(date, universe=universe)
         return vwap
     with _lock:
@@ -418,6 +441,8 @@ def vwap_breakout_today(date: Optional[str] = None, universe: str = "daytrade"):
 @app.get("/sr_vwap_cross/today", tags=["VWAP"], summary="VWAP + 壓力/支撐穿越清單")
 def sr_vwap_cross_today(date: Optional[str] = None, universe: str = "daytrade"):
     if date:
+        if str(date)[:10] != _today_str():
+            return _historical_vwap_bundle(str(date)[:10], universe=universe)["sr"]
         _, sr = _scan_vwap_sr(date, universe=universe)
         return sr
     with _lock:
@@ -434,12 +459,22 @@ def vwap_sr_catchup():
 def vwap_sr_replay(date: str, universe: str = "daytrade"):
     from pattern.vwap_sr_scan import last_chg_map, last_m1_bars
 
+    date_str = str(date)[:10]
+    if date_str != _today_str():
+        bundle = _historical_vwap_bundle(date_str, universe=universe)
+        return {
+            "vwap": bundle["vwap"],
+            "sr": bundle["sr"],
+            "m1_bars": bundle["m1_bars"],
+            "chg": bundle["chg"],
+        }
+
     vwap, sr = _scan_vwap_sr(date, universe=universe)
     return {
         "vwap": vwap,
         "sr": sr,
-        "m1_bars": last_m1_bars(date, universe),
-        "chg": last_chg_map(date, universe=universe),
+        "m1_bars": last_m1_bars(date_str, universe),
+        "chg": last_chg_map(date_str, universe=universe),
     }
 
 
@@ -455,6 +490,8 @@ def vwap_activity(date: Optional[str] = None, universe: str = "daytrade"):
 def vwap_macd_div(date: Optional[str] = None, universe: str = "daytrade"):
     date_str = date or datetime.now(_TW).strftime("%Y-%m-%d")
     today = datetime.now(_TW).strftime("%Y-%m-%d")
+    if date_str != today:
+        return {"date": date_str, "stocks": _historical_vwap_bundle(date_str, universe=universe)["macd"]}
     if date_str == today:
         with _lock:
             if _vwap_macd_live is not None:
@@ -468,6 +505,8 @@ def vwap_macd_div(date: Optional[str] = None, universe: str = "daytrade"):
 def vwap_obv_div(date: Optional[str] = None, universe: str = "daytrade"):
     date_str = date or datetime.now(_TW).strftime("%Y-%m-%d")
     today = datetime.now(_TW).strftime("%Y-%m-%d")
+    if date_str != today:
+        return {"date": date_str, "stocks": _historical_vwap_bundle(date_str, universe=universe)["obv"]}
     if date_str == today:
         with _lock:
             if _vwap_obv_live is not None:
@@ -475,6 +514,19 @@ def vwap_obv_div(date: Optional[str] = None, universe: str = "daytrade"):
     from pattern.vwap_obv_div import metrics_for_date
 
     return {"date": date_str, "stocks": metrics_for_date(date_str, universe=universe)}
+
+
+@app.get("/vwap_signal/dates", tags=["VWAP"], summary="取得已有離線盤勢資料的日期")
+def vwap_signal_dates():
+    from pattern.offline_store import available_scan_dates
+    from pattern.vwap_signal_store import available_signal_dates
+
+    dates = sorted(set(available_scan_dates()) | set(available_signal_dates()))
+    return {
+        "dates": dates,
+        "latest": dates[-1] if dates else None,
+        "total": len(dates),
+    }
 
 
 @app.get("/chart/{stock_id}/candles", tags=["圖表"], summary="今日即時 M1 K 線")
@@ -496,26 +548,23 @@ def chart_candles_history(
     if interval != "1m":
         raise HTTPException(status_code=400, detail="目前只支援 interval=1m")
 
-    from data.m1_data_loader import _download_m1
+    from pattern.data_loader import get_stock_candles
 
     try:
-        df = _download_m1(str(stock_id))
+        df = get_stock_candles(
+            str(stock_id),
+            timeframe="1m",
+            date=str(date)[:10],
+            limit=100000,
+            full_day=True,
+        )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"向 Fugle 取得歷史分K失敗: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"讀取本機/HF 歷史分K失敗: {exc}") from exc
     if df.empty:
-        raise HTTPException(status_code=404, detail=f"{stock_id} 查無歷史分K資料")
+        raise HTTPException(status_code=404, detail=f"{stock_id} 在 {date} 沒有分K資料")
 
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"], format="mixed")
-    day_start = pd.Timestamp(date)
-    day_end = day_start + pd.Timedelta(days=1)
-    df = df[(df["date"] >= day_start) & (df["date"] < day_end)]
-    if df.empty:
-        raise HTTPException(
-            status_code=404,
-            detail=f"{stock_id} 在 {date} 沒有分K資料（Fugle 歷史 API 僅能查近30日，或該日非交易日）",
-        )
-
     df["_minute"] = df["date"].dt.strftime("%H:%M")
     if start_time:
         df = df[df["_minute"] >= start_time]

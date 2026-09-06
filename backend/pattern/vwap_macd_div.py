@@ -123,14 +123,11 @@ def _compute(date_str: str, universe: str = "daytrade") -> dict[str, dict]:
 
 def metrics_for_date(date_str: str, universe: str = "daytrade") -> dict[str, dict]:
     universe = normalize_universe(universe)
-    key = (date_str, universe)
     today = datetime.now(_TW).strftime("%Y-%m-%d")
-    with _lock:
-        if date_str != today and key in _cache:
-            return _cache[key]
-        result = _compute(date_str, universe=universe)
-        # 過去日期的 m1 來自 HF 歷史檔，空結果也穩定；cache 起來避免週末/
-        # 尚未保留的日期反覆讀同一個月檔。今天才需要每次重算。
-        if date_str != today:
-            _cache[key] = result
-        return result
+    if date_str != today:
+        from pattern.vwap_signal_store import read_vwap_signals
+        from pattern.vwap_sr_scan import stock_ids_for_universe
+
+        bundle = read_vwap_signals(date_str, stock_ids=stock_ids_for_universe(universe))
+        return (bundle or {}).get("macd", {})
+    return _compute(date_str, universe=universe)

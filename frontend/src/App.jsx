@@ -1013,7 +1013,7 @@ export default function App() {
     let stopped = false;
     async function loadPatternScanDates() {
       try {
-        const data = await fetchJson("/api/pattern/scan/dates");
+        const data = await fetchJson("/vwap_signal/dates");
         if (!stopped) setPatternScanDates(data.dates || []);
       } catch {
         if (!stopped) setPatternScanDates([]);

@@ -24,7 +24,7 @@ Required environment variables in `backend/.env`:
 
 Examples:
     python -m scripts.sync_market_db_from_hf
-    python -m scripts.sync_market_db_from_hf --only m1 m5_std d1 adjustment_day pattern_scan tickers
+    python -m scripts.sync_market_db_from_hf --only m1 m5_std d1 adjustment_day pattern_scan vwap_activity vwap_signals tickers
     python -m scripts.sync_market_db_from_hf --intraday-months 36
     python -m scripts.sync_market_db_from_hf --m1-live-files 30
     python -m scripts.sync_market_db_from_hf --sdk-log-days 3 --app-log-days 7
@@ -63,6 +63,7 @@ DEFAULT_MARKET_DB_SYNC_FOLDERS = [
     "tick_adjust_factor",
     "pattern_scan",
     "vwap_activity",
+    "vwap_signals",
     "m1_flags",
     "d1_flags",
     "adjustment_day_flags",

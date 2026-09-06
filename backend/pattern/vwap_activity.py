@@ -288,7 +288,7 @@ def metrics_for_date(date_str: str, universe: str = "daytrade") -> dict[str, dic
         if date_str != today and key in _cache:
             return _cache[key]
 
-    from pattern.activity_store import has_activity_store, read_vwap_activity
+    from pattern.activity_store import read_vwap_activity
 
     offline = read_vwap_activity(date_str, stock_ids=stock_ids)
     if offline is not None:
@@ -297,7 +297,7 @@ def metrics_for_date(date_str: str, universe: str = "daytrade") -> dict[str, dic
                 with _lock:
                     _cache[key] = offline
             return offline
-    if date_str != today and has_activity_store():
+    if date_str != today:
         with _lock:
             _cache[key] = {}
         return {}

@@ -265,12 +265,20 @@ def _horizontal_sr_lines(df: pd.DataFrame, to_epoch, stock_id: str) -> List[Dict
     （使用者實測3443：D1顯示5956.51，m1疊圖顯示5337.50，差了快12%，見
     對話紀錄）。改成直接呼叫 sr_levels_for_date()，兩邊共用同一個計算＋
     同一份cache，不會再各自維護一套邏輯、以後也不會再漂移。"""
-    from pattern.vwap_sr_scan import sr_levels_for_date
-
     if df is None or df.empty or len(df) < 25:
         return []
     date_str = str(df["date"].iloc[-1])[:10]
-    res, sup = sr_levels_for_date(date_str, {str(stock_id)}).get(str(stock_id), (None, None))
+    today = pd.Timestamp.now(tz="Asia/Taipei").strftime("%Y-%m-%d")
+    if date_str != today:
+        from pattern.vwap_signal_store import read_vwap_signals
+
+        bundle = read_vwap_signals(date_str, stock_ids={str(stock_id)})
+        levels = (bundle or {}).get("sr_levels", {}).get(str(stock_id), {})
+        res, sup = levels.get("resistance"), levels.get("support")
+    else:
+        from pattern.vwap_sr_scan import sr_levels_for_date
+
+        res, sup = sr_levels_for_date(date_str, {str(stock_id)}).get(str(stock_id), (None, None))
     if res is None and sup is None:
         return []
 

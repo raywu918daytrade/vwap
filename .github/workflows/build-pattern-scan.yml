@@ -58,7 +58,7 @@ jobs:
             fi
           fi
           python -m scripts.sync_market_db_from_hf \
-            --only m5_std d1 adjustment_day tickers adjustment_factor tick_adjust_factor pattern_scan vwap_activity d1_flags adjustment_day_flags \
+            --only m1 m5_std d1 adjustment_day tickers adjustment_factor tick_adjust_factor pattern_scan vwap_activity vwap_signals d1_flags adjustment_day_flags \
             --intraday-months "${SYNC_INTRADAY_MONTHS}" \
             --no-prune
 
@@ -70,11 +70,14 @@ jobs:
           if [ -n "${INIT_MONTHS:-}" ]; then
             python -m scripts.build_pattern_scan --init-months "${INIT_MONTHS}" --upload
             python -m scripts.build_vwap_activity --init-months "${INIT_MONTHS}" --upload
+            python -m scripts.build_vwap_signals --init-months "${INIT_MONTHS}" --upload
           elif [ -n "${TARGET_DATE:-}" ]; then
             python -m scripts.build_pattern_scan --date "${TARGET_DATE}" --upload
             python -m scripts.build_vwap_activity --date "${TARGET_DATE}" --upload
+            python -m scripts.build_vwap_signals --date "${TARGET_DATE}" --upload
           else
             TARGET="$(TZ=Asia/Taipei date +%F)"
             python -m scripts.build_pattern_scan --date "${TARGET}" --upload
             python -m scripts.build_vwap_activity --date "${TARGET}" --upload
+            python -m scripts.build_vwap_signals --date "${TARGET}" --upload
           fi
