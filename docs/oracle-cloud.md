@@ -91,7 +91,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 跑完 `usermod` 後重新登入 SSH，讓 `ubuntu` 使用者拿到 docker group 權限。
 
-## GitHub 存取
+## GitHub Actions 自動部署
 
 repo 是 private：
 
@@ -99,20 +99,67 @@ repo 是 private：
 https://github.com/raywu918daytrade/vwap
 ```
 
-建議在 VM 產生一把 deploy key，放到 GitHub repo 的 Deploy keys：
+部署方向是 GitHub Actions SSH 到 Oracle VM，把目前 commit 打包成 release
+archive 上傳，再在 VM 上 build / restart Docker Compose。VM 不需要 clone private
+repo，也不要放 `GITHUB_DAY_TRADE` token。
 
-```bash
-ssh-keygen -t ed25519 -C "oracle-vwap" -f ~/.ssh/id_ed25519
-cat ~/.ssh/id_ed25519.pub
+自動部署 workflow：
+
+```text
+.github/workflows/deploy-oracle.yml
 ```
 
-把公鑰加到 GitHub 後，用 SSH clone：
+每次 push 到 `main`，或手動在 GitHub Actions 按 `workflow_dispatch`，都會部署到
+`/home/ubuntu/vwap`。
+
+GitHub repo 需要設定這些 Secrets / Variables：
+
+必填 Secret：
+
+- `ORACLE_SSH_PRIVATE_KEY`：GitHub Actions 登入 Oracle VM 用的私鑰。
+
+建議 Secret：
+
+- `ORACLE_KNOWN_HOSTS`：Oracle VM 的 SSH known_hosts 指紋，避免每次用
+  `ssh-keyscan` 動態取得。
+
+可選 Variables（不設就用預設值）：
+
+- `ORACLE_HOST`：預設 `129.225.130.75`
+- `ORACLE_USER`：預設 `ubuntu`
+- `ORACLE_PORT`：預設 `22`
+- `ORACLE_DEPLOY_PATH`：預設 `/home/ubuntu/vwap`
+
+建議產生一把只給 GitHub Actions 用的 SSH key，不要用自己的日常登入私鑰：
 
 ```bash
-git clone git@github.com:raywu918daytrade/vwap.git ~/vwap
+ssh-keygen -t ed25519 -C "github-actions-vwap" -f /tmp/vwap_oracle_deploy -N ""
 ```
 
-不要把本機用來 push 的 `GITHUB_DAY_TRADE` token 放到雲端 `.env`。
+把公鑰加到 Oracle VM：
+
+```bash
+cat /tmp/vwap_oracle_deploy.pub | ssh ubuntu@129.225.130.75 \
+  'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
+```
+
+把私鑰放到 GitHub Secret：
+
+```bash
+gh secret set ORACLE_SSH_PRIVATE_KEY --repo raywu918daytrade/vwap < /tmp/vwap_oracle_deploy
+```
+
+建議也把 known_hosts 固定下來：
+
+```bash
+ssh-keyscan -H 129.225.130.75 | gh secret set ORACLE_KNOWN_HOSTS --repo raywu918daytrade/vwap
+```
+
+設定完成後刪掉本機暫存私鑰：
+
+```bash
+rm -f /tmp/vwap_oracle_deploy /tmp/vwap_oracle_deploy.pub
+```
 
 ## 第一次部署
 
@@ -170,11 +217,30 @@ curl http://129.225.130.75/health
 
 ## 更新部署
 
+平常不用 SSH 手動更新；push 到 `main` 後 GitHub Actions 會自動部署。
+
+部署腳本：
+
+```text
+scripts/deploy_oracle.sh
+```
+
+部署時會保留 VM 上的 runtime/secret：
+
+- `backend/.env`
+- `backend/db`
+- `backend/log`
+- `backend/logs`
+- `backend/.cache`
+
+其他 source code 會以目前 commit 覆蓋，避免舊檔案殘留。
+
+若 GitHub Actions 暫時不能用，才手動部署：
+
 ```bash
 ssh ubuntu@129.225.130.75
 cd ~/vwap
-git pull
-docker compose -f docker-compose.oracle.yml up -d --build
+docker compose -f docker-compose.oracle.yml up -d --build --remove-orphans
 ```
 
 若只要重啟服務：

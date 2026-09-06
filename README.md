@@ -38,6 +38,8 @@ docker compose -f docker-compose.oracle.yml up -d --build
 
 對外只需要開 HTTP `80`；前端 Nginx 會 serve React build，並把 API、SSE 與圖表資料 proxy 到後端。完整步驟見 `docs/oracle-cloud.md`。
 
+push 到 `main` 後會由 GitHub Actions 自動部署到 Oracle Cloud；workflow 會保留雲端 `backend/.env`、`backend/db`、`backend/log*` 與 HF cache，只替換程式碼並重建 compose。
+
 ## 保留功能
 
 - VWAP框：`/vwap_sr_replay`、`/vwap_breakout/today`、`/sr_vwap_cross/today`、`/vwap_activity`、`/vwap_macd_div`、`/vwap_obv_div`，並整合 `/api/pattern/types`、`/api/pattern/scan/submit` 型態掃描結果
