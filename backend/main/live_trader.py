@@ -112,6 +112,8 @@ def _start_cache_prewarm(reason: str) -> None:
     list_date_limit = CACHE_PREWARM_STARTUP_LIST_DATES if reason == "startup" else 0
     chart_date_limit = CACHE_PREWARM_STARTUP_CHART_DATES if reason == "startup" else CACHE_PREWARM_CHART_DATES
     chart_month_limit = min(CACHE_PREWARM_CHART_MONTHS, month_limit)
+    if reason == "startup" and chart_date_limit <= 0:
+        chart_month_limit = 0
     if month_limit <= 0:
         return
 
