@@ -1723,13 +1723,28 @@ export default function App() {
                       </th>
                       {patternColumns.map((type) => {
                         const style = patternSideStyle(type);
+                        const checked = selectedPatternTypes.includes(type.id);
                         return (
                           <th
                             key={type.id}
                             className={`cursor-pointer border-l border-base-300/40 text-center ${style.head}`}
                             onClick={() => sortVwap(`pattern:${type.id}`)}
                           >
-                            {type.name}
+                            <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
+                              <span>{type.name}</span>
+                              <input
+                                type="checkbox"
+                                className="checkbox checkbox-xs"
+                                checked={checked}
+                                title={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`}
+                                aria-label={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`}
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) => {
+                                  event.stopPropagation();
+                                  togglePatternType(type.id);
+                                }}
+                              />
+                            </div>
                           </th>
                         );
                       })}
