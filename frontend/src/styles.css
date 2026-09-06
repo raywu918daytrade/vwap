@@ -162,3 +162,18 @@ body {
     max-width: 100% !important;
   }
 }
+
+/* Keep the compact header health/version line visible on phones as well. */
+@media (max-width: 767px) {
+  .hidden.items-center.gap-3.text-xs.text-base-content\/60.md\:flex {
+    display: flex !important;
+    gap: 0.4rem;
+    font-size: 0.625rem;
+    white-space: nowrap;
+  }
+
+  .hidden.items-center.gap-3.text-xs.text-base-content\/60.md\:flex > span:first-child,
+  .hidden.items-center.gap-3.text-xs.text-base-content\/60.md\:flex > span:nth-child(2) {
+    display: none;
+  }
+}
