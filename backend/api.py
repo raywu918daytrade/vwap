@@ -12,7 +12,10 @@ Kept surfaces:
 from __future__ import annotations
 
 import asyncio
+import gzip
+import hashlib
 import json
+import os
 import threading
 import time as _time_mod
 from collections import deque
@@ -103,6 +106,96 @@ _vwap_chg: dict[str, float] = {}
 
 _system_logs: deque = deque(maxlen=500)
 _LOG_DIR = Path(__file__).parent / "logs"
+_VWAP_BUNDLE_CACHE: dict[tuple, dict] = {}
+_VWAP_BUNDLE_CACHE_ORDER: deque = deque()
+_VWAP_BUNDLE_CACHE_LIMIT = max(3, int(os.environ.get("VWAP_BUNDLE_CACHE_DATES", "80")))
+_VWAP_BUNDLE_DISK_CACHE_DIR = Path(os.environ.get(
+    "VWAP_BUNDLE_CACHE_DIR",
+    Path(__file__).parent / ".cache/vwap_bundle",
+))
+_VWAP_BUNDLE_DISK_CACHE_ENABLED = os.environ.get("VWAP_BUNDLE_DISK_CACHE", "1").lower() not in {"0", "false", "no"}
+_vwap_bundle_cache_lock = threading.Lock()
+
+
+def _mtime_token(path: Path) -> str:
+    try:
+        return str(int(path.stat().st_mtime_ns))
+    except OSError:
+        return "missing"
+
+
+def _vwap_bundle_source_version(date_str: str) -> str:
+    month = date_str[:7].replace("-", "_")
+    paths = [
+        Path(__file__).parent / f"db/vwap_signals/{month}.parquet",
+        Path(__file__).parent / f"db/vwap_activity/{month}.parquet",
+        Path(__file__).parent / "db/tickers/tick_universe.parquet",
+    ]
+    return "|".join(f"{p.name}:{_mtime_token(p)}" for p in paths)
+
+
+def _vwap_bundle_cache_key(date_str: str, universe: str, repeat: bool) -> tuple:
+    return (date_str, universe or "daytrade", bool(repeat), _vwap_bundle_source_version(date_str))
+
+
+def _vwap_bundle_disk_cache_path(cache_key: tuple) -> Path:
+    raw = json.dumps(cache_key, ensure_ascii=True, separators=(",", ":"))
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    date_part = str(cache_key[0]).replace("/", "-")
+    return _VWAP_BUNDLE_DISK_CACHE_DIR / date_part / digest[:2] / f"{digest}.json.gz"
+
+
+def _read_vwap_bundle_cache(cache_key: tuple) -> dict | None:
+    with _vwap_bundle_cache_lock:
+        cached = _VWAP_BUNDLE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    if not _VWAP_BUNDLE_DISK_CACHE_ENABLED:
+        return None
+    path = _vwap_bundle_disk_cache_path(cache_key)
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+    _remember_vwap_bundle_cache(cache_key, payload)
+    return payload
+
+
+def _remember_vwap_bundle_cache(cache_key: tuple, payload: dict) -> None:
+    with _vwap_bundle_cache_lock:
+        _VWAP_BUNDLE_CACHE[cache_key] = payload
+        if cache_key in _VWAP_BUNDLE_CACHE_ORDER:
+            _VWAP_BUNDLE_CACHE_ORDER.remove(cache_key)
+        _VWAP_BUNDLE_CACHE_ORDER.append(cache_key)
+        while len(_VWAP_BUNDLE_CACHE_ORDER) > _VWAP_BUNDLE_CACHE_LIMIT:
+            oldest = _VWAP_BUNDLE_CACHE_ORDER.popleft()
+            _VWAP_BUNDLE_CACHE.pop(oldest, None)
+
+
+def _write_vwap_bundle_disk_cache(cache_key: tuple, payload: dict) -> None:
+    if not _VWAP_BUNDLE_DISK_CACHE_ENABLED:
+        return
+    path = _vwap_bundle_disk_cache_path(cache_key)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with gzip.open(path, "wt", encoding="utf-8", compresslevel=4) as fh:
+            json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        pass
+
+
+def clear_vwap_bundle_cache() -> None:
+    """Clear in-memory historical bundle cache after HF refresh."""
+    with _vwap_bundle_cache_lock:
+        _VWAP_BUNDLE_CACHE.clear()
+        _VWAP_BUNDLE_CACHE_ORDER.clear()
 
 
 def _reset_if_new_day() -> None:
@@ -551,9 +644,13 @@ def vwap_signal_bundle(date: Optional[str] = None, universe: str = "daytrade", r
     date_str = (date or _today_str())[:10]
     today = _today_str()
     if date_str != today:
+        cache_key = _vwap_bundle_cache_key(date_str, universe, repeat)
+        cached = _read_vwap_bundle_cache(cache_key)
+        if cached is not None:
+            return cached
         bundle = _historical_vwap_bundle(date_str, universe=universe)
         vwap_rows = bundle["vwap"] if repeat else _latest_signal_by_stock(bundle["vwap"])
-        return {
+        result = {
             "date": date_str,
             "vwap": vwap_rows,
             "sr": bundle["sr"],
@@ -563,6 +660,9 @@ def vwap_signal_bundle(date: Optional[str] = None, universe: str = "daytrade", r
             "macd": bundle["macd"],
             "obv": bundle["obv"],
         }
+        _remember_vwap_bundle_cache(cache_key, result)
+        _write_vwap_bundle_disk_cache(cache_key, result)
+        return result
 
     with _lock:
         vwap_rows = list(reversed(_vwap_breakout_signals))

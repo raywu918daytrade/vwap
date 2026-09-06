@@ -12,6 +12,7 @@ import uvicorn
 
 from api import (
     append_system_log as _log_sys,
+    clear_vwap_bundle_cache as _clear_vwap_bundle_cache,
     get_uvicorn_config,
     push_candles,
     push_quote,
@@ -97,6 +98,7 @@ def _clear_after_hf_sync() -> None:
     """Refresh in-process caches after HF updates local historical data."""
     global _last_vwap_catchup_date
     _startup_data.clear_market_query_caches()
+    _clear_vwap_bundle_cache()
     _prev_close_cache.clear()
     _last_vwap_catchup_date = ""
 

@@ -217,7 +217,12 @@ _DETAIL_DISK_CACHE_DIR = Path(os.environ.get(
     "PATTERN_DETAIL_CACHE_DIR",
     Path(__file__).parent.parent / ".cache/pattern_detail",
 ))
+_SCAN_DISK_CACHE_DIR = Path(os.environ.get(
+    "PATTERN_SCAN_CACHE_DIR",
+    Path(__file__).parent.parent / ".cache/pattern_scan",
+))
 _DETAIL_DISK_CACHE_ENABLED = os.environ.get("PATTERN_DETAIL_DISK_CACHE", "1").lower() not in {"0", "false", "no"}
+_SCAN_DISK_CACHE_ENABLED = os.environ.get("PATTERN_SCAN_DISK_CACHE", "1").lower() not in {"0", "false", "no"}
 
 
 def _month_file_mtime(path: Path) -> str:
@@ -247,20 +252,30 @@ def _historical_detail_version(timeframe: str, date: str, pattern_type: str) -> 
     return "historical:" + "|".join(f"{p.name}:{_month_file_mtime(p)}" for p in paths)
 
 
-def _detail_disk_cache_path(cache_key: tuple) -> Path:
+def _historical_scan_version(date: str) -> str:
+    month = str(date)[:7].replace("-", "_")
+    path = Path(__file__).parent.parent / f"db/pattern_scan/d1/{month}.parquet"
+    return f"{path.name}:{_month_file_mtime(path)}"
+
+
+def _disk_cache_path(cache_dir: Path, cache_key: tuple) -> Path:
     raw = json.dumps(cache_key, ensure_ascii=True, default=str, separators=(",", ":"))
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()
-    date_part = str(cache_key[3] or "latest").replace("/", "-")
-    return _DETAIL_DISK_CACHE_DIR / date_part / digest[:2] / f"{digest}.json.gz"
+    date_part = "unknown"
+    for part in cache_key:
+        text = str(part)
+        if len(text) >= 10 and text[4:5] == "-" and text[7:8] == "-":
+            date_part = text[:10]
+            break
+    return cache_dir / date_part / digest[:2] / f"{digest}.json.gz"
 
 
-def _read_detail_disk_cache(cache_key: tuple) -> Optional[Dict[str, Any]]:
-    if not _DETAIL_DISK_CACHE_ENABLED or cache_key[3] == "latest":
-        return None
-    path = _detail_disk_cache_path(cache_key)
+def _read_json_disk_cache(cache_dir: Path, cache_key: tuple) -> Optional[Dict[str, Any]]:
+    path = _disk_cache_path(cache_dir, cache_key)
     try:
         with gzip.open(path, "rt", encoding="utf-8") as fh:
-            return json.load(fh)
+            payload = json.load(fh)
+        return payload if isinstance(payload, dict) else None
     except FileNotFoundError:
         return None
     except Exception:
@@ -271,10 +286,8 @@ def _read_detail_disk_cache(cache_key: tuple) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _write_detail_disk_cache(cache_key: tuple, payload: Dict[str, Any]) -> None:
-    if not _DETAIL_DISK_CACHE_ENABLED or cache_key[3] == "latest":
-        return
-    path = _detail_disk_cache_path(cache_key)
+def _write_json_disk_cache(cache_dir: Path, cache_key: tuple, payload: Dict[str, Any]) -> None:
+    path = _disk_cache_path(cache_dir, cache_key)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with gzip.open(path, "wt", encoding="utf-8", compresslevel=4) as fh:
@@ -283,12 +296,28 @@ def _write_detail_disk_cache(cache_key: tuple, payload: Dict[str, Any]) -> None:
         pass
 
 
-def _clear_detail_disk_cache() -> int:
-    if not _DETAIL_DISK_CACHE_DIR.exists():
+def _clear_json_disk_cache(cache_dir: Path) -> int:
+    if not cache_dir.exists():
         return 0
-    count = sum(1 for p in _DETAIL_DISK_CACHE_DIR.rglob("*.json.gz") if p.is_file())
-    shutil.rmtree(_DETAIL_DISK_CACHE_DIR, ignore_errors=True)
+    count = sum(1 for p in cache_dir.rglob("*.json.gz") if p.is_file())
+    shutil.rmtree(cache_dir, ignore_errors=True)
     return count
+
+
+def _read_detail_disk_cache(cache_key: tuple) -> Optional[Dict[str, Any]]:
+    if not _DETAIL_DISK_CACHE_ENABLED or cache_key[3] == "latest":
+        return None
+    return _read_json_disk_cache(_DETAIL_DISK_CACHE_DIR, cache_key)
+
+
+def _write_detail_disk_cache(cache_key: tuple, payload: Dict[str, Any]) -> None:
+    if not _DETAIL_DISK_CACHE_ENABLED or cache_key[3] == "latest":
+        return
+    _write_json_disk_cache(_DETAIL_DISK_CACHE_DIR, cache_key, payload)
+
+
+def _clear_detail_disk_cache() -> int:
+    return _clear_json_disk_cache(_DETAIL_DISK_CACHE_DIR)
 
 
 def reload_universe_cache() -> None:
@@ -401,14 +430,16 @@ def clear_pattern_cache() -> Dict[str, Any]:
     """清空記憶體與磁碟中的 Pattern 掃描與詳情快取。"""
     scan_count = len(_SCAN_CACHE)
     detail_count = len(_DETAIL_CACHE)
-    disk_count = _clear_detail_disk_cache()
+    scan_disk_count = _clear_json_disk_cache(_SCAN_DISK_CACHE_DIR)
+    detail_disk_count = _clear_detail_disk_cache()
     _SCAN_CACHE.clear()
     _DETAIL_CACHE.clear()
     return {
         "ok": True,
         "message": (
             f"已清空快取 (scan 快取: {scan_count} 筆, "
-            f"detail 記憶體快取: {detail_count} 筆, detail 磁碟快取: {disk_count} 筆)"
+            f"scan 磁碟快取: {scan_disk_count} 筆, "
+            f"detail 記憶體快取: {detail_count} 筆, detail 磁碟快取: {detail_disk_count} 筆)"
         ),
     }
 
@@ -469,18 +500,29 @@ def scan_patterns(
     timeframe = _normalize_scan_timeframe(timeframe)
     del limit
     selected_types = _selected_pattern_types(pattern_type)
+    effective_date = date
+    if not effective_date:
+        dates = available_scan_dates()
+        effective_date = dates[-1] if dates else None
+    date_key = _date_text(effective_date) or "latest"
     cache_key = (
         "offline_scan",
         pattern_type,
         tuple(selected_types),
         timeframe,
-        date or "latest",
+        date_key,
         float(min_score),
+        _historical_scan_version(date_key) if date_key != "latest" else "missing",
     )
     if cache_key in _SCAN_CACHE:
         return _SCAN_CACHE[cache_key]
+    if _SCAN_DISK_CACHE_ENABLED and date_key != "latest":
+        cached = _read_json_disk_cache(_SCAN_DISK_CACHE_DIR, cache_key)
+        if cached is not None:
+            _SCAN_CACHE[cache_key] = cached
+            return cached
     scan_date, matches = read_pattern_scan(
-        date,
+        effective_date,
         selected_types,
         min_score=float(min_score),
         include_payload=False,
@@ -495,6 +537,8 @@ def scan_patterns(
         "results": matches,
     }
     _SCAN_CACHE[cache_key] = result
+    if _SCAN_DISK_CACHE_ENABLED and date_key != "latest":
+        _write_json_disk_cache(_SCAN_DISK_CACHE_DIR, cache_key, result)
     return result
 
 

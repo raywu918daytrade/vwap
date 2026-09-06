@@ -50,8 +50,8 @@ def prewarm_historical_caches(
 
     from pattern.pattern_api import get_pattern_detail, scan_patterns
     from pattern.vwap_activity import metrics_for_date
-    from pattern.vwap_signal_store import read_vwap_signals
     from pattern.vwap_sr_scan import stock_ids_for_universe
+    from api import vwap_signal_bundle
 
     dates = _recent_offline_dates(month_limit)
     chart_dates = _chart_dates(dates, chart_month_limit, chart_date_limit)
@@ -70,8 +70,7 @@ def prewarm_historical_caches(
     for date in dates:
         t0 = perf_counter()
         try:
-            read_vwap_signals(date, stock_ids=stock_ids)
-            metrics_for_date(date, universe=universe)
+            vwap_signal_bundle(date=date, universe=universe, repeat=False)
             scan_patterns(pattern_type="all", timeframe="day", date=date, min_score=60.0, limit=120)
             print(
                 f"  [快取預熱] {date} 清單完成 ({perf_counter() - t0:.1f}s)",
@@ -86,7 +85,7 @@ def prewarm_historical_caches(
     for date in chart_dates:
         t0 = perf_counter()
         try:
-            bundle = read_vwap_signals(date, stock_ids=stock_ids) or {}
+            bundle = vwap_signal_bundle(date=date, universe=universe, repeat=False)
             activity = metrics_for_date(date, universe=universe)
             warm_stocks = _chart_stocks_for_date(
                 bundle,
