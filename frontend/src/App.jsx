@@ -726,7 +726,7 @@ export default function App() {
   const [watchDrawerOpen, setWatchDrawerOpen] = useState(false);
   const [focusedPanel, setFocusedPanel] = useState("vwap");
   const [signalLoadedKey, setSignalLoadedKey] = useState("");
-  const [selectedChartDate, setSelectedChartDate] = useState(() => vwapDate);
+  const [selectedChartDate, setSelectedChartDate] = useState(null);
 
   const stockIdRef = useRef(stockId);
   const activeChartDateRef = useRef("");
