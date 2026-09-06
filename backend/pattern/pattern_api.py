@@ -384,6 +384,16 @@ def scan_patterns(
     timeframe = _normalize_scan_timeframe(timeframe)
     del limit
     selected_types = _selected_pattern_types(pattern_type)
+    cache_key = (
+        "offline_scan",
+        pattern_type,
+        tuple(selected_types),
+        timeframe,
+        date or "latest",
+        float(min_score),
+    )
+    if cache_key in _SCAN_CACHE:
+        return _SCAN_CACHE[cache_key]
     scan_date, matches = read_pattern_scan(
         date,
         selected_types,
@@ -399,6 +409,7 @@ def scan_patterns(
         "total_matches": len(matches),
         "results": matches,
     }
+    _SCAN_CACHE[cache_key] = result
     return result
 
 

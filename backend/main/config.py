@@ -25,3 +25,15 @@ MARKET_CLOSE_MIN = int(os.environ.get("MARKET_CLOSE_MIN", "30"))
 # the old "restart in the morning to pull fresh history" workflow.
 HF_DAILY_SYNC_HOUR = int(os.environ.get("HF_DAILY_SYNC_HOUR", "19"))
 HF_DAILY_SYNC_MIN = int(os.environ.get("HF_DAILY_SYNC_MIN", "0"))
+
+# Warm the most common historical reads after startup/HF sync so the first user
+# page load does not pay the parquet cold-read cost on small cloud instances.
+CACHE_PREWARM_MONTHS = max(0, min(3, int(os.environ.get("CACHE_PREWARM_MONTHS", "3"))))
+CACHE_PREWARM_CHART_ROWS = int(os.environ.get("CACHE_PREWARM_CHART_ROWS", "32"))
+CACHE_PREWARM_STOCKS = [
+    s.strip()
+    for s in os.environ.get("CACHE_PREWARM_STOCKS", "0050,2330").split(",")
+    if s.strip()
+]
+CACHE_PREWARM_DAY_ATR = float(os.environ.get("CACHE_PREWARM_DAY_ATR", "0.05"))
+CACHE_PREWARM_VOL5_PR = float(os.environ.get("CACHE_PREWARM_VOL5_PR", "0.5"))

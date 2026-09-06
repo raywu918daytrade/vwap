@@ -11,6 +11,7 @@ Today's live session is still calculated in memory by the realtime collector.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,7 @@ VWAP_SIGNAL_COLUMNS = [
 ]
 EVENT_KINDS = {"vwap", "sr"}
 MAP_KINDS = {"macd", "obv"}
-_CACHE_LIMIT = 3
+_CACHE_LIMIT = max(3, int(os.environ.get("VWAP_SIGNAL_CACHE_DATES", "80")))
 _cache: dict[str, dict[str, Any]] = {}
 _cache_order: list[str] = []
 _lock = threading.Lock()

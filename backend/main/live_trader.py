@@ -28,6 +28,11 @@ from data.query import load_m1_live
 from main import collector as _collector
 from main import startup_data as _startup_data
 from main.config import (
+    CACHE_PREWARM_CHART_ROWS,
+    CACHE_PREWARM_DAY_ATR,
+    CACHE_PREWARM_MONTHS,
+    CACHE_PREWARM_STOCKS,
+    CACHE_PREWARM_VOL5_PR,
     HF_DAILY_SYNC_HOUR,
     HF_DAILY_SYNC_MIN,
     MARKET_CLOSE_HOUR,
@@ -51,6 +56,8 @@ state = AppState()
 _startup_done = threading.Event()
 _last_vwap_catchup_date = ""
 _prev_close_cache: dict[str, tuple[str, float]] = {}
+_prewarm_lock = threading.Lock()
+_prewarm_active = False
 
 
 def _on_vwap_sr_catchup(vwap: list, sr: list) -> None:
@@ -69,6 +76,7 @@ def _startup() -> None:
         sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
         if sync_status in ("synced", "signals_synced"):
             _clear_after_hf_sync()
+        _start_cache_prewarm("startup")
         print("更新富邦即時訂閱清單...", flush=True)
         _startup_data.refresh_fubon_subscription_universe(state)
         print(f"  即時訂閱標的：{len(state.tickers)} 支", flush=True)
@@ -88,6 +96,41 @@ def _clear_after_hf_sync() -> None:
     _startup_data.clear_market_query_caches()
     _prev_close_cache.clear()
     _last_vwap_catchup_date = ""
+
+
+def _start_cache_prewarm(reason: str) -> None:
+    """Warm historical caches in the background without blocking API startup."""
+    if CACHE_PREWARM_MONTHS <= 0:
+        return
+
+    def _run() -> None:
+        global _prewarm_active
+        with _prewarm_lock:
+            if _prewarm_active:
+                print(f"[快取預熱] 已在執行中，略過 {reason}", flush=True)
+                return
+            _prewarm_active = True
+        try:
+            from main.cache_warmup import prewarm_historical_caches
+
+            print(f"[快取預熱] 觸發來源：{reason}", flush=True)
+            prewarm_historical_caches(
+                month_limit=CACHE_PREWARM_MONTHS,
+                chart_rows=CACHE_PREWARM_CHART_ROWS,
+                chart_stocks=CACHE_PREWARM_STOCKS,
+                activity_filters={
+                    "day_atr": CACHE_PREWARM_DAY_ATR,
+                    "vol5_pr": CACHE_PREWARM_VOL5_PR,
+                },
+            )
+        except Exception as exc:
+            print(f"[快取預熱] 失敗: {exc}", flush=True)
+            _log_sys(f"快取預熱失敗: {exc}", "warning")
+        finally:
+            with _prewarm_lock:
+                _prewarm_active = False
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _daily_hf_sync() -> None:
@@ -119,6 +162,7 @@ def _daily_hf_sync() -> None:
                 _log_sys(f"每日 HF 同步尚未取得 {expected_signal_date} 離線盤勢訊號，30 分鐘後重試", "warning")
             elif sync_status in ("synced", "signals_synced"):
                 _clear_after_hf_sync()
+                _start_cache_prewarm("daily-hf-sync")
                 last_sync_date = today
                 next_retry_at = None
                 _log_sys("每日 HF 同步完成：已下載歷史/離線訊號資料並清空查詢快取")
