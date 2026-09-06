@@ -6,6 +6,17 @@ const HISTORICAL_TTL = Number.POSITIVE_INFINITY;
 const LIVE_TTL = 3000;
 const PREFETCH_STOCKS = 10;
 
+// The restored UI still contains one legacy 350ms debounce before loading a
+// selected VWAP/watch-list chart. There is no expensive client-side compute left
+// to debounce, so collapse that legacy delay to the next task without touching
+// the UI component tree. Other timer durations remain unchanged.
+if (typeof window !== "undefined" && !window.__vwapChartDelayRemoved) {
+  const originalSetTimeout = window.setTimeout.bind(window);
+  window.setTimeout = (handler, timeout, ...args) =>
+    originalSetTimeout(handler, Number(timeout) === 350 ? 0 : timeout, ...args);
+  window.__vwapChartDelayRemoved = true;
+}
+
 export function apiUrl(path) {
   const clean = path.startsWith("/") ? path : `/${path}`;
   return `${API_BASE}${clean}`;
@@ -62,7 +73,6 @@ function detailSiblingPaths(path) {
     const timeframe = url.searchParams.get("timeframe");
     if (!stockId || timeframe !== "day") return [];
     const date = url.searchParams.get("date") || "";
-    const limit = Number(url.searchParams.get("limit") || 120);
     const siblings = [
       patternDetailPath(stockId, { timeframe: "1m", date, limit: 120, fullDay: true }),
     ];
@@ -93,6 +103,9 @@ function prefetchFromBundle(path, payload) {
       const sid = String(row?.stock_id || "");
       if (!sid || seen.has(sid)) continue;
       seen.add(sid);
+      // Warm both chart panes. If the user clicks one of these rows, the current
+      // sequential App caller will consume the same in-flight/cache entries.
+      paths.push(patternDetailPath(sid, { timeframe: "day", date, limit: 120 }));
       paths.push(patternDetailPath(sid, { timeframe: "1m", date, limit: 120, fullDay: true }));
       if (seen.size >= PREFETCH_STOCKS) break;
     }
@@ -133,8 +146,8 @@ export async function fetchJson(path, options) {
     if (pending) return pending;
   }
 
-  // When the UI asks for a day chart, start the expensive intraday/index reads
-  // immediately so the old sequential caller can consume already-warm results.
+  // A day-chart request immediately starts its 1m chart and 0050 siblings.
+  // Thus even the legacy sequential caller performs the network/I/O concurrently.
   prefetchPaths(detailSiblingPaths(path));
 
   const request = (async () => {
