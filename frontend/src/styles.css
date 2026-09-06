@@ -39,3 +39,46 @@ body {
 .tv-lightweight-charts {
   font-family: SFMono-Regular, Consolas, Menlo, monospace;
 }
+
+.d1-inline-filters {
+  flex: 0 0 auto;
+  width: auto !important;
+  overflow: visible !important;
+  border-left: 1px solid hsl(var(--bc) / 0.12);
+  margin-left: 0.25rem;
+  padding-left: 0.5rem;
+}
+
+.d1-inline-filters > div:first-child {
+  white-space: nowrap;
+}
+
+.d1-toolbar-hidden-row {
+  display: none !important;
+}
+
+.d1-menu-section-label {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid hsl(var(--bc) / 0.15);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--bc) / 0.7);
+}
+
+.d1-menu-inline {
+  position: static !important;
+  display: block !important;
+  width: 100% !important;
+  max-height: none !important;
+  margin-top: 0.25rem !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.d1-menu-inline > div:first-child {
+  display: none !important;
+}
