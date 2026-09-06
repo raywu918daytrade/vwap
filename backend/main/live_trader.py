@@ -36,6 +36,9 @@ from main.config import (
     CACHE_PREWARM_DAY_ATR,
     CACHE_PREWARM_MONTHS,
     CACHE_PREWARM_STOCKS,
+    CACHE_PREWARM_STARTUP_CHART_DATES,
+    CACHE_PREWARM_STARTUP_LIST_DATES,
+    CACHE_PREWARM_STARTUP_MONTHS,
     CACHE_PREWARM_VOL5_PR,
     HF_DAILY_SYNC_HOUR,
     HF_DAILY_SYNC_MIN,
@@ -105,7 +108,11 @@ def _clear_after_hf_sync() -> None:
 
 def _start_cache_prewarm(reason: str) -> None:
     """Warm historical caches in the background without blocking API startup."""
-    if CACHE_PREWARM_MONTHS <= 0:
+    month_limit = CACHE_PREWARM_STARTUP_MONTHS if reason == "startup" else CACHE_PREWARM_MONTHS
+    list_date_limit = CACHE_PREWARM_STARTUP_LIST_DATES if reason == "startup" else 0
+    chart_date_limit = CACHE_PREWARM_STARTUP_CHART_DATES if reason == "startup" else CACHE_PREWARM_CHART_DATES
+    chart_month_limit = min(CACHE_PREWARM_CHART_MONTHS, month_limit)
+    if month_limit <= 0:
         return
 
     def _run() -> None:
@@ -120,9 +127,10 @@ def _start_cache_prewarm(reason: str) -> None:
 
             print(f"[快取預熱] 觸發來源：{reason}", flush=True)
             prewarm_historical_caches(
-                month_limit=CACHE_PREWARM_MONTHS,
-                chart_month_limit=CACHE_PREWARM_CHART_MONTHS,
-                chart_date_limit=CACHE_PREWARM_CHART_DATES,
+                month_limit=month_limit,
+                list_date_limit=list_date_limit,
+                chart_month_limit=chart_month_limit,
+                chart_date_limit=chart_date_limit,
                 chart_rows=CACHE_PREWARM_CHART_ROWS,
                 chart_stocks=CACHE_PREWARM_STOCKS,
                 activity_filters={

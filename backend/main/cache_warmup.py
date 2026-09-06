@@ -36,6 +36,7 @@ def prewarm_historical_caches(
     chart_rows: int,
     chart_stocks: list[str],
     activity_filters: dict[str, float],
+    list_date_limit: int = 0,
     chart_pause_sec: float = 0.0,
     universe: str = "daytrade",
 ) -> dict[str, int]:
@@ -54,6 +55,8 @@ def prewarm_historical_caches(
     from api import vwap_signal_bundle
 
     dates = _recent_offline_dates(month_limit)
+    if list_date_limit > 0:
+        dates = dates[:list_date_limit]
     chart_dates = _chart_dates(dates, chart_month_limit, chart_date_limit)
     stock_ids = stock_ids_for_universe(universe)
     fixed_chart_stocks = list(dict.fromkeys(str(sid) for sid in chart_stocks if str(sid).strip()))
