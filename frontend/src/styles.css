@@ -84,3 +84,81 @@ body {
   min-width: 0.8rem;
   min-height: 0.8rem;
 }
+
+/*
+ * Mobile layout is intentionally independent from the desktop 45/55 viewport grid.
+ * The signal table keeps a bounded viewport, while each chart gets its own full-height
+ * card and the document itself becomes scrollable.  This avoids iOS Safari shrinking
+ * the chart canvases to the small remainder of a locked dvh layout.
+ */
+@media (max-width: 1023px) {
+  html,
+  body,
+  #root {
+    height: auto;
+    min-height: 100%;
+  }
+
+  body {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #root > div {
+    height: auto !important;
+    min-height: 100dvh !important;
+    overflow: visible !important;
+  }
+
+  #root > div > main {
+    display: block !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+
+  /* Signal list: usable on mobile without consuming the whole page. */
+  #root > div > main > div:first-child {
+    display: grid !important;
+    height: 48svh !important;
+    min-height: 320px !important;
+    max-height: 460px !important;
+    margin-bottom: 0.5rem;
+    overflow: hidden !important;
+  }
+
+  #root > div > main > div:first-child > section {
+    height: 100%;
+    min-height: 0;
+  }
+
+  /* Charts become a vertical stack. Each card owns real vertical space. */
+  #root > div > main > div:last-child {
+    display: block !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  #root > div > main > div:last-child > div {
+    height: 58svh !important;
+    min-height: 380px !important;
+    max-height: 520px !important;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+  }
+
+  #root > div > main > div:last-child > div > section {
+    height: 100%;
+    min-height: 0;
+  }
+
+  #root > div > main > div:last-child > div > section > div:last-child {
+    min-height: 0;
+  }
+
+  .tv-lightweight-charts {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
