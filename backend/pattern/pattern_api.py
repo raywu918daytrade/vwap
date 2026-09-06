@@ -479,8 +479,13 @@ def get_pattern_detail(
     if not skip_pattern:
         timeframe = _normalize_scan_timeframe(timeframe)
 
-    # 取得最新 K 線時間戳以構造智慧快取 Key
-    latest_ts = get_latest_candle_timestamp(timeframe=timeframe, date=date)
+    # 歷史日期資料由 HF 同步後清快取，不需要每次先讀 2330 取版本戳。
+    # 那個預讀在 Oracle 小主機上會和頁面刷新時的 detail 請求互相搶 IO。
+    latest_ts = (
+        f"historical:{str(date)[:10]}"
+        if date and not force_live
+        else get_latest_candle_timestamp(timeframe=timeframe, date=date)
+    )
     cache_key = (stock_id, pattern_type if not skip_pattern else "none", timeframe, date or "latest", limit, full_day, latest_ts)
 
     if not force_live and cache_key in _DETAIL_CACHE:

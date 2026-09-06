@@ -345,6 +345,29 @@ def _historical_vwap_bundle(date_str: str, universe: str = "daytrade") -> dict:
     }
 
 
+def _latest_signal_by_stock(rows: list[dict]) -> list[dict]:
+    """Keep only the latest intraday event per stock for default list views."""
+    latest: dict[str, dict] = {}
+    for row in rows or []:
+        sid = str(row.get("stock_id") or "")
+        if not sid:
+            continue
+        prev = latest.get(sid)
+        if prev is None or str(row.get("time") or "") > str(prev.get("time") or ""):
+            latest[sid] = row
+    return sorted(
+        latest.values(),
+        key=lambda item: (str(item.get("time") or ""), str(item.get("stock_id") or "")),
+        reverse=True,
+    )
+
+
+def _activity_metrics_for_date(date_str: str, universe: str) -> dict:
+    from pattern.vwap_activity import metrics_for_date
+
+    return metrics_for_date(date_str, universe=universe)
+
+
 def _catchup_today_into_memory() -> tuple[list, list]:
     global _vwap_macd_live, _vwap_obv_live, _vwap_chg
     today = datetime.now(_TW).strftime("%Y-%m-%d")
@@ -514,6 +537,62 @@ def vwap_obv_div(date: Optional[str] = None, universe: str = "daytrade"):
     from pattern.vwap_obv_div import metrics_for_date
 
     return {"date": date_str, "stocks": metrics_for_date(date_str, universe=universe)}
+
+
+@app.get("/vwap_signal/bundle", tags=["VWAP"], summary="盤中訊號整包讀取")
+def vwap_signal_bundle(date: Optional[str] = None, universe: str = "daytrade", repeat: bool = False):
+    """Return the dashboard's historical signal inputs with one parquet read.
+
+    The refresh path used to fire VWAP/SR, activity, MACD, and OBV as separate
+    requests. On a small Oracle VM those concurrent requests could all cold-read
+    the same monthly shards before caches filled. This endpoint keeps the same
+    response shapes while reducing duplicate IO.
+    """
+    date_str = (date or _today_str())[:10]
+    today = _today_str()
+    if date_str != today:
+        bundle = _historical_vwap_bundle(date_str, universe=universe)
+        vwap_rows = bundle["vwap"] if repeat else _latest_signal_by_stock(bundle["vwap"])
+        return {
+            "date": date_str,
+            "vwap": vwap_rows,
+            "sr": bundle["sr"],
+            "m1_bars": bundle["m1_bars"],
+            "chg": bundle["chg"],
+            "activity": _activity_metrics_for_date(date_str, universe),
+            "macd": bundle["macd"],
+            "obv": bundle["obv"],
+        }
+
+    with _lock:
+        vwap_rows = list(reversed(_vwap_breakout_signals))
+        sr_rows = list(reversed(_sr_vwap_cross_signals))
+        macd_missing = _vwap_macd_live is None
+        obv_missing = _vwap_obv_live is None
+        macd_live = dict(_vwap_macd_live or {})
+        obv_live = dict(_vwap_obv_live or {})
+        chg_live = dict(_vwap_chg)
+
+    if not repeat:
+        vwap_rows = _latest_signal_by_stock(vwap_rows)
+    if macd_missing:
+        from pattern.vwap_macd_div import metrics_for_date as macd_metrics
+
+        macd_live = macd_metrics(date_str, universe=universe)
+    if obv_missing:
+        from pattern.vwap_obv_div import metrics_for_date as obv_metrics
+
+        obv_live = obv_metrics(date_str, universe=universe)
+    return {
+        "date": date_str,
+        "vwap": vwap_rows,
+        "sr": sr_rows,
+        "m1_bars": 0,
+        "chg": chg_live,
+        "activity": _activity_metrics_for_date(date_str, universe),
+        "macd": macd_live,
+        "obv": obv_live,
+    }
 
 
 @app.get("/vwap_signal/dates", tags=["VWAP"], summary="取得已有離線盤勢資料的日期")

@@ -725,10 +725,13 @@ export default function App() {
   const [obsStocks, setObsStocks] = useState(() => new Set(JSON.parse(localStorage.getItem("obsStocks") || "[]")));
   const [watchDrawerOpen, setWatchDrawerOpen] = useState(false);
   const [focusedPanel, setFocusedPanel] = useState("vwap");
+  const [signalLoadedKey, setSignalLoadedKey] = useState("");
 
   const stockIdRef = useRef(stockId);
   const activeChartDateRef = useRef("");
   const vwapDateRef = useRef(vwapDate);
+  const signalLoadSeqRef = useRef(0);
+  const chartLoadSeqRef = useRef(0);
   const today = useMemo(() => taipeiTodayIso(), [clock]);
   const stockName = dayData?.stock_name || intradayData?.stock_name || "";
   const titleStock = stockName && stockName !== stockId ? `${stockId} ${stockName}` : stockId;
@@ -744,6 +747,7 @@ export default function App() {
   const activeChartLabel = TIMEFRAME_LABEL[activeChartTimeframe] || activeChartTimeframe;
   const rightChartVariant = activeChartTimeframe === "day" ? "day" : "intraday";
   const showIndicatorPane = rightChartVariant === "intraday";
+  const signalLoadKey = `${vwapDate || "today"}:${universe}:${repeatEvents ? "repeat" : "latest"}`;
 
   useEffect(() => {
     if (sessionStorage.getItem(VWAP_FILTER_DEFAULT_VERSION_KEY) === VWAP_FILTER_DEFAULT_VERSION) return;
@@ -806,6 +810,9 @@ export default function App() {
   const loadCharts = useCallback(async () => {
     const sid = stockId.trim();
     if (!sid) return;
+    const requestId = chartLoadSeqRef.current + 1;
+    chartLoadSeqRef.current = requestId;
+    const isCurrent = () => requestId === chartLoadSeqRef.current;
     setLoadingCharts(true);
     setDayError("");
     setIntradayError("");
@@ -814,28 +821,47 @@ export default function App() {
     const hasPatternOverlay = dayChartPatternType !== "none";
     const chartForceLive = hasPatternOverlay && activeChartDate ? false : forceLive;
     const shouldFetchIdx = rightChartVariant === "intraday" && chartIndicatorMode === "idx" && sid !== DEFAULT_STOCK;
-    const [dayResult, intradayResult, idxResult] = await Promise.allSettled([
-      fetchJson(
-        patternDetailPath(sid, {
-          patternType: dayChartPatternType,
-          timeframe: "day",
-          date: activeChartDate,
-          limit: dayChartLimit,
-          forceLive: chartForceLive,
-        }),
-      ),
-      fetchJson(
-        patternDetailPath(sid, {
-          patternType: activeChartPatternType,
-          timeframe: activeChartTimeframe,
-          date: activeChartDate,
-          limit: activeChartLimit,
-          fullDay: rightChartVariant === "intraday",
-          forceLive: chartForceLive,
-        }),
-      ),
-      shouldFetchIdx
-        ? fetchJson(
+    try {
+      try {
+        const dayResult = await fetchJson(
+          patternDetailPath(sid, {
+            patternType: dayChartPatternType,
+            timeframe: "day",
+            date: activeChartDate,
+            limit: dayChartLimit,
+            forceLive: chartForceLive,
+          }),
+        );
+        if (!isCurrent()) return;
+        setDayData(dayResult);
+      } catch (error) {
+        if (!isCurrent()) return;
+        setDayData(null);
+        setDayError(error?.message || "日K載入失敗");
+      }
+
+      try {
+        const intradayResult = await fetchJson(
+          patternDetailPath(sid, {
+            patternType: activeChartPatternType,
+            timeframe: activeChartTimeframe,
+            date: activeChartDate,
+            limit: activeChartLimit,
+            fullDay: rightChartVariant === "intraday",
+            forceLive: chartForceLive,
+          }),
+        );
+        if (!isCurrent()) return;
+        setIntradayData(intradayResult);
+      } catch (error) {
+        if (!isCurrent()) return;
+        setIntradayData(null);
+        setIntradayError(error?.message || `${activeChartLabel}載入失敗`);
+      }
+
+      if (shouldFetchIdx) {
+        try {
+          const idxResult = await fetchJson(
             patternDetailPath(DEFAULT_STOCK, {
               timeframe: activeChartTimeframe,
               date: activeChartDate,
@@ -843,23 +869,19 @@ export default function App() {
               fullDay: true,
               forceLive: chartForceLive,
             }),
-          )
-        : Promise.resolve(null),
-    ]);
-    if (dayResult.status === "fulfilled") {
-      setDayData(dayResult.value);
-    } else {
-      setDayData(null);
-      setDayError(dayResult.reason?.message || "日K載入失敗");
+          );
+          if (!isCurrent()) return;
+          setIdxData(idxResult);
+        } catch {
+          if (!isCurrent()) return;
+          setIdxData(null);
+        }
+      } else if (isCurrent()) {
+        setIdxData(null);
+      }
+    } finally {
+      if (isCurrent()) setLoadingCharts(false);
     }
-    if (intradayResult.status === "fulfilled") {
-      setIntradayData(intradayResult.value);
-    } else {
-      setIntradayData(null);
-      setIntradayError(intradayResult.reason?.message || `${activeChartLabel}載入失敗`);
-    }
-    if (idxResult.status === "fulfilled") setIdxData(idxResult.value);
-    setLoadingCharts(false);
   }, [
     activeChartLabel,
     activeChartLimit,
@@ -883,46 +905,32 @@ export default function App() {
   }, []);
 
   const loadVwapTables = useCallback(async () => {
+    const requestId = signalLoadSeqRef.current + 1;
+    signalLoadSeqRef.current = requestId;
+    const isCurrent = () => requestId === signalLoadSeqRef.current;
     setVwapLoading(true);
     setVwapError("");
+    setSignalLoadedKey("");
     try {
-      if (vwapDate) {
-        const qs = new URLSearchParams({ date: vwapDate, universe });
-        const [replay, activity, macd, obv] = await Promise.all([
-          fetchJson(`/vwap_sr_replay?${qs.toString()}`),
-          fetchJson(`/vwap_activity?${qs.toString()}`),
-          fetchJson(`/vwap_macd_div?${qs.toString()}`),
-          fetchJson(`/vwap_obv_div?${qs.toString()}`),
-        ]);
-        setVwapRowsRaw(replay.vwap || []);
-        setSrRowsRaw(replay.sr || []);
-        setChgMap(replay.chg || {});
-        setActivityMap(activity.stocks || {});
-        setMacdMap(macd.stocks || {});
-        setObvMap(obv.stocks || {});
-      } else {
-        const qs = new URLSearchParams({ universe });
-        const [vwap, sr, chg, activity, macd, obv] = await Promise.all([
-          fetchJson("/vwap_breakout/today"),
-          fetchJson("/sr_vwap_cross/today"),
-          fetchJson("/vwap_chg"),
-          fetchJson(`/vwap_activity?${qs.toString()}`),
-          fetchJson(`/vwap_macd_div?${qs.toString()}`),
-          fetchJson(`/vwap_obv_div?${qs.toString()}`),
-        ]);
-        setVwapRowsRaw(vwap || []);
-        setSrRowsRaw(sr || []);
-        setChgMap(chg || {});
-        setActivityMap(activity.stocks || {});
-        setMacdMap(macd.stocks || {});
-        setObvMap(obv.stocks || {});
-      }
+      const qs = new URLSearchParams({ universe, repeat: repeatEvents ? "1" : "0" });
+      if (vwapDate) qs.set("date", vwapDate);
+      const bundle = await fetchJson(`/vwap_signal/bundle?${qs.toString()}`);
+      if (!isCurrent()) return;
+      setVwapRowsRaw(bundle.vwap || []);
+      setSrRowsRaw(bundle.sr || []);
+      setChgMap(bundle.chg || {});
+      setActivityMap(bundle.activity || {});
+      setMacdMap(bundle.macd || {});
+      setObvMap(bundle.obv || {});
     } catch (error) {
-      setVwapError(error.message || `${SIGNAL_LABEL}載入失敗`);
+      if (isCurrent()) setVwapError(error.message || `${SIGNAL_LABEL}載入失敗`);
     } finally {
-      setVwapLoading(false);
+      if (isCurrent()) {
+        setVwapLoading(false);
+        setSignalLoadedKey(signalLoadKey);
+      }
     }
-  }, [vwapDate, universe]);
+  }, [repeatEvents, signalLoadKey, universe, vwapDate]);
 
   useEffect(() => {
     localStorage.setItem("chartStock", stockId);
@@ -963,8 +971,13 @@ export default function App() {
   }, [obsStocks]);
 
   useEffect(() => {
-    loadCharts();
-  }, [loadCharts, reloadSeq]);
+    if (isVwapChart && signalLoadedKey !== signalLoadKey) return undefined;
+    const delayMs = isVwapChart ? 350 : 0;
+    const timer = window.setTimeout(() => {
+      loadCharts();
+    }, delayMs);
+    return () => window.clearTimeout(timer);
+  }, [isVwapChart, loadCharts, reloadSeq, signalLoadedKey, signalLoadKey]);
 
   useEffect(() => {
     let stopped = false;
@@ -1080,11 +1093,17 @@ export default function App() {
         }
       }
     }
+    if (signalLoadedKey !== signalLoadKey) {
+      setPatternRows([]);
+      setPatternLoading(false);
+      setPatternError("");
+      return undefined;
+    }
     loadPatternScan();
     return () => {
       stopped = true;
     };
-  }, [patternLimit, vwapDate]);
+  }, [patternLimit, signalLoadedKey, signalLoadKey, vwapDate]);
 
   useEffect(() => {
     const es = new EventSource(apiUrl("/stream"));
