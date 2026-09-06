@@ -40,19 +40,6 @@ body {
   font-family: SFMono-Regular, Consolas, Menlo, monospace;
 }
 
-.d1-inline-filters {
-  flex: 0 0 auto;
-  width: auto !important;
-  overflow: visible !important;
-  border-left: 1px solid hsl(var(--bc) / 0.12);
-  margin-left: 0.25rem;
-  padding-left: 0.5rem;
-}
-
-.d1-inline-filters > div:first-child {
-  white-space: nowrap;
-}
-
 .d1-toolbar-hidden-row {
   display: none !important;
 }
@@ -81,4 +68,19 @@ body {
 
 .d1-menu-inline > div:first-child {
   display: none !important;
+}
+
+.pattern-header-filter {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.pattern-header-checkbox {
+  width: 0.8rem;
+  height: 0.8rem;
+  min-width: 0.8rem;
+  min-height: 0.8rem;
 }
