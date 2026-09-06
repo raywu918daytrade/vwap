@@ -29,7 +29,7 @@ from pattern.head_shoulders_top.detector import HeadShouldersTopDetector
 from pattern.m_top.detector import MTopDetector
 from pattern.macd_hist_bear.detector import MacdHistBearDetector
 from pattern.macd_hist_bull.detector import MacdHistBullDetector
-from pattern.offline_store import read_pattern_for_stock, read_pattern_scan
+from pattern.offline_store import available_scan_dates, read_pattern_for_stock, read_pattern_scan
 from pattern.triangle.detector import TriangleDetector
 from pattern.w_bottom.detector import WBottomDetector
 
@@ -387,6 +387,17 @@ def scan_patterns(
         "results": matches,
     }
     return result
+
+
+@router.get("/scan/dates", summary="取得已有離線型態結果的日期")
+def get_pattern_scan_dates() -> Dict[str, Any]:
+    """Return dates that have at least one precomputed D1 pattern result."""
+    dates = available_scan_dates()
+    return {
+        "dates": dates,
+        "latest": dates[-1] if dates else None,
+        "total": len(dates),
+    }
 
 
 # ── 相容入口 ─────────────────────────────────────────────────────────────

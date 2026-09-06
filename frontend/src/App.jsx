@@ -322,6 +322,10 @@ function isoDate(value) {
   return String(value).slice(0, 10);
 }
 
+function displayDate(value) {
+  return isoDate(value).replaceAll("-", "/");
+}
+
 function daysBetweenIso(fromDate, toDate) {
   const from = isoDate(fromDate);
   const to = isoDate(toDate);
@@ -492,6 +496,7 @@ export default function App() {
   const [selectedPatternTypes, setSelectedPatternTypes] = useState(initialPatternFilters);
   const [patternLimit, setPatternLimit] = useState(120);
   const [patternRows, setPatternRows] = useState([]);
+  const [patternScanDates, setPatternScanDates] = useState([]);
   const [patternLoading, setPatternLoading] = useState(false);
   const [patternError, setPatternError] = useState("");
   const [vwapMenuOpen, setVwapMenuOpen] = useState(false);
@@ -804,6 +809,29 @@ export default function App() {
       stopped = true;
     };
   }, []);
+
+  useEffect(() => {
+    let stopped = false;
+    async function loadPatternScanDates() {
+      try {
+        const data = await fetchJson("/api/pattern/scan/dates");
+        if (!stopped) setPatternScanDates(data.dates || []);
+      } catch {
+        if (!stopped) setPatternScanDates([]);
+      }
+    }
+    loadPatternScanDates();
+    return () => {
+      stopped = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!vwapDate || !patternScanDates.length) return;
+    if (!patternScanDates.includes(vwapDate)) {
+      setVwapDate(patternScanDates[patternScanDates.length - 1] || "");
+    }
+  }, [patternScanDates, vwapDate]);
 
   useEffect(() => {
     let stopped = false;
@@ -1261,13 +1289,22 @@ export default function App() {
             <div className="relative z-20 shrink-0 border-b border-base-300 bg-base-200">
               <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.5rem] items-start gap-1 px-2 py-1">
                 <div className="flex min-w-0 w-full gap-1 overflow-x-auto pb-1">
-                  <input
-                    type="date"
-                    className="input input-bordered input-xs w-32 shrink-0 rounded"
+                  <select
+                    className="select select-bordered select-xs w-36 shrink-0 rounded"
                     value={vwapDate}
-                    title="留空＝今日補齊後繼續即時；選過去日期則凍結該日"
+                    title="只列已有離線型態結果的日期；即時會回到今日資料流"
                     onChange={(e) => setVwapDate(e.target.value)}
-                  />
+                  >
+                    <option value="">即時/今日</option>
+                    {vwapDate && patternScanDates.length > 0 && !patternScanDates.includes(vwapDate) ? (
+                      <option value={vwapDate}>{displayDate(vwapDate)}</option>
+                    ) : null}
+                    {[...patternScanDates].reverse().map((date) => (
+                      <option key={date} value={date}>
+                        {displayDate(date)}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     className="input input-bordered input-xs w-20 shrink-0 rounded uppercase"
                     placeholder="代號"
