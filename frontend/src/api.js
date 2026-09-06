@@ -32,6 +32,9 @@ export function patternDetailPath(stockId, { patternType = "none", timeframe, da
   });
   if (date) params.set("date", date);
   if (fullDay) params.set("full_day", "true");
-  if (forceLive) params.set("force_live", "true");
+  // Do not send force_live for normal chart loads. The backend cache key already
+  // tracks the latest candle timestamp, so fresh data invalidates naturally.
+  // Sending force_live on every stock switch bypasses both memory and disk cache.
+  void forceLive;
   return `/api/pattern/${encodeURIComponent(stockId)}/detail?${params.toString()}`;
 }
