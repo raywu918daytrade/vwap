@@ -32,7 +32,7 @@ function integrateD1Settings() {
   d1Menu.classList.add("d1-menu-inline");
   topMenu.appendChild(d1Menu);
 
-  // 型態過濾改由表格欄位標題旁的 checkbox 控制，因此整排舊按鈕隱藏。
+  // 型態過濾已移到表格欄位標題旁的 checkbox，舊功能過濾列不再顯示。
   d1Row.classList.add("d1-toolbar-hidden-row");
 }
 
@@ -46,54 +46,72 @@ function patternFilterButtons() {
   });
 }
 
+function normalizeText(value) {
+  return (value || "").replace(/\s+/g, "").trim();
+}
+
+function findPatternButtonForHeader(headerText, buttons) {
+  const normalizedHeader = normalizeText(headerText);
+  return buttons.find((button) => {
+    const buttonText = normalizeText(button.textContent);
+    const title = normalizeText(button.getAttribute("title"));
+    return buttonText === normalizedHeader || title.includes(normalizedHeader);
+  });
+}
+
 function syncPatternHeaderFilters() {
   const buttons = patternFilterButtons();
   if (!buttons.length) return;
 
   const headers = [...document.querySelectorAll("thead th")];
 
-  for (const button of buttons) {
-    const name = button.textContent.trim();
-    const header = headers.find((th) => {
-      const label = th.querySelector(".pattern-header-label")?.textContent.trim();
-      if (label) return label === name;
-      return th.textContent.trim() === name;
+  for (const header of headers) {
+    if (header.querySelector(".pattern-header-filter")) continue;
+
+    const originalText = header.textContent.trim();
+    if (!originalText) continue;
+
+    const button = findPatternButtonForHeader(originalText, buttons);
+    if (!button) continue;
+
+    const name = button.textContent.trim() || originalText;
+    header.textContent = "";
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "pattern-header-label";
+    nameSpan.textContent = originalText;
+    header.appendChild(nameSpan);
+
+    const label = document.createElement("label");
+    label.className = "pattern-header-filter";
+    label.title = `過濾${name}`;
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "checkbox checkbox-xs pattern-header-checkbox";
+    checkbox.setAttribute("aria-label", `過濾${name}`);
+    checkbox.checked = (button.getAttribute("title") || "").startsWith("取消");
+
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", (event) => {
+      event.stopPropagation();
+      const currentButtons = patternFilterButtons();
+      const currentButton = findPatternButtonForHeader(originalText, currentButtons);
+      currentButton?.click();
     });
-    if (!header) continue;
 
-    let label = header.querySelector(".pattern-header-filter");
-    let checkbox = label?.querySelector('input[type="checkbox"]');
+    label.addEventListener("click", (event) => event.stopPropagation());
+    label.appendChild(checkbox);
+    header.appendChild(label);
+  }
 
-    if (!label || !checkbox) {
-      const originalText = header.textContent.trim();
-      header.textContent = "";
+  for (const header of headers) {
+    const checkbox = header.querySelector('.pattern-header-checkbox');
+    const headerText = header.querySelector('.pattern-header-label')?.textContent.trim();
+    if (!checkbox || !headerText) continue;
 
-      const nameSpan = document.createElement("span");
-      nameSpan.className = "pattern-header-label";
-      nameSpan.textContent = originalText;
-      header.appendChild(nameSpan);
-
-      label = document.createElement("label");
-      label.className = "pattern-header-filter";
-      label.title = `過濾${name}`;
-
-      checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.className = "checkbox checkbox-xs pattern-header-checkbox";
-      checkbox.setAttribute("aria-label", `過濾${name}`);
-
-      checkbox.addEventListener("click", (event) => event.stopPropagation());
-      checkbox.addEventListener("change", (event) => {
-        event.stopPropagation();
-        const currentButton = patternFilterButtons().find((item) => item.textContent.trim() === name);
-        currentButton?.click();
-      });
-
-      label.addEventListener("click", (event) => event.stopPropagation());
-      label.appendChild(checkbox);
-      header.appendChild(label);
-    }
-
+    const button = findPatternButtonForHeader(headerText, buttons);
+    if (!button) continue;
     checkbox.checked = (button.getAttribute("title") || "").startsWith("取消");
   }
 }
