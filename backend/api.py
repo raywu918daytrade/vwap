@@ -518,10 +518,10 @@ def vwap_obv_div(date: Optional[str] = None, universe: str = "daytrade"):
 
 @app.get("/vwap_signal/dates", tags=["VWAP"], summary="取得已有離線盤勢資料的日期")
 def vwap_signal_dates():
-    from pattern.offline_store import available_scan_dates
+    from pattern.activity_store import available_activity_dates
     from pattern.vwap_signal_store import available_signal_dates
 
-    dates = sorted(set(available_scan_dates()) | set(available_signal_dates()))
+    dates = sorted(set(available_activity_dates()) | set(available_signal_dates()))
     return {
         "dates": dates,
         "latest": dates[-1] if dates else None,
