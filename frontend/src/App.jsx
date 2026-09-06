@@ -496,7 +496,6 @@ export default function App() {
   const [patternError, setPatternError] = useState("");
   const [vwapMenuOpen, setVwapMenuOpen] = useState(false);
   const [patternMenuOpen, setPatternMenuOpen] = useState(false);
-  const pendingPatternJobRef = useRef("");
   const vwapMenuRef = useRef(null);
   const patternMenuRef = useRef(null);
   const watchDrawerRef = useRef(null);
@@ -831,9 +830,8 @@ export default function App() {
 
   useEffect(() => {
     let stopped = false;
-    let fallbackTimer = 0;
     const patternType = "all";
-    async function submitPatternScan() {
+    async function loadPatternScan() {
       setPatternLoading(true);
       setPatternError("");
       setPatternRows([]);
@@ -844,35 +842,20 @@ export default function App() {
           limit: String(patternLimit || 120),
         });
         if (vwapDate) params.set("date", vwapDate);
-        const data = await fetchJson(`/api/pattern/scan/submit?${params.toString()}`);
+        const data = await fetchJson(`/api/pattern/scan?${params.toString()}`);
         if (stopped) return;
-        pendingPatternJobRef.current = data.job_id;
-        fallbackTimer = window.setTimeout(async () => {
-          if (stopped || pendingPatternJobRef.current !== data.job_id) return;
-          try {
-            const direct = await fetchJson(`/api/pattern/scan?${params.toString()}`);
-            if (stopped || pendingPatternJobRef.current !== data.job_id) return;
-            pendingPatternJobRef.current = "";
-            setPatternRows(direct.results || []);
-            setPatternLoading(false);
-          } catch (error) {
-            if (!stopped && pendingPatternJobRef.current === data.job_id) {
-              setPatternError(error.message || "型態掃描失敗");
-              setPatternLoading(false);
-            }
-          }
-        }, 8000);
+        setPatternRows(data.results || []);
+        setPatternLoading(false);
       } catch (error) {
         if (!stopped) {
-          setPatternError(error.message || "型態掃描送出失敗");
+          setPatternError(error.message || "型態結果載入失敗");
           setPatternLoading(false);
         }
       }
     }
-    submitPatternScan();
+    loadPatternScan();
     return () => {
       stopped = true;
-      window.clearTimeout(fallbackTimer);
     };
   }, [patternLimit, vwapDate]);
 
@@ -886,16 +869,6 @@ export default function App() {
         message = JSON.parse(event.data);
       } catch {
         return;
-      }
-      if (message.type === "pattern_scan_done" && message.job_id === pendingPatternJobRef.current) {
-        pendingPatternJobRef.current = "";
-        setPatternLoading(false);
-        if (message.error) {
-          setPatternError(message.error);
-          setPatternRows([]);
-        } else {
-          setPatternRows(message.data?.results || []);
-        }
       }
       if (!vwapDateRef.current) {
         if (["vwap_breakout", "sr_vwap_cross", "vwap_macd_div", "vwap_obv_div"].includes(message.type)) {

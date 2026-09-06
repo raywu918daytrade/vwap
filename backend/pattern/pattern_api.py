@@ -6,16 +6,12 @@ Pattern Recognition API Endpoints (FastAPI Router)
 - GET  /api/pattern/stocks/daytrade    當沖候選股清單（db/fubon_subscribe/subscribe_list.parquet，
                                         今天實際被富邦WebSocket即時收集的股票池，見該端點的說明）
 - GET  /api/pattern/types             取得可用的技術型態選單清單 (含中文名稱)
-- GET  /api/pattern/scan             過濾篩選 D1 型態符合股票清單（同步版本，支援快取）
-- GET  /api/pattern/scan/submit      非同步版本：立刻回傳 job_id，掃描完成後透過 SSE
-                                       （type: pattern_scan_done）推播結果，見 _run_scan_job()
-                                       的說明——2026-08-11加，避免掃描（純Python迴圈跑型態
-                                       偵測，長時間佔用GIL）卡住 /stream 導致前端SSE斷線。
-- GET  /api/pattern/{stock_id}/detail  取得單一股票的 K 線與型態擬合細節（含轉折點與趨勢線座標，支援快取）
+- GET  /api/pattern/scan             讀取 HF 同步下來的 D1 型態掃描結果
+- GET  /api/pattern/scan/submit      舊版相容入口；現在同步讀離線結果並立刻回傳
+- GET  /api/pattern/{stock_id}/detail  取得單一股票的 K 線與離線型態繪圖細節（支援快取）
 - POST /api/pattern/cache/clear      手動清空快取
 """
 
-import asyncio
 import uuid
 from typing import Any, Dict, List, Optional
 from pathlib import Path
@@ -27,12 +23,13 @@ from pattern.abcd_bull.detector import AbcdBullDetector
 from pattern.breakdown_retest.detector import BreakdownRetestDetector
 from pattern.breakout_retest.detector import BreakoutRetestDetector
 from pattern.cup_handle.detector import CupHandleDetector
-from pattern.data_loader import get_all_stocks_candles, get_latest_candle_timestamp, get_stock_candles
+from pattern.data_loader import get_latest_candle_timestamp, get_stock_candles
 from pattern.head_shoulders_bottom.detector import HeadShouldersBottomDetector
 from pattern.head_shoulders_top.detector import HeadShouldersTopDetector
 from pattern.m_top.detector import MTopDetector
 from pattern.macd_hist_bear.detector import MacdHistBearDetector
 from pattern.macd_hist_bull.detector import MacdHistBullDetector
+from pattern.offline_store import read_pattern_for_stock, read_pattern_scan
 from pattern.triangle.detector import TriangleDetector
 from pattern.w_bottom.detector import WBottomDetector
 
@@ -228,6 +225,34 @@ def _normalize_scan_timeframe(timeframe: str | None) -> str:
     raise HTTPException(status_code=400, detail="型態掃描只支援 D1（日K），已移除 1m/3m/5m 掃描")
 
 
+def _selected_pattern_types(pattern_type: str) -> list[str]:
+    """Normalize a scan pattern selector into registered detector keys."""
+    raw_types = [t.strip() for t in str(pattern_type or "").split(",") if t.strip()]
+    if "all" in raw_types:
+        return list(DETECTORS.keys())
+
+    selected_types = []
+    invalid_types = []
+    for p in raw_types:
+        if p in DETECTORS:
+            if p not in selected_types:
+                selected_types.append(p)
+        else:
+            invalid_types.append(p)
+
+    if invalid_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"尚未支援或無效的型態: {invalid_types}。可用型態: {list(DETECTORS.keys())} 或 all",
+        )
+    if not selected_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"未指定有效的型態。可用型態: {list(DETECTORS.keys())} 或 all",
+        )
+    return selected_types
+
+
 def _horizontal_sr_lines(df: pd.DataFrame, to_epoch, stock_id: str) -> List[Dict[str, Any]]:
     """日K 橫向壓力／支撐（雙轉折水平線），不要求型態過關。
 
@@ -333,7 +358,12 @@ def scan_patterns(
     min_score: float = Query(60.0, description="最小信心度分數 (0~100)"),
     limit: int = Query(120, description="K 線視窗根數，預設 120 根"),
 ) -> Dict[str, Any]:
-    """掃描 tick_universe 股票，找出符合特定/多個/全型態 D1 條件的清單。"""
+    """Read precomputed D1 pattern rows downloaded from HF.
+
+    The Oracle runtime no longer runs pattern detectors on request. Offline
+    jobs produce `db/pattern_scan/d1/YYYY_MM.parquet`; missing dates return an
+    empty list so non-trading days stay blank.
+    """
     # 處理直接在 Python 內部調用函式時可能傳入 Query 物件的情況
     if hasattr(pattern_type, "default"):
         pattern_type = pattern_type.default
@@ -344,207 +374,28 @@ def scan_patterns(
     if hasattr(limit, "default"):
         limit = limit.default
     timeframe = _normalize_scan_timeframe(timeframe)
-
-    # 1. 解析型態參數 (支援逗號分隔與 "all")
-    raw_types = [t.strip() for t in pattern_type.split(",") if t.strip()]
-    
-    if "all" in raw_types:
-        selected_types = list(DETECTORS.keys())
-    else:
-        selected_types = []
-        invalid_types = []
-        for p in raw_types:
-            if p in DETECTORS:
-                if p not in selected_types:
-                    selected_types.append(p)
-            else:
-                invalid_types.append(p)
-        
-        if invalid_types:
-            raise HTTPException(
-                status_code=400,
-                detail=f"尚未支援或無效的型態: {invalid_types}。可用型態: {list(DETECTORS.keys())} 或 all",
-            )
-
-    if not selected_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"未指定有效的型態。可用型態: {list(DETECTORS.keys())} 或 all",
-        )
-
-    # 正規化型態鍵值以穩定命中快取
-    normalized_pattern_key = ",".join(sorted(selected_types))
-
-    # 2. 取得最新 K 線時間戳以構造智慧快取 Key
-    latest_ts = get_latest_candle_timestamp(timeframe=timeframe, date=date)
-    cache_key = (normalized_pattern_key, timeframe, date or "latest", min_score, limit, latest_ts)
-
-    if cache_key in _SCAN_CACHE:
-        return _SCAN_CACHE[cache_key]
-
-    # 3. 只讀 tick_universe 母體（上限800檔）的 D1 K 線，不要整個市場
-    # （~2900檔）都讀進來才在下面的迴圈丟掉。
-    all_candles = get_all_stocks_candles(timeframe=timeframe, date=date, limit=limit, stock_ids=TICK_UNIVERSE_SET)
-
-    active_detectors = [(pt, DETECTORS[pt]) for pt in selected_types]
-
-    matches = []
-    for stock_id in TICK_UNIVERSE_SET:
-        df_candles = all_candles.get(stock_id)
-        if df_candles is None or df_candles.empty or len(df_candles) < 20:
-            continue
-
-        str_stock_id = str(stock_id)
-
-        # 一支股票可同時匹配多個 Detector
-        for pt_key, detector in active_detectors:
-            try:
-                res = detector.detect(df_candles, stock_id=stock_id, timeframe=timeframe)
-                if res and res.score >= min_score:
-                    stock_name = STOCK_NAME_MAP.get(str_stock_id, str_stock_id)
-                    res_dict = res.to_dict()
-                    res_dict["pattern_name"] = detector.display_name
-                    _attach_event_date(res_dict)
-                    res_dict["stock_name"] = stock_name
-                    res_dict["name"] = stock_name
-                    res_dict["in_tick_universe"] = True
-                    matches.append(res_dict)
-            except Exception:
-                continue
-
-    # 按信心分數遞減排序
-    matches.sort(key=lambda x: x["score"], reverse=True)
+    del limit
+    selected_types = _selected_pattern_types(pattern_type)
+    scan_date, matches = read_pattern_scan(date, selected_types, min_score=float(min_score))
 
     result = {
         "pattern_type": pattern_type,
         "pattern_types": selected_types,
         "timeframe": timeframe,
-        "date": date or (matches[0]["date"] if matches else None),
+        "date": scan_date or date,
         "total_matches": len(matches),
         "results": matches,
     }
-
-    _SCAN_CACHE[cache_key] = result
     return result
 
 
-# ── 非同步版本（2026-08-11加）─────────────────────────────────────────────
-# 型態偵測是純 Python 巢狀迴圈（見各 detector 的 detect()），跑起來會連續
-# 占用 GIL 45~70秒以上，即使 FastAPI 把同步路由丟到執行緒池跑，同一個
-# process 裡的 asyncio event loop 執行緒一樣要搶 GIL，會導致 /stream
-# （SSE）長時間排不到執行時間，前端看起來像斷線（見檔頭說明）。這裡改成
-# 「submit 立刻回傳 job_id，掃描在背景 async task 跑、每處理一批股票就
-# await asyncio.sleep(0) 讓出 event loop，完成後用既有的 SSE _broadcast()
-# 推播結果」，不做輪詢。scan_patterns()（同步版本）保留不動，供直接
-# import 呼叫的場合使用，行為完全不變。
+# ── 相容入口 ─────────────────────────────────────────────────────────────
+# 前端已改成直接讀 /scan。/scan/submit 保留給舊頁面或外部呼叫，現在也是讀
+# HF 同步的離線 parquet，不再在 Oracle runtime 上開背景 detector。
 _scan_jobs: Dict[str, Dict[str, Any]] = {}
-_SCAN_YIELD_EVERY = 20  # 每處理這麼多檔股票就讓出 event loop 一次
 
 
-async def _scan_stocks_async(
-    all_candles: Dict[str, pd.DataFrame],
-    active_detectors: list,
-    timeframe: str,
-    min_score: float,
-) -> list:
-    """邏輯跟 scan_patterns() 內的迴圈完全一樣，差別只在定期
-    await asyncio.sleep(0)，讓任何一段連續佔用 GIL 的時間都壓在很短
-    （幾百毫秒等級），SSE heartbeat／健康檢查才擠得進去。"""
-    matches = []
-    for i, stock_id in enumerate(TICK_UNIVERSE_SET):
-        if i % _SCAN_YIELD_EVERY == 0:
-            await asyncio.sleep(0)
-        df_candles = all_candles.get(stock_id)
-        if df_candles is None or df_candles.empty or len(df_candles) < 20:
-            continue
-
-        str_stock_id = str(stock_id)
-
-        for pt_key, detector in active_detectors:
-            try:
-                res = detector.detect(df_candles, stock_id=stock_id, timeframe=timeframe)
-                if res and res.score >= min_score:
-                    stock_name = STOCK_NAME_MAP.get(str_stock_id, str_stock_id)
-                    res_dict = res.to_dict()
-                    res_dict["pattern_name"] = detector.display_name
-                    _attach_event_date(res_dict)
-                    res_dict["stock_name"] = stock_name
-                    res_dict["name"] = stock_name
-                    res_dict["in_tick_universe"] = True
-                    matches.append(res_dict)
-            except Exception:
-                continue
-
-    matches.sort(key=lambda x: x["score"], reverse=True)
-    return matches
-
-
-async def _run_scan_job(
-    job_id: str,
-    pattern_type: str,
-    timeframe: str,
-    date: Optional[str],
-    min_score: float,
-    limit: int,
-) -> None:
-    from api import _broadcast
-
-    try:
-        timeframe = _normalize_scan_timeframe(timeframe)
-        raw_types = [t.strip() for t in pattern_type.split(",") if t.strip()]
-        if "all" in raw_types:
-            selected_types = list(DETECTORS.keys())
-        else:
-            selected_types = []
-            for p in raw_types:
-                if p in DETECTORS and p not in selected_types:
-                    selected_types.append(p)
-
-        if not selected_types:
-            _scan_jobs[job_id] = {"status": "error", "error": "未指定有效的型態"}
-            _broadcast({"type": "pattern_scan_done", "job_id": job_id, "error": "未指定有效的型態"})
-            return
-
-        # 讀K線資料會擋住 event loop 一段時間。丟進預設執行緒池跑，
-        # 讓 pyarrow/pandas 的 I/O 與 C-level 運算期間仍可處理 SSE/健康檢查。
-        loop = asyncio.get_event_loop()
-        latest_ts = await loop.run_in_executor(
-            None, lambda: get_latest_candle_timestamp(timeframe=timeframe, date=date)
-        )
-        normalized_pattern_key = ",".join(sorted(selected_types))
-        cache_key = (normalized_pattern_key, timeframe, date or "latest", min_score, limit, latest_ts)
-
-        if cache_key in _SCAN_CACHE:
-            result = _SCAN_CACHE[cache_key]
-        else:
-            all_candles = await loop.run_in_executor(
-                None,
-                lambda: get_all_stocks_candles(
-                    timeframe=timeframe, date=date, limit=limit, stock_ids=TICK_UNIVERSE_SET
-                ),
-            )
-            active_detectors = [(pt, DETECTORS[pt]) for pt in selected_types]
-            matches = await _scan_stocks_async(
-                all_candles, active_detectors, timeframe, min_score
-            )
-            result = {
-                "pattern_type": pattern_type,
-                "pattern_types": selected_types,
-                "timeframe": timeframe,
-                "date": date or (matches[0]["date"] if matches else None),
-                "total_matches": len(matches),
-                "results": matches,
-            }
-            _SCAN_CACHE[cache_key] = result
-
-        _scan_jobs[job_id] = {"status": "done"}
-        _broadcast({"type": "pattern_scan_done", "job_id": job_id, "data": result})
-    except Exception as e:
-        _scan_jobs[job_id] = {"status": "error", "error": str(e)}
-        _broadcast({"type": "pattern_scan_done", "job_id": job_id, "error": str(e)})
-
-
-@router.get("/scan/submit", summary="非同步版本：立刻回傳job_id，掃描完成後透過SSE推播結果")
+@router.get("/scan/submit", summary="舊版相容入口：讀取離線型態掃描結果")
 async def submit_scan(
     pattern_type: str = Query("triangle", description="同 /scan 的說明"),
     timeframe: str = Query(PATTERN_SCAN_TIMEFRAME, description="型態掃描固定只支援 D1/day"),
@@ -552,17 +403,17 @@ async def submit_scan(
     min_score: float = Query(60.0, description="最小信心度分數 (0~100)"),
     limit: int = Query(120, description="K 線視窗根數，預設 120 根"),
 ) -> Dict[str, Any]:
-    """立刻回傳 job_id，不等掃描完成——一定要宣告成 async def 才能在這裡
-    呼叫 asyncio.create_task()（同步 def 路由會被 FastAPI 丟到背景執行緒
-    跑，那個執行緒沒有 running event loop，呼叫 create_task 會直接出錯）。
-    """
-    timeframe = _normalize_scan_timeframe(timeframe)
+    """Return a completed job payload without starting runtime detector work."""
     job_id = str(uuid.uuid4())
-    _scan_jobs[job_id] = {"status": "pending"}
-    asyncio.create_task(
-        _run_scan_job(job_id, pattern_type, timeframe, date, min_score, limit)
-    )
-    return {"job_id": job_id}
+    result = scan_patterns(pattern_type, timeframe, date, min_score, limit)
+    _scan_jobs[job_id] = {"status": "done", "data": result}
+    try:
+        from api import _broadcast
+
+        _broadcast({"type": "pattern_scan_done", "job_id": job_id, "data": result})
+    except Exception:
+        pass
+    return {"job_id": job_id, "data": result}
 
 
 @router.get("/{stock_id}/detail", summary="單一股票 K 線與型態繪圖細節")
@@ -616,10 +467,6 @@ def get_pattern_detail(
         raise HTTPException(status_code=404, detail=f"查無 {stock_id} 在 timeframe={timeframe} 的 K 線資料")
 
     detector = None if skip_pattern else DETECTORS[pattern_type]
-    pattern_res = (
-        None if skip_pattern
-        else detector.detect(df_candles, stock_id=stock_id, timeframe=timeframe)
-    )
 
     # 轉換 K 線給前端圖表使用 (依照 CLAUDE.md 使用 tw_naive_to_epoch)
     from api import tw_naive_to_epoch
@@ -655,28 +502,34 @@ def get_pattern_detail(
                 vwap_output.append({"time": tw_naive_to_epoch(dt), "value": round(float(v), 2)})
 
     pattern_output = None
-    if pattern_res:
-        pattern_dict = pattern_res.to_dict()
-        pattern_dict["pattern_name"] = detector.display_name
-        _attach_event_date(pattern_dict)
-        # 把 lines 和 pivots 裡的時間也轉成 epoch 秒數方便前端畫圖
-        for p in pattern_dict.get("pivots", []):
-            try:
-                p["time"] = tw_naive_to_epoch(pd.Timestamp(p["date"]))
-            except Exception:
-                p["time"] = None
+    if not skip_pattern and timeframe == PATTERN_SCAN_TIMEFRAME:
+        pattern_dict = read_pattern_for_stock(
+            stock_id=stock_id,
+            pattern_type=pattern_type,
+            date=str(date)[:10] if date else None,
+            min_score=60.0,
+        )
+        if pattern_dict:
+            pattern_dict["pattern_name"] = pattern_dict.get("pattern_name") or detector.display_name
+            _attach_event_date(pattern_dict)
+            # 把 lines 和 pivots 裡的時間也轉成 epoch 秒數方便前端畫圖
+            for p in pattern_dict.get("pivots", []):
+                try:
+                    p["time"] = tw_naive_to_epoch(pd.Timestamp(p["date"]))
+                except Exception:
+                    p["time"] = None
 
-        for l in pattern_dict.get("lines", []):
-            try:
-                t1 = tw_naive_to_epoch(pd.Timestamp(l["start_date"]))
-                t2 = tw_naive_to_epoch(pd.Timestamp(l["end_date"]))
-                l["start_time"] = t1
-                l["end_time"] = t2
-            except Exception:
-                l["start_time"] = None
-                l["end_time"] = None
+            for l in pattern_dict.get("lines", []):
+                try:
+                    t1 = tw_naive_to_epoch(pd.Timestamp(l["start_date"]))
+                    t2 = tw_naive_to_epoch(pd.Timestamp(l["end_date"]))
+                    l["start_time"] = t1
+                    l["end_time"] = t2
+                except Exception:
+                    l["start_time"] = None
+                    l["end_time"] = None
 
-        pattern_output = pattern_dict
+            pattern_output = pattern_dict
 
     # 日K 橫向壓力／支撐：不綁型態掃描。分K 疊圖要的是「反覆碰到的水平水位」。
     sr_lines_output: List[Dict[str, Any]] = []

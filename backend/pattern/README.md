@@ -1,6 +1,6 @@
 # 技術型態識別系統 (Pattern Recognition System)
 
-本模組提供 D1 技術型態（如三角收斂、W底、M頭、頭肩頂、頭肩底、杯柄、ABCD、突破壓力回測、跌破支撐反彈等 10 種型態）的自動識別演算、圖表資料載入、FastAPI 端點與記憶體快取機制。
+本模組提供 D1 技術型態（如三角收斂、W底、M頭、頭肩頂、頭肩底、杯柄、ABCD、突破壓力回測、跌破支撐反彈、MACD 柱背離等）的離線識別演算、圖表資料載入、FastAPI 端點與記憶體快取機制。
 
 ---
 
@@ -240,7 +240,7 @@ pattern/
 系統提供選股與繪圖端點，掛載於主 FastAPI (`api.py`) 的 `/api/pattern` 前綴下：
 
 ### 1. `GET /api/pattern/types`
-- **用途**：取得可用的 10 種技術型態選單清單（含中文名稱）。
+- **用途**：取得可用的 D1 技術型態選單清單（含中文名稱）。
 - **回傳內容**：
   ```json
   {
@@ -254,27 +254,29 @@ pattern/
       { "id": "head_shoulders_top", "name": "頭肩頂" },
       { "id": "cup_handle", "name": "杯柄型態" },
       { "id": "breakout_retest", "name": "突破壓力回測" },
-      { "id": "breakdown_retest", "name": "跌破支撐反彈" }
+      { "id": "breakdown_retest", "name": "跌破支撐反彈" },
+      { "id": "macd_hist_bull", "name": "MACD柱底背離" },
+      { "id": "macd_hist_bear", "name": "MACD柱頂背離" }
     ]
   }
   ```
 
 ### 2. `GET /api/pattern/scan`
-- **用途**：型態選股過濾（支援多型態與全型態一次掃描）。母體固定為 `db/tickers/tick_universe.parquet` 約 400 檔股票。
+- **用途**：讀取 HF 同步下來的離線 D1 型態選股結果（支援多型態與全型態一次查詢）。母體固定為 `db/tickers/tick_universe.parquet`。
 - **查詢參數**：
   - `pattern_type` (str): 型態種類，支援 3 種傳參方式：
     1. **單一型態**：`triangle`
     2. **多個型態 (逗號分隔)**：`triangle,w_bottom,m_top`
-    3. **全型態掃描**：`all`（一次掃描所有 10 種已註冊型態）
+    3. **全型態查詢**：`all`（一次查詢所有已註冊型態）
   - `timeframe` (str): 型態掃描固定只支援 `day` / `D1`（預設 `day`）；`1m`, `3m`, `5m` 已移除。
   - `date` (str, 選填): 基準日期 `YYYY-MM-DD`（預設最新交易日）。
   - `min_score` (float): 最低信心分數門檻，預設 `60.0`。
   - `limit` (int): K 線視窗根數，預設 `120` 根。
-- **回傳內容**：符合條件的股票清單，包含 `pattern_types` 與 `results` 平舖陣列。每筆匹配結果包含 `stock_name` / `name`（股票中文名稱，例如 `"台積電"`）與 `in_tick_universe: true`。若同一股票符合多個型態，會保留各自獨立的型態匹配項目，並按信心分數全域遞減排序。
+- **回傳內容**：符合條件的股票清單，包含 `pattern_types` 與 `results` 平舖陣列。每筆匹配結果包含 `stock_name` / `name`（股票中文名稱，例如 `"台積電"`）、`event_date` 與 `in_tick_universe: true`。若同一股票符合多個型態，會保留各自獨立的型態匹配項目。
 
 ### 3. `GET /api/pattern/{stock_id}/detail`
 - **用途**：取得單一股票的 K 線歷史數據、型態繪圖座標、VWAP 與日壓力支撐水位。
-- **查詢參數**：`pattern_type`, `timeframe`, `date`, `limit`。`pattern_type=none` 時可用於純圖表 K 線；要跑型態偵測時只支援 `timeframe=day`。
+- **查詢參數**：`pattern_type`, `timeframe`, `date`, `limit`。`pattern_type=none` 時可用於純圖表 K 線；型態繪圖細節只支援 `timeframe=day`，且來源為離線 parquet payload。
 - **回傳內容**：
   - `stock_id`: 股票代號（例如 `"2330"`）。
   - `stock_name`: 股票中文名稱（例如 `"台積電"`）。
@@ -293,11 +295,13 @@ pattern/
 
 ## 11. 智慧快取機制 (In-Memory Caching)
 
-為了避免 tick_universe 約 400 檔重複掃描運算，採用**雙軌智慧記憶體快取**：
+型態掃描結果已改由 `backend/scripts/build_pattern_scan.py` 離線產生，再存到 HF 的
+`db/pattern_scan/d1/YYYY_MM.parquet`。API runtime 不再即時跑 detector。
+詳情端點仍有 K 線與圖表 payload 快取：
 
 - **快取 Key 結構**：
-  `(pattern_type, timeframe, date, min_score, limit, latest_ts)`
+  `(stock_id, pattern_type, timeframe, date, limit, full_day, latest_ts)`
 - **自動失效與更新**：
   - 快取 Key 自動綁定 `get_latest_candle_timestamp()`（最新 K 線時間戳）。
-  - **盤後時間**：日 K 資料不變，快取持續生效，二次查詢時間由 1.9 秒降至 **< 50ms**（加速約 40 倍）。
-- **參數隔離**：不同型態、日期或 K 線視窗根數的查詢條件會生成獨立 Key，互不干擾。
+  - **盤後時間**：日 K 資料不變，K 線與 overlay 查詢可持續使用快取。
+- **參數隔離**：不同股票、型態、日期或 K 線視窗根數的查詢條件會生成獨立 Key，互不干擾。

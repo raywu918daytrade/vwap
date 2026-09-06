@@ -1,0 +1,66 @@
+name: Build D1 Pattern Scan
+
+on:
+  schedule:
+    # 19:00 Asia/Taipei = 11:00 UTC
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Optional trading date YYYY-MM-DD. Empty means today in Asia/Taipei."
+        required: false
+        type: string
+      init_months:
+        description: "Optional one-time init window in months, for example 3."
+        required: false
+        type: string
+
+concurrency:
+  group: d1-pattern-scan
+  cancel-in-progress: false
+
+jobs:
+  build-pattern-scan:
+    name: Build and upload D1 pattern scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      HF_REPO_ID: ${{ secrets.HF_REPO_ID || vars.HF_REPO_ID || 'raywu918daytrade/daytrade' }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HUB_DISABLE_XET: "1"
+      TARGET_DATE: ${{ inputs.date }}
+      INIT_MONTHS: ${{ inputs.init_months }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Download market DB inputs
+        working-directory: backend
+        run: |
+          python -m scripts.sync_market_db_from_hf \
+            --only d1 adjustment_day tickers adjustment_factor tick_adjust_factor pattern_scan d1_flags adjustment_day_flags \
+            --no-prune
+
+      - name: Build and upload scan parquet
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${INIT_MONTHS:-}" ]; then
+            python -m scripts.build_pattern_scan --init-months "${INIT_MONTHS}" --upload
+          elif [ -n "${TARGET_DATE:-}" ]; then
+            python -m scripts.build_pattern_scan --date "${TARGET_DATE}" --upload
+          else
+            python -m scripts.build_pattern_scan --date "$(TZ=Asia/Taipei date +%F)" --upload
+          fi

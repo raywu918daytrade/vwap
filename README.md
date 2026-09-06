@@ -42,11 +42,12 @@ push 到 `main` 後會由 GitHub Actions 自動部署到 Oracle Cloud；workflow
 
 ## 保留功能
 
-- VWAP框：`/vwap_sr_replay`、`/vwap_breakout/today`、`/sr_vwap_cross/today`、`/vwap_activity`、`/vwap_macd_div`、`/vwap_obv_div`，並整合 `/api/pattern/types`、`/api/pattern/scan/submit` 型態掃描結果
+- VWAP框：`/vwap_sr_replay`、`/vwap_breakout/today`、`/sr_vwap_cross/today`、`/vwap_activity`、`/vwap_macd_div`、`/vwap_obv_div`，並整合 `/api/pattern/types`、`/api/pattern/scan` 離線型態掃描結果
 - 觀察框：前端 localStorage 保存觀察股票，沿用 VWAP/SR/MACD/OBV 顯示
 - K線圖：`/api/pattern/{stock_id}/detail` 提供日K、M1K、型態線、轉折點、VWAP、日壓力支撐疊圖；VWAP/觀察列另保留 MACD、OBV、0050 子面板
-- 歷史資料同步：`backend/scripts/sync_market_db_from_hf.py` 從外部維護的 Hugging Face dataset 下載 `db/`
-- HF 同步：`backend/main/startup_data.py` 會視本機 D1 flag 新鮮度呼叫 HF 同步；`backend/main/live_trader.py` 在服務常駐時預設每天 19:00 再檢查一次。本專案不再負責每日資料更新或上傳 HF
+- 歷史資料同步：`backend/scripts/sync_market_db_from_hf.py` 從外部維護的 Hugging Face dataset 下載 `db/`，包含 `db/pattern_scan/d1` 型態結果
+- 型態離線掃描：`backend/scripts/build_pattern_scan.py` 可在本機初始化最近 N 個月結果並上傳 HF；`.github/workflows/build-pattern-scan.yml` 會每天台北 19:00 掃當日 D1 型態並上傳 HF
+- HF 同步：`backend/main/startup_data.py` 會視本機 D1 flag 新鮮度呼叫 HF 同步；`backend/main/live_trader.py` 在服務常駐時預設每天 19:00 再檢查一次。原始歷史資料仍由舊專案維護，新專案只產生/讀取型態掃描結果
 - 即時連線：`backend/fubon/marketdata_ws.py`
 
 ## 盤中補資料

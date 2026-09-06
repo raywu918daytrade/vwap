@@ -109,14 +109,25 @@ repo，也不要放 `GITHUB_DAY_TRADE` token。
 .github/workflows/deploy-oracle.yml
 ```
 
+型態離線掃描 workflow：
+
+```text
+.github/workflows/build-pattern-scan.yml
+```
+
 每次 push 到 `main`，或手動在 GitHub Actions 按 `workflow_dispatch`，都會部署到
 `/home/ubuntu/vwap`。
+
+型態掃描 workflow 預設每天台北時間 19:00 執行，只掃當天 D1 型態並上傳到 HF。
+第一次初始化最近三個月時，可以手動 dispatch 並填 `init_months=3`；也可以在本機跑
+`python -m scripts.build_pattern_scan --init-months 3 --upload`。
 
 GitHub repo 需要設定這些 Secrets / Variables：
 
 必填 Secret：
 
 - `ORACLE_SSH_PRIVATE_KEY`：GitHub Actions 登入 Oracle VM 用的私鑰。
+- `HF_TOKEN`：Hugging Face dataset 寫入 token，供型態掃描 workflow 上傳 parquet。
 
 建議 Secret：
 
@@ -129,6 +140,9 @@ GitHub repo 需要設定這些 Secrets / Variables：
 - `ORACLE_USER`：預設 `ubuntu`
 - `ORACLE_PORT`：預設 `22`
 - `ORACLE_DEPLOY_PATH`：預設 `/home/ubuntu/vwap`
+- `HF_REPO_ID`：Hugging Face dataset repo id；型態掃描 workflow 預設用
+  `raywu918daytrade/daytrade`，只有要改 dataset 時才需要覆蓋。若不放
+  Variable，也可改放同名 Secret。
 
 建議產生一把只給 GitHub Actions 用的 SSH key，不要用自己的日常登入私鑰：
 
@@ -277,6 +291,7 @@ runtime 目錄用 bind mount 留在 VM：
 ## 資料保留規則
 
 - `db/m1`, `db/m5_std`：rolling 24 個月份。
+- `db/pattern_scan/d1`：離線 D1 型態掃描結果，按月 parquet shard 全量保留。
 - `db/m1_live`：最近 14 個交易檔。
 - `log`：最近 7 個日曆天。
 - `logs`：最近 14 個日曆天。
@@ -306,6 +321,17 @@ docker compose -f docker-compose.oracle.yml logs -f backend
 
 # 手動跑 HF 同步
 docker compose -f docker-compose.oracle.yml exec backend python -m scripts.sync_market_db_from_hf
+
+# 只同步型態查表資料
+docker compose -f docker-compose.oracle.yml exec backend python -m scripts.sync_market_db_from_hf --only pattern_scan
+
+# 本機第一次初始化最近 3 個月 D1 型態並上傳 HF
+cd backend
+python -m scripts.build_pattern_scan --init-months 3 --upload
+
+# 本機或 GitHub Actions 手動補單日型態
+cd backend
+python -m scripts.build_pattern_scan --date 2026-09-04 --upload
 
 # 手動調成保留 36 個月分K
 docker compose -f docker-compose.oracle.yml exec backend python -m scripts.sync_market_db_from_hf --intraday-months 36
