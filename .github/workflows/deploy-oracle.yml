@@ -80,14 +80,19 @@ jobs:
             /tmp/vwap-release.tgz \
             "${ORACLE_USER}@${ORACLE_HOST}:${remote_archive}"
 
+      - name: Create deploy version
+        run: |
+          echo "APP_VERSION=$(TZ=Asia/Taipei date +'%Y%m%d-%H%M')" >> "${GITHUB_ENV}"
+
       - name: Deploy on Oracle
         run: |
           set -euo pipefail
           remote_archive="/tmp/vwap-release-${GITHUB_SHA}.tgz"
-          remote_env="$(printf 'DEPLOY_ARCHIVE=%q DEPLOY_PATH=%q DEPLOY_COMMIT=%q' \
+          remote_env="$(printf 'DEPLOY_ARCHIVE=%q DEPLOY_PATH=%q DEPLOY_COMMIT=%q APP_VERSION=%q' \
             "${remote_archive}" \
             "${ORACLE_DEPLOY_PATH}" \
-            "${GITHUB_SHA}")"
+            "${GITHUB_SHA}" \
+            "${APP_VERSION}")"
           ssh -i ~/.ssh/oracle_vwap \
             -p "${ORACLE_PORT}" \
             -o IdentitiesOnly=yes \

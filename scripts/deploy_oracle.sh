@@ -4,6 +4,7 @@ set -Eeuo pipefail
 deploy_path="${DEPLOY_PATH:-$HOME/vwap}"
 archive="${DEPLOY_ARCHIVE:?DEPLOY_ARCHIVE is required}"
 commit="${DEPLOY_COMMIT:-unknown}"
+export APP_VERSION="${APP_VERSION:-$(TZ=Asia/Taipei date +%Y%m%d-%H%M)}"
 compose_file="docker-compose.oracle.yml"
 base_dir="$(dirname "${deploy_path}")"
 release_dir="$(mktemp -d "${base_dir}/.vwap-release.XXXXXX")"
@@ -14,7 +15,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Deploying vwap ${commit} to ${deploy_path}"
+echo "Deploying vwap ${commit} (${APP_VERSION}) to ${deploy_path}"
 
 if [ ! -f "${archive}" ]; then
   echo "Release archive not found: ${archive}" >&2

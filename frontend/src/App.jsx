@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { apiUrl, fetchJson, patternDetailPath } from "./api.js";
 import { formatTaipeiClock, previousTaipeiWeekdayIso, taipeiTodayIso } from "./date.js";
 import { TIMEFRAME_LABEL, priceSummary } from "./chartData.js";
@@ -6,6 +7,7 @@ import TradingViewChart, { indicatorLabel } from "./TradingViewChart.jsx";
 
 const DEFAULT_STOCK = "0050";
 const PRODUCT_NAME = "盤勢雷達";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "local";
 const SIGNAL_LABEL = "盤中訊號";
 const BASELINE_LABEL = "基準線";
 const PATTERN_TIMEFRAME = "day";
@@ -91,8 +93,10 @@ const ACTIVITY_DEFAULTS = {
   open5_rng: "",
   vol5_pr: "0.5",
 };
-const VWAP_FILTER_DEFAULT_VERSION = "2";
+const VWAP_FILTER_DEFAULT_VERSION = "4";
 const VWAP_FILTER_DEFAULT_VERSION_KEY = "vwapFilterDefaultVersion";
+const CHART_INDICATOR_DEFAULT_VERSION = "2";
+const CHART_INDICATOR_DEFAULT_VERSION_KEY = "chartIndicatorDefaultVersion";
 
 function patternTypeId(type) {
   return String(type?.id || type?.pattern_type || type || "");
@@ -140,14 +144,12 @@ function StatusBadge({ status }) {
   return <span className="badge badge-warning badge-sm">連線中</span>;
 }
 
-function HealthLine({ health, clock }) {
-  const coverage = health?.coverage?.total ? `${health.coverage.arrived}/${health.coverage.total}` : "-";
+function HealthLine({ health, clock, version }) {
   return (
     <div className="hidden items-center gap-3 text-xs text-base-content/60 md:flex">
-      <span>採集：{health?.collector || "-"}</span>
-      <span>涵蓋率：{coverage}</span>
       <span>連線數：{health?.ws_clients ?? health?.sse_clients ?? "-"}</span>
       <span>更新：{clock}</span>
+      <span>版本：{version}</span>
     </div>
   );
 }
@@ -192,6 +194,12 @@ function initialActivityFilters() {
       return [key, seedDefaults ? ACTIVITY_DEFAULTS[key] || "" : saved != null ? saved : ACTIVITY_DEFAULTS[key] || ""];
     }),
   );
+}
+
+function initialChartIndicatorMode() {
+  if (sessionStorage.getItem(CHART_INDICATOR_DEFAULT_VERSION_KEY) !== CHART_INDICATOR_DEFAULT_VERSION) return "idx";
+  const saved = sessionStorage.getItem("chartIndicatorMode");
+  return ["macd", "obv", "idx"].includes(saved) ? saved : "idx";
 }
 
 function initialSessionFlag(storageKey, defaultValue) {
@@ -324,6 +332,42 @@ function isoDate(value) {
 
 function displayDate(value) {
   return isoDate(value).replaceAll("-", "/");
+}
+
+function monthKey(value) {
+  const date = isoDate(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.slice(0, 7) : "";
+}
+
+function shiftMonth(month, delta) {
+  const match = /^(\d{4})-(\d{2})$/.exec(month || "");
+  if (!match) return monthKey(taipeiTodayIso());
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1 + delta, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function clampMonth(month, minMonth, maxMonth) {
+  if (minMonth && month < minMonth) return minMonth;
+  if (maxMonth && month > maxMonth) return maxMonth;
+  return month;
+}
+
+function calendarCells(month) {
+  const match = /^(\d{4})-(\d{2})$/.exec(month || "");
+  if (!match) return [];
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const firstWeekday = new Date(Date.UTC(year, monthIndex, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const cellCount = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+  return Array.from({ length: cellCount }, (_, index) => {
+    const day = index - firstWeekday + 1;
+    if (day < 1 || day > daysInMonth) return null;
+    return {
+      date: `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      day,
+    };
+  });
 }
 
 function daysBetweenIso(fromDate, toDate) {
@@ -474,11 +518,166 @@ function ChartIndicatorControls({ value, onChange }) {
   );
 }
 
+function DateCalendarPicker({ value, dates, today, onChange }) {
+  const sortedDates = useMemo(() => [...new Set(dates || [])].filter(Boolean).sort(), [dates]);
+  const dateSet = useMemo(() => new Set(sortedDates), [sortedDates]);
+  const minMonth = monthKey(sortedDates[0]);
+  const maxMonth = monthKey(sortedDates[sortedDates.length - 1]);
+  const fallbackMonth = monthKey(value) || maxMonth || monthKey(today);
+  const [open, setOpen] = useState(false);
+  const [viewMonth, setViewMonth] = useState(fallbackMonth);
+  const [popupStyle, setPopupStyle] = useState({ left: 0, top: 0 });
+  const rootRef = useRef(null);
+  const popupRef = useRef(null);
+
+  useEffect(() => {
+    const nextMonth = clampMonth(monthKey(value) || maxMonth || monthKey(today), minMonth, maxMonth);
+    setViewMonth(nextMonth);
+  }, [maxMonth, minMonth, today, value]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    function updatePopupPosition() {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = 256;
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+      setPopupStyle({ left, top: rect.bottom + 4 });
+    }
+
+    function closeOnOutsidePointer(event) {
+      if (!rootRef.current?.contains(event.target) && !popupRef.current?.contains(event.target)) setOpen(false);
+    }
+
+    function closeOnEscape(event) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    updatePopupPosition();
+    window.addEventListener("resize", updatePopupPosition);
+    window.addEventListener("scroll", updatePopupPosition, true);
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("resize", updatePopupPosition);
+      window.removeEventListener("scroll", updatePopupPosition, true);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  const cells = useMemo(() => calendarCells(viewMonth), [viewMonth]);
+  const canPrev = Boolean(minMonth) && viewMonth > minMonth;
+  const canNext = Boolean(maxMonth) && viewMonth < maxMonth;
+
+  const calendarPopup =
+    open && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            ref={popupRef}
+            className="fixed z-[1000] w-64 rounded border border-base-300 bg-base-200 p-3 shadow"
+            style={popupStyle}
+          >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className={`btn btn-xs rounded ${value ? "" : "btn-primary"}`}
+                onClick={() => {
+                  onChange("");
+                  setOpen(false);
+                }}
+              >
+                即時/今日
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-square btn-xs rounded"
+                title="關閉"
+                aria-label="關閉"
+                onClick={() => setOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="mb-2 flex items-center justify-between">
+              <button
+                type="button"
+                className="btn btn-square btn-xs rounded"
+                disabled={!canPrev}
+                aria-label="上一個月"
+                onClick={() => setViewMonth((month) => clampMonth(shiftMonth(month, -1), minMonth, maxMonth))}
+              >
+                ‹
+              </button>
+              <div className="text-sm font-semibold text-base-content">{viewMonth?.replace("-", "/")}</div>
+              <button
+                type="button"
+                className="btn btn-square btn-xs rounded"
+                disabled={!canNext}
+                aria-label="下一個月"
+                onClick={() => setViewMonth((month) => clampMonth(shiftMonth(month, 1), minMonth, maxMonth))}
+              >
+                ›
+              </button>
+            </div>
+            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-base-content/45">
+              {["日", "一", "二", "三", "四", "五", "六"].map((label) => (
+                <div key={label}>{label}</div>
+              ))}
+            </div>
+            <div className="mt-1 grid grid-cols-7 gap-1">
+              {cells.map((cell, index) => {
+                if (!cell) return <div key={`blank-${index}`} className="h-7" />;
+                const enabled = dateSet.has(cell.date);
+                const selected = value === cell.date;
+                return (
+                  <button
+                    key={cell.date}
+                    type="button"
+                    className={`btn btn-square btn-xs h-7 min-h-7 w-7 rounded text-xs ${
+                      selected ? "btn-primary" : enabled ? "bg-base-100" : "btn-disabled bg-base-300/30 text-base-content/25"
+                    }`}
+                    disabled={!enabled}
+                    title={enabled ? displayDate(cell.date) : "此日無資料"}
+                    onClick={() => {
+                      onChange(cell.date);
+                      setOpen(false);
+                    }}
+                  >
+                    {cell.day}
+                  </button>
+                );
+              })}
+            </div>
+            {!sortedDates.length ? <div className="mt-2 text-center text-xs text-warning">尚未載入日期資料</div> : null}
+          </div>,
+          document.body,
+        )
+      : null;
+
+  return (
+    <div ref={rootRef} className="relative shrink-0">
+      <button
+        type="button"
+        className="btn btn-xs w-36 justify-between rounded border-base-300 bg-base-100"
+        title="選擇已有資料的日期"
+        aria-label="選擇日期"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{value ? displayDate(value) : "即時/今日"}</span>
+        <span className="text-[10px] text-base-content/45">日曆</span>
+      </button>
+      {calendarPopup}
+    </div>
+  );
+}
+
 export default function App() {
   const [stockId, setStockId] = useState(() => localStorage.getItem("chartStock") || DEFAULT_STOCK);
   const [selectedEventKey, setSelectedEventKey] = useState("");
   const [chartContext, setChartContext] = useState({ kind: "manual" });
-  const [chartIndicatorMode, setChartIndicatorMode] = useState(() => sessionStorage.getItem("chartIndicatorMode") || "macd");
+  const [chartIndicatorMode, setChartIndicatorMode] = useState(initialChartIndicatorMode);
   const [vwapDate, setVwapDate] = useState(() => initialSavedDate("vwapDate"));
   const [timeframe] = useState(() => localStorage.getItem("chartTimeframe") || "1m");
   const [dayData, setDayData] = useState(null);
@@ -516,7 +715,7 @@ export default function App() {
   const [vwapLoading, setVwapLoading] = useState(false);
   const [vwapError, setVwapError] = useState("");
   const [vwapSearch, setVwapSearch] = useState("");
-  const [repeatEvents, setRepeatEvents] = useState(() => initialSessionFlag("vwapRepeat", true));
+  const [repeatEvents, setRepeatEvents] = useState(false);
   const [showAllCandidates, setShowAllCandidates] = useState(() => initialSessionFlag("vwapShowAll", false));
   const [srOnly, setSrOnly] = useState(() => initialSessionFlag("vwapSrFilter", true));
   const [macdOnly, setMacdOnly] = useState(() => initialSessionFlag("vwapMacdFilter", false));
@@ -548,7 +747,7 @@ export default function App() {
 
   useEffect(() => {
     if (sessionStorage.getItem(VWAP_FILTER_DEFAULT_VERSION_KEY) === VWAP_FILTER_DEFAULT_VERSION) return;
-    setRepeatEvents(true);
+    setRepeatEvents(false);
     setShowAllCandidates(false);
     setSrOnly(true);
     setMacdOnly(false);
@@ -736,13 +935,12 @@ export default function App() {
   }, [universe]);
 
   useEffect(() => {
-    sessionStorage.setItem("vwapRepeat", repeatEvents ? "1" : "0");
     sessionStorage.setItem("vwapShowAll", showAllCandidates ? "1" : "0");
     sessionStorage.setItem("vwapSrFilter", srOnly ? "1" : "0");
     sessionStorage.setItem("vwapMacdFilter", macdOnly ? "1" : "0");
     sessionStorage.setItem("vwapObvFilter", obvOnly ? "1" : "0");
     sessionStorage.setItem(VWAP_FILTER_DEFAULT_VERSION_KEY, VWAP_FILTER_DEFAULT_VERSION);
-  }, [repeatEvents, showAllCandidates, srOnly, macdOnly, obvOnly]);
+  }, [showAllCandidates, srOnly, macdOnly, obvOnly]);
 
   useEffect(() => {
     sessionStorage.setItem("vwapPatternFilters", JSON.stringify(selectedPatternTypes));
@@ -750,6 +948,7 @@ export default function App() {
 
   useEffect(() => {
     sessionStorage.setItem("chartIndicatorMode", chartIndicatorMode);
+    sessionStorage.setItem(CHART_INDICATOR_DEFAULT_VERSION_KEY, CHART_INDICATOR_DEFAULT_VERSION);
   }, [chartIndicatorMode]);
 
   useEffect(() => {
@@ -1261,7 +1460,7 @@ export default function App() {
             <StatusBadge status={connection} />
           </div>
           <div className="flex items-center gap-2">
-            <HealthLine health={health} clock={clock} />
+            <HealthLine health={health} clock={clock} version={APP_VERSION} />
             <button
               type="button"
               className={`btn btn-xs rounded ${watchDrawerOpen ? "btn-primary" : ""}`}
@@ -1289,22 +1488,7 @@ export default function App() {
             <div className="relative z-20 shrink-0 border-b border-base-300 bg-base-200">
               <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.5rem] items-start gap-1 px-2 py-1">
                 <div className="flex min-w-0 w-full gap-1 overflow-x-auto pb-1">
-                  <select
-                    className="select select-bordered select-xs w-36 shrink-0 rounded"
-                    value={vwapDate}
-                    title="只列已有離線型態結果的日期；即時會回到今日資料流"
-                    onChange={(e) => setVwapDate(e.target.value)}
-                  >
-                    <option value="">即時/今日</option>
-                    {vwapDate && patternScanDates.length > 0 && !patternScanDates.includes(vwapDate) ? (
-                      <option value={vwapDate}>{displayDate(vwapDate)}</option>
-                    ) : null}
-                    {[...patternScanDates].reverse().map((date) => (
-                      <option key={date} value={date}>
-                        {displayDate(date)}
-                      </option>
-                    ))}
-                  </select>
+                  <DateCalendarPicker value={vwapDate} dates={patternScanDates} today={today} onChange={setVwapDate} />
                   <input
                     className="input input-bordered input-xs w-20 shrink-0 rounded uppercase"
                     placeholder="代號"
