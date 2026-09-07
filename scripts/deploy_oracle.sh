@@ -70,6 +70,30 @@ for _ in $(seq 1 60); do
     echo "Health check passed:"
     cat /tmp/vwap-health.json
     echo
+
+    # /health can be HTTP 200 even when the Fubon realtime collector is down.
+    # Give the collector a short grace period, then print backend runtime logs
+    # into the deploy job so production connection failures are diagnosable.
+    collector_status="$(python3 - <<'PY'
+import json
+try:
+    with open('/tmp/vwap-health.json', 'r', encoding='utf-8') as fh:
+        print(json.load(fh).get('collector', 'unknown'))
+except Exception:
+    print('unknown')
+PY
+)"
+    if [ "${collector_status}" != "running" ]; then
+      echo "Collector is ${collector_status}; waiting 15s and collecting backend diagnostics..."
+      sleep 15
+      curl -fsS http://127.0.0.1/health >/tmp/vwap-health-after.json || true
+      echo "Health after grace period:"
+      cat /tmp/vwap-health-after.json 2>/dev/null || true
+      echo
+      echo "Recent backend logs:"
+      docker compose -f "${compose_file}" logs --tail=160 backend || true
+    fi
+
     docker compose -f "${compose_file}" ps
     docker image prune -f >/dev/null || true
     exit 0
