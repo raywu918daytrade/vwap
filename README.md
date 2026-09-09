@@ -40,6 +40,12 @@ docker compose -f docker-compose.oracle.yml up -d --build
 
 push 到 `main` 後會由 GitHub Actions 自動部署到 Oracle Cloud；workflow 會保留雲端 `backend/.env`、`backend/db`、`backend/log*` 與 HF cache，只替換程式碼並重建 compose。
 
+## Render
+
+`render` branch 可用根目錄的 `render.yaml` 建立單一 Render Web Service。Render 會用 `backend/Dockerfile` build 一個 Docker image：先建置 `frontend/`，再把 Vite 產物放進 FastAPI 的 `/app/static`，最後由同一個後端 process 服務 `/`、`/api/*`、SSE 與 `/health`。
+
+部署時在 Render Blueprint 填入 secrets：`FUGLE`、`FUGLE_DAYTRADE`、`FUBON_ID`、`FUBON_API_KEY`、`FUBON_CERT_B64`、`HF_REPO_ID`、`HF_TOKEN`。若富邦憑證有密碼，再手動加 `FUBON_CERT_PASS`。不要手動設定 `PORT`；Render 會注入，後端會綁定 `0.0.0.0:$PORT`。詳細注意事項見 `docs/render.md`。
+
 ## 保留功能
 
 - VWAP框：`/vwap_sr_replay`、`/vwap_breakout/today`、`/sr_vwap_cross/today`、`/vwap_activity`、`/vwap_macd_div`、`/vwap_obv_div`，並整合 `/api/pattern/types`、`/api/pattern/scan` 離線型態掃描結果

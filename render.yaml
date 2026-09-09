@@ -1,0 +1,73 @@
+services:
+  - type: web
+    name: vwap
+    runtime: docker
+    branch: render
+    region: singapore
+    plan: free
+    numInstances: 1
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: TZ
+        value: Asia/Taipei
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: HF_HOME
+        value: /app/.cache/huggingface
+      - key: HF_HUB_DISABLE_XET
+        value: "1"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
+      - key: NUMEXPR_NUM_THREADS
+        value: "1"
+      - key: VECLIB_MAXIMUM_THREADS
+        value: "1"
+      - key: ARROW_NUM_THREADS
+        value: "1"
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      - key: FUBON_BACKFILL_WORKERS
+        value: "2"
+      - key: CACHE_PREWARM_MONTHS
+        value: "1"
+      - key: CACHE_PREWARM_STARTUP_MONTHS
+        value: "0"
+      - key: CACHE_PREWARM_STARTUP_LIST_DATES
+        value: "0"
+      - key: CACHE_PREWARM_STARTUP_CHART_DATES
+        value: "0"
+      - key: CACHE_PREWARM_CHART_MONTHS
+        value: "0"
+      - key: CACHE_PREWARM_CHART_DATES
+        value: "0"
+      - key: CACHE_PREWARM_CHART_ROWS
+        value: "16"
+      - key: VWAP_BUNDLE_DISK_CACHE
+        value: "1"
+      - key: PATTERN_SCAN_DISK_CACHE
+        value: "1"
+      - key: PATTERN_DETAIL_DISK_CACHE
+        value: "1"
+      - key: WATCHLIST_QUOTES
+        value: "0050"
+      - key: FUGLE
+        sync: false
+      - key: FUGLE_DAYTRADE
+        sync: false
+      - key: FUBON_ID
+        sync: false
+      - key: FUBON_API_KEY
+        sync: false
+      - key: FUBON_CERT_B64
+        sync: false
+      - key: HF_REPO_ID
+        sync: false
+      - key: HF_TOKEN
+        sync: false
