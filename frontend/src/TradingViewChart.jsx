@@ -502,13 +502,13 @@ export default function TradingViewChart({
   obvMap,
 }) {
   const containerRef = useRef(null);
+  const hasCandles = Boolean(data?.candles?.length);
 
   useEffect(() => {
     const container = containerRef.current;
     const sourceCandles = data?.candles || [];
     if (!container || !sourceCandles.length) return undefined;
 
-    container.innerHTML = "";
     const isFullDay = variant === "intraday" && ["1m", "3m", "5m"].includes(timeframe);
     const plottedCandles = isFullDay ? plotFullDay(sourceCandles, timeframe) : sourceCandles;
     const chart = createChart(container, baseOptions(container, variant));
@@ -561,12 +561,12 @@ export default function TradingViewChart({
     };
     const observer = new ResizeObserver(resize);
     observer.observe(container);
-    requestAnimationFrame(resize);
+    const resizeFrame = requestAnimationFrame(resize);
 
     return () => {
       observer.disconnect();
+      cancelAnimationFrame(resizeFrame);
       chart.remove();
-      container.innerHTML = "";
     };
   }, [
     data,
@@ -585,20 +585,17 @@ export default function TradingViewChart({
     timeframe,
   ]);
 
-  if (!data?.candles?.length) {
-    return (
-      <div className="flex h-full min-h-[260px] items-center justify-center text-base-content/50">
+  return (
+    <div className="relative h-full min-h-[280px]">
+      <div ref={containerRef} className="h-full w-full" />
+      {!hasCandles ? (
+        <div className="absolute inset-0 flex items-center justify-center text-base-content/50">
         <div className="text-center">
           <div className="mb-2 text-2xl">K</div>
           <div className="text-xs">{emptyMessage || "尚無K線資料"}</div>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative h-full min-h-[280px]">
-      <div ref={containerRef} className="h-full w-full" />
+        </div>
+      ) : null}
     </div>
   );
 }

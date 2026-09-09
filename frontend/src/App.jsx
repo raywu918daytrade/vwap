@@ -11,7 +11,6 @@ const APP_VERSION = "local";
 const SIGNAL_LABEL = "盤中訊號";
 const BASELINE_LABEL = "基準線";
 const PATTERN_TIMEFRAME = "day";
-const PATTERN_TIMEFRAME_LABEL = "D1";
 const PATTERN_TYPE_META = {
   w_bottom: { side: "bull", rank: 0 },
   head_shoulders_bottom: { side: "bull", rank: 1 },
@@ -27,26 +26,14 @@ const PATTERN_TYPE_META = {
   macd_hist_bear: { side: "bear", rank: 30 },
 };
 const PATTERN_SIDE_ORDER = { bull: 0, bear: 1 };
-const PATTERN_GROUPS = [
-  { side: "bull", label: "多方" },
-  { side: "bear", label: "空方" },
-];
 const PATTERN_SIDE_STYLE = {
   bull: {
-    group: "border-error/40 bg-error/5",
-    label: "text-error",
     head: "bg-error/10 text-error",
     cell: "bg-error/5",
-    buttonOn: "border-error bg-error/20 text-error hover:bg-error/25",
-    buttonOff: "border-error/25 bg-base-100/40 text-base-content/80 hover:border-error/50 hover:bg-error/10",
   },
   bear: {
-    group: "border-success/40 bg-success/5",
-    label: "text-success",
     head: "bg-success/10 text-success",
     cell: "bg-success/5",
-    buttonOn: "border-success bg-success/20 text-success hover:bg-success/25",
-    buttonOff: "border-success/25 bg-base-100/40 text-base-content/80 hover:border-success/50 hover:bg-success/10",
   },
 };
 const ACTIVITY_FILTERS = {
@@ -131,11 +118,6 @@ function sortPatternTypes(types) {
 function patternSideStyle(typeOrSide) {
   const side = typeOrSide === "bear" || typeOrSide === "bull" ? typeOrSide : patternSide(typeOrSide);
   return PATTERN_SIDE_STYLE[side] || PATTERN_SIDE_STYLE.bull;
-}
-
-function patternButtonClass(type, selected) {
-  const style = patternSideStyle(type);
-  return `btn btn-xs shrink-0 rounded border ${selected ? style.buttonOn : style.buttonOff}`;
 }
 
 function StatusBadge({ status }) {
@@ -704,9 +686,7 @@ export default function App() {
   const [patternLoading, setPatternLoading] = useState(false);
   const [patternError, setPatternError] = useState("");
   const [vwapMenuOpen, setVwapMenuOpen] = useState(false);
-  const [patternMenuOpen, setPatternMenuOpen] = useState(false);
   const vwapMenuRef = useRef(null);
-  const patternMenuRef = useRef(null);
   const watchDrawerRef = useRef(null);
 
   const [universe, setUniverse] = useState(() => localStorage.getItem("vwapUniverse") || "daytrade");
@@ -773,21 +753,17 @@ export default function App() {
   }, [stockId, activeChartDate, vwapDate]);
 
   useEffect(() => {
-    if (!vwapMenuOpen && !patternMenuOpen) return undefined;
+    if (!vwapMenuOpen) return undefined;
 
     function closeOnOutsidePointer(event) {
       if (vwapMenuOpen && !vwapMenuRef.current?.contains(event.target)) {
         setVwapMenuOpen(false);
-      }
-      if (patternMenuOpen && !patternMenuRef.current?.contains(event.target)) {
-        setPatternMenuOpen(false);
       }
     }
 
     function closeOnEscape(event) {
       if (event.key === "Escape") {
         setVwapMenuOpen(false);
-        setPatternMenuOpen(false);
       }
     }
 
@@ -797,7 +773,7 @@ export default function App() {
       document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [patternMenuOpen, vwapMenuOpen]);
+  }, [vwapMenuOpen]);
 
   useEffect(() => {
     if (!watchDrawerOpen) return undefined;
@@ -1191,15 +1167,6 @@ export default function App() {
     }
     return sortPatternTypes([...seen.values()]);
   }, [patternRows, patternTypes]);
-
-  const patternFilterGroups = useMemo(
-    () =>
-      PATTERN_GROUPS.map((group) => ({
-        ...group,
-        types: patternColumns.filter((type) => patternSide(type) === group.side),
-      })).filter((group) => group.types.length),
-    [patternColumns],
-  );
 
   const patternsByStock = useMemo(() => {
     const out = new Map();
@@ -1596,28 +1563,8 @@ export default function App() {
                         </select>
                       </label>
                     ))}
-                  </div>
-                </details>
-              </div>
-              <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.5rem] items-start gap-1 border-t border-base-300/70 px-2 py-1">
-                <div className="flex min-w-0 w-full items-start gap-1 overflow-hidden">
-                  <div className="shrink-0 pt-1 text-[11px] font-semibold text-base-content/60">D1型態</div>
-                  <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
-                    {patternFilterGroups.map((group) => {
-                      const style = patternSideStyle(group.side);
-                      return <div key={group.side} className={`flex shrink-0 items-center gap-1 rounded border px-1 py-0.5 ${style.group}`}>
-                        <span className={`shrink-0 px-1 text-[10px] font-semibold ${style.label}`}>{group.label}</span>
-                        {group.types.map((type) => <button key={type.id} className={patternButtonClass(type, selectedPatternTypes.includes(type.id))} title={selectedPatternTypes.includes(type.id) ? `取消${type.name}過濾` : `只看有${type.name}的股票`} onClick={() => togglePatternType(type.id)}>{type.name}</button>)}
-                      </div>;
-                    })}
-                  </div>
-                </div>
-                <details ref={patternMenuRef} className="dropdown dropdown-end relative z-30 w-6 justify-self-end" open={patternMenuOpen}>
-                  <summary className="btn btn-square btn-xs rounded" title="D1型態設定" aria-label="D1型態設定" onClick={(event) => { event.preventDefault(); setPatternMenuOpen((open) => !open); }}>☰</summary>
-                  <div className="dropdown-content z-50 mt-1 max-h-36 w-56 overflow-y-auto rounded border border-base-300 bg-base-200 p-3 shadow">
-                    <div className="mb-2 flex items-center justify-between border-b border-base-300 pb-2"><span className="text-xs font-semibold text-base-content/70">D1型態</span><button type="button" className="btn btn-ghost btn-square btn-xs rounded" title="關閉" aria-label="關閉" onClick={() => setPatternMenuOpen(false)}>×</button></div>
-                    <button type="button" className="btn btn-xs mb-2 w-full rounded" onClick={() => setSelectedPatternTypes([])}>清除型態過濾</button>
-                    <label className="form-control w-full"><div className="label py-1"><span className="label-text text-xs">週期</span></div><select className="select select-bordered select-xs rounded" value={PATTERN_TIMEFRAME} disabled><option value={PATTERN_TIMEFRAME}>{PATTERN_TIMEFRAME_LABEL}</option></select></label>
+                    <div className="mt-3 border-t border-base-300 pt-2 text-xs font-semibold text-base-content/70">D1型態</div>
+                    <button type="button" className="btn btn-xs mt-2 w-full rounded" onClick={() => setSelectedPatternTypes([])}>清除型態過濾</button>
                     <label className="form-control mt-2 w-full"><div className="label py-1"><span className="label-text text-xs">日K根數</span></div><input type="number" className="input input-bordered input-xs rounded" value={patternLimit} min="20" max="500" step="10" onChange={(e) => setPatternLimit(Number(e.target.value) || 120)} /></label>
                   </div>
                 </details>
