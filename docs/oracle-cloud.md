@@ -69,7 +69,7 @@ OCI Security List 或 NSG 至少開：
 
 - TCP `443`：HTTPS
 
-目前 compose 只對外開 `80`。backend 的 `8000` 只在 Docker 內網給 nginx proxy。
+目前 compose 只對外開 `80`，直接映射到單一 app container 的 `8000`。
 
 ## 新 VM 初始安裝
 
@@ -268,15 +268,13 @@ docker compose -f docker-compose.oracle.yml up -d --build --remove-orphans
 
 ```bash
 docker compose -f docker-compose.oracle.yml restart backend
-docker compose -f docker-compose.oracle.yml restart web
 ```
 
 ## 架構
 
-`docker-compose.oracle.yml` 只跑兩個 container：
+`docker-compose.oracle.yml` 只跑一個 container：
 
-- `backend`：FastAPI + `main.live_trader`，負責 HF 同步、富邦即時 M1、API、SSE。
-- `web`：Nginx serve React build，並把 API/SSE proxy 到 backend。
+- `backend`：FastAPI + React build + `main.live_trader`，負責靜態頁面、HF 同步、富邦即時 M1、API 與 SSE。
 
 對外路徑：
 

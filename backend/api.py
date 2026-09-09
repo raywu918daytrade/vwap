@@ -28,6 +28,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 _TW = timezone(timedelta(hours=8))
 
@@ -808,6 +809,11 @@ async def event_stream(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+_FRONTEND_DIST = Path(os.environ.get("FRONTEND_DIST_DIR", Path(__file__).parent / "static"))
+if _FRONTEND_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
 
 
 def get_uvicorn_config(host: str = "0.0.0.0", port: int = 8000) -> uvicorn.Config:

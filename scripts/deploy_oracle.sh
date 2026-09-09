@@ -32,6 +32,13 @@ fi
 
 cd "${release_dir}"
 docker compose -f "${compose_file}" config --quiet
+
+# A 512 MB VM cannot reliably build while the live pandas/Fubon process is
+# holding most of RAM. Stop the previous release first; Docker layer cache is
+# retained, and the single app container is started again below.
+if [ -f "${deploy_path}/${compose_file}" ]; then
+  docker compose -f "${deploy_path}/${compose_file}" stop || true
+fi
 docker compose -f "${compose_file}" build
 
 mkdir -p "${deploy_path}/backend"

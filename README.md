@@ -36,7 +36,7 @@ mkdir -p backend/db backend/log backend/logs backend/.cache
 docker compose -f docker-compose.oracle.yml up -d --build
 ```
 
-對外只需要開 HTTP `80`；前端 Nginx 會 serve React build，並把 API、SSE 與圖表資料 proxy 到後端。完整步驟見 `docs/oracle-cloud.md`。
+對外只需要開 HTTP `80`；單一 FastAPI container 會提供 React build、API、SSE 與富邦即時行情。完整步驟見 `docs/oracle-cloud.md`。
 
 push 到 `main` 後會由 GitHub Actions 自動部署到 Oracle Cloud；workflow 會保留雲端 `backend/.env`、`backend/db`、`backend/log*` 與 HF cache，只替換程式碼並重建 compose。
 

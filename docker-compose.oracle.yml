@@ -2,13 +2,15 @@ name: vwap
 
 services:
   backend:
-    image: vwap-backend:local
+    image: vwap-app:local
     platform: linux/amd64
     mem_limit: 448m
     mem_reservation: 256m
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        VITE_APP_VERSION: ${APP_VERSION:-local}
     restart: unless-stopped
     env_file:
       - ./backend/.env
@@ -29,28 +31,11 @@ services:
       - ./backend/log:/app/log
       - ./backend/logs:/app/logs
       - ./backend/.cache:/app/.cache
-    expose:
-      - "8000"
+    ports:
+      - "${HTTP_PORT:-80}:8000"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=5)\""]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 60s
-
-  web:
-    image: vwap-frontend:local
-    platform: linux/amd64
-    mem_limit: 64m
-    mem_reservation: 32m
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_APP_VERSION: ${APP_VERSION:-local}
-    restart: unless-stopped
-    depends_on:
-      backend:
-        condition: service_healthy
-    ports:
-      - "${HTTP_PORT:-80}:80"
