@@ -948,13 +948,6 @@ export default function App() {
   const changeVwapDate = useCallback((nextDate) => {
     if (nextDate === vwapDate) return;
     signalLoadSeqRef.current += 1;
-    setVwapRowsRaw([]);
-    setSrRowsRaw([]);
-    setChgMap({});
-    setActivityMap({});
-    setMacdMap({});
-    setObvMap({});
-    setPatternRows([]);
     setSignalLoadedKey("");
     setSelectedEventKey("");
     setVwapError("");
@@ -1540,7 +1533,7 @@ export default function App() {
         <div className="grid min-h-0 grid-cols-1 overflow-hidden">
           <Panel
             title={SIGNAL_LABEL}
-            count={vwapRows.length}
+            count={vwapLoading ? 0 : vwapRows.length}
             actions={vwapLoading || patternLoading ? <span className="loading loading-spinner loading-xs text-primary" /> : null}
             bodyClassName="flex flex-col overflow-hidden"
             focused={focusedPanel === "vwap"}
@@ -1638,7 +1631,7 @@ export default function App() {
                     <th className="cursor-pointer" onClick={() => sortVwap("stock_id")}>股票</th><th className="cursor-pointer" onClick={() => sortVwap("chg_pct")}>漲幅</th><th className="cursor-pointer text-right" onClick={() => sortVwap("time")}>時間</th><th className="cursor-pointer text-center" onClick={() => sortVwap("sr_on")}>SR</th><th className="cursor-pointer text-center" onClick={() => sortVwap("macd_on")}>MACD</th><th className="cursor-pointer text-center" onClick={() => sortVwap("obv_on")}>OBV</th>
                     {patternColumns.map((type) => { const style = patternSideStyle(type); const checked = selectedPatternTypes.includes(type.id); return <th key={type.id} className={`cursor-pointer border-l border-base-300/40 text-center ${style.head}`} onClick={() => sortVwap(`pattern:${type.id}`)}><div className="flex items-center justify-center gap-1.5 whitespace-nowrap"><span>{type.name}</span><input type="checkbox" className="checkbox checkbox-xs" checked={checked} title={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`} aria-label={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); togglePatternType(type.id); }} /></div></th>; })}
                   </tr></thead>
-                  <tbody>{vwapRows.map((row, idx) => { const key = eventKey(row); const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id); return <tr key={`${key}-${idx}`} data-panel="vwap" data-row-index={idx} className={selected ? "bg-primary/15" : ""} onClick={() => selectMarketRow(row, key, "vwap")} onDoubleClick={() => toggleObsStock(row.stock_id)}><StockCell row={row}>{row.direction ? <div className={`mt-1 text-[10px] ${row.direction === "up" ? "text-error" : "text-success"}`}>{row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} ({BASELINE_LABEL} {Number(row.vwap).toFixed(2)})</div> : null}</StockCell><td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>{row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}</td><td className="text-right text-base-content/50">{hm(row.time)}</td><td className="text-center"><Lamp on={row.sr_on} kind="both" title="SR" /></td><td className="text-center"><Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" /></td><td className="text-center"><Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" /></td>{patternColumns.map((type) => <PatternSignalCell key={type.id} type={type} hit={row.pattern_hits?.get(type.id)} label={type.name} onSelect={() => selectMarketRow(row, key, "vwap", type.id)} />)}</tr>; })}</tbody>
+                  <tbody className={vwapLoading ? "invisible pointer-events-none" : ""}>{vwapRows.map((row, idx) => { const key = eventKey(row); const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id); return <tr key={`${key}-${idx}`} data-panel="vwap" data-row-index={idx} className={selected ? "bg-primary/15" : ""} onClick={() => selectMarketRow(row, key, "vwap")} onDoubleClick={() => toggleObsStock(row.stock_id)}><StockCell row={row}>{row.direction ? <div className={`mt-1 text-[10px] ${row.direction === "up" ? "text-error" : "text-success"}`}>{row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} ({BASELINE_LABEL} {Number(row.vwap).toFixed(2)})</div> : null}</StockCell><td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>{row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}</td><td className="text-right text-base-content/50">{hm(row.time)}</td><td className="text-center"><Lamp on={row.sr_on} kind="both" title="SR" /></td><td className="text-center"><Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" /></td><td className="text-center"><Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" /></td>{patternColumns.map((type) => <PatternSignalCell key={type.id} type={type} hit={row.pattern_hits?.get(type.id)} label={type.name} onSelect={() => selectMarketRow(row, key, "vwap", type.id)} />)}</tr>; })}</tbody>
                 </table>
               </div>
             ) : <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">該日尚無盤中 / SR 訊號</div>}
