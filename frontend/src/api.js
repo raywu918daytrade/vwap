@@ -4,7 +4,6 @@ const responseCache = new Map();
 const inflight = new Map();
 const HISTORICAL_TTL = Number.POSITIVE_INFINITY;
 const LIVE_TTL = 3000;
-const PREFETCH_STOCKS = 10;
 
 // The restored UI still contains one legacy 350ms debounce before loading a
 // selected VWAP/watch-list chart. There is no expensive client-side compute left
@@ -65,78 +64,6 @@ function remember(path, value) {
   });
 }
 
-function detailSiblingPaths(path) {
-  try {
-    const url = new URL(path, "http://local");
-    if (!/^\/api\/pattern\/[^/]+\/detail$/.test(url.pathname)) return [];
-    const stockId = decodeURIComponent(url.pathname.split("/")[3] || "");
-    const timeframe = url.searchParams.get("timeframe");
-    if (!stockId || timeframe !== "day") return [];
-    const date = url.searchParams.get("date") || "";
-    const siblings = [
-      patternDetailPath(stockId, { timeframe: "1m", date, limit: 120, fullDay: true }),
-    ];
-    if (stockId !== "0050") {
-      siblings.push(patternDetailPath("0050", { timeframe: "1m", date, limit: 120, fullDay: true }));
-    }
-    return siblings;
-  } catch {
-    return [];
-  }
-}
-
-function prefetchPaths(paths) {
-  for (const path of paths) {
-    if (!path || cachedValue(path) !== undefined || inflight.has(path)) continue;
-    void fetchJson(path).catch(() => {});
-  }
-}
-
-function prefetchFromBundle(path, payload) {
-  try {
-    const url = new URL(path, "http://local");
-    const date = url.searchParams.get("date") || "";
-    const rows = [...(payload?.vwap || []), ...(payload?.sr || [])];
-    const seen = new Set();
-    const paths = [];
-    for (const row of rows) {
-      const sid = String(row?.stock_id || "");
-      if (!sid || seen.has(sid)) continue;
-      seen.add(sid);
-      // Warm both chart panes. If the user clicks one of these rows, the current
-      // sequential App caller will consume the same in-flight/cache entries.
-      paths.push(patternDetailPath(sid, { timeframe: "day", date, limit: 120 }));
-      paths.push(patternDetailPath(sid, { timeframe: "1m", date, limit: 120, fullDay: true }));
-      if (seen.size >= PREFETCH_STOCKS) break;
-    }
-    paths.push(patternDetailPath("0050", { timeframe: "1m", date, limit: 120, fullDay: true }));
-    prefetchPaths(paths);
-  } catch {
-    // Prefetch is best-effort only.
-  }
-}
-
-function prefetchFromPatternScan(path, payload) {
-  if (!path.startsWith("/api/pattern/scan")) return;
-  try {
-    const url = new URL(path, "http://local");
-    const date = url.searchParams.get("date") || "";
-    const seen = new Set();
-    const paths = [];
-    for (const row of payload?.results || []) {
-      const sid = String(row?.stock_id || "");
-      const patternType = String(row?.pattern_type || "none");
-      if (!sid || seen.has(sid)) continue;
-      seen.add(sid);
-      paths.push(patternDetailPath(sid, { patternType, timeframe: "day", date, limit: 120 }));
-      if (seen.size >= PREFETCH_STOCKS) break;
-    }
-    prefetchPaths(paths);
-  } catch {
-    // Prefetch is best-effort only.
-  }
-}
-
 export async function fetchJson(path, options) {
   const canCache = cacheableRequest(path, options);
   if (canCache) {
@@ -145,10 +72,6 @@ export async function fetchJson(path, options) {
     const pending = inflight.get(path);
     if (pending) return pending;
   }
-
-  // A day-chart request immediately starts its 1m chart and 0050 siblings.
-  // Thus even the legacy sequential caller performs the network/I/O concurrently.
-  prefetchPaths(detailSiblingPaths(path));
 
   const request = (async () => {
     const response = await fetch(apiUrl(path), options);
@@ -168,8 +91,6 @@ export async function fetchJson(path, options) {
     }
     const payload = await response.json();
     if (canCache) remember(path, payload);
-    if (path.startsWith("/vwap_signal/bundle")) prefetchFromBundle(path, payload);
-    prefetchFromPatternScan(path, payload);
     return payload;
   })();
 
