@@ -4,7 +4,7 @@ services:
     runtime: docker
     branch: render
     region: singapore
-    plan: 0.5c-512mb
+    plan: free
     numInstances: 1
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
