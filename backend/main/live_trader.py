@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins as _builtins
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -406,12 +407,22 @@ def _run_collector_after_startup() -> None:
     _collector.start_collector(on_minute, backfill_done=state.backfill_done)
 
 
+def _server_port() -> int:
+    raw = os.environ.get("PORT", "8000")
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"PORT must be an integer, got {raw!r}") from exc
+
+
 if __name__ == "__main__":
     threading.Thread(target=_startup, daemon=True).start()
     threading.Thread(target=_daily_hf_sync, daemon=True).start()
     threading.Thread(target=_daily_refresh, daemon=True).start()
     threading.Thread(target=_run_collector_after_startup, daemon=True).start()
 
-    config = get_uvicorn_config(host="0.0.0.0", port=8000)
+    port = _server_port()
+    print(f"HTTP server listening on 0.0.0.0:{port}", flush=True)
+    config = get_uvicorn_config(host="0.0.0.0", port=port)
     server = uvicorn.Server(config)
     server.run()
