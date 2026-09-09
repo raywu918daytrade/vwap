@@ -82,7 +82,14 @@ def get_stock_candles(
         except Exception:
             limit = 120
     if timeframe == "day":
-        df = load_pattern_day_by_stock(stock_id, date=None)
+        ref_date = date or pd.Timestamp.now(tz="Asia/Taipei").strftime("%Y-%m-%d")
+        lookback_days = max(180, int((limit or 120) * 1.8))
+        start_date = (pd.Timestamp(ref_date) - pd.Timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        df = load_pattern_day_by_stock(
+            stock_id,
+            start_date=start_date,
+            end_date=str(ref_date)[:10],
+        )
         if date:
             df = df[df["date"] <= f"{date} 23:59:59"]
         else:

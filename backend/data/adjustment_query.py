@@ -87,24 +87,38 @@ def load_pattern_day(
     return df.sort_values(["stock_id", "date"]).reset_index(drop=True)
 
 
-def load_pattern_day_by_stock(stock_id: str, date: str = None) -> pd.DataFrame:
+def load_pattern_day_by_stock(
+    stock_id: str,
+    date: str = None,
+    start_date: str = None,
+    end_date: str = None,
+) -> pd.DataFrame:
     """載入單一股票在 db/adjustment_day/ 的日K（完整還原），只讀該股票的
     row group，不用像 load_pattern_day() 一樣把全市場都讀進記憶體。open/high/
     low/close 不用另外換算；volume 另外處理，見 _adjust_volume_only()。
 
-    date: 選填，格式 "YYYY-MM-DD"，指定只回傳該日那一筆；不填則回傳該股票
-    全部日K（依日期排序）。查無資料一律回傳空 DataFrame。"""
-    dataset = ds.dataset(str(_ROOT / "db/adjustment_day"), format="parquet")
+    date: 選填，格式 "YYYY-MM-DD"，指定只回傳該日那一筆。
+    start_date/end_date: 選填日期範圍，用來先限制需開啟的月份檔案。
+    查無資料一律回傳空 DataFrame。"""
+    paths = raw_query._dataset_paths(_ROOT / "db/adjustment_day", start_date, end_date)
+    if not paths:
+        return pd.DataFrame(columns=["stock_id", "date", "open", "high", "low", "close", "volume"])
+    dataset = ds.dataset(paths, format="parquet")
     filt = ds.field("stock_id") == stock_id
     if date is not None:
         filt = filt & (ds.field("date") == date)
+    else:
+        if start_date is not None:
+            filt = filt & (ds.field("date") >= start_date)
+        if end_date is not None:
+            filt = filt & (ds.field("date") <= end_date)
     table = dataset.to_table(filter=filt)
     if table.num_rows == 0:
         return pd.DataFrame(columns=["stock_id", "date", "open", "high", "low", "close", "volume"])
     df = table.to_pandas()
     df["date"] = pd.to_datetime(df["date"], format="mixed")
     df.drop_duplicates(subset=["date"], keep="last", inplace=True)
-    df = _adjust_volume_only(df, stock_id, date, None)
+    df = _adjust_volume_only(df, stock_id, date, start_date)
     return df.sort_values("date").reset_index(drop=True)
 
 
