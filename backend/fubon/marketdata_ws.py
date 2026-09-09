@@ -75,6 +75,8 @@ _COVERAGE_POLL_SEC = 1.0
 # 多執行緒下大家共用同一個節流時鐘，各自的網路等待時間可以互相重疊。
 _BACKFILL_INTERVAL = float(os.environ.get("FUBON_REST_INTERVAL", "0.25"))
 _BACKFILL_WORKERS = int(os.environ.get("FUBON_BACKFILL_WORKERS", "10"))
+_MARKET_CLOSE_HOUR = int(os.environ.get("MARKET_CLOSE_HOUR", "13"))
+_MARKET_CLOSE_MIN = int(os.environ.get("MARKET_CLOSE_MIN", "30"))
 
 
 def _live_path(date_str: str) -> Path:
@@ -188,8 +190,13 @@ class FubonM1Collector:
         # 時間，不是process啟動時間，所以前面模型載入/清單驗證等花的時間
         # 不會讓這個判斷失準。
         now_tw = datetime.now(_TW)
-        if (now_tw.hour, now_tw.minute) < (8, 45):
+        now_hm = (now_tw.hour, now_tw.minute)
+        if now_hm < (8, 45):
             print(f"[backfill] 現在還沒到8:45（{now_tw.strftime('%H:%M')}），市場尚未開盤，跳過backfill", flush=True)
+            if self._backfill_done:
+                self._backfill_done.set()
+        elif now_hm > (_MARKET_CLOSE_HOUR, _MARKET_CLOSE_MIN):
+            print(f"[backfill] 現在已收盤（{now_tw.strftime('%H:%M')}），跳過當日盤中缺口回補", flush=True)
             if self._backfill_done:
                 self._backfill_done.set()
         else:
@@ -287,12 +294,23 @@ class FubonM1Collector:
         with self._buffer_lock:
             if not self._buffer:
                 return
-            rows = list(self._buffer.values())
+            pending = self._buffer
+            self._buffer = {}
+
+        rows = list(pending.values())
 
         df = pd.DataFrame(rows)
-        with self._save_lock:
-            for date_str, g in df.groupby(df["date"].str[:10]):
-                _atomic_save(g.copy(), _live_path(date_str))
+        try:
+            with self._save_lock:
+                for date_str, g in df.groupby(df["date"].str[:10]):
+                    _atomic_save(g.copy(), _live_path(date_str))
+        except Exception:
+            # New WebSocket rows collected during the save take precedence;
+            # only restore snapshot rows whose key has not arrived again.
+            with self._buffer_lock:
+                for key, row in pending.items():
+                    self._buffer.setdefault(key, row)
+            raise
         print(f"[flush] 存檔 {len(df)} 筆（{df['stock_id'].nunique()} 支）", flush=True)
 
     # ── 每分鐘固定觸發一次 on_minute（保底機制）────────────────────────────
