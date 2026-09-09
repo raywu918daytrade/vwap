@@ -8,6 +8,7 @@ calculating 09:05 volume PR from historical M5 data on a small VM:
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,8 @@ VWAP_ACTIVITY_COLUMNS = [
     "open5_rng",
     "vol5_pr",
 ]
+_dates_cache: list[str] | None = None
+_dates_lock = threading.Lock()
 
 
 def _month_path(date_str: str) -> Path:
@@ -56,6 +59,11 @@ def has_activity_store() -> bool:
 
 def available_activity_dates() -> list[str]:
     """Return all dates present in local VWAP activity parquet shards."""
+    global _dates_cache
+    with _dates_lock:
+        if _dates_cache is not None:
+            return list(_dates_cache)
+
     dates: set[str] = set()
     for path in sorted(VWAP_ACTIVITY_DIR.glob("*.parquet")):
         try:
@@ -65,7 +73,17 @@ def available_activity_dates() -> list[str]:
         if df.empty:
             continue
         dates.update(_date_key(value) for value in df["scan_date"].dropna().unique())
-    return sorted(date for date in dates if date)
+    result = sorted(date for date in dates if date)
+    with _dates_lock:
+        _dates_cache = result
+    return list(result)
+
+
+def clear_cache() -> None:
+    """Clear the date index after local HF shards are replaced."""
+    global _dates_cache
+    with _dates_lock:
+        _dates_cache = None
 
 
 def read_vwap_activity(
@@ -159,4 +177,5 @@ def write_vwap_activity(date: str, metrics: dict[str, dict]) -> Path:
     if not df_all.empty:
         df_all = df_all.sort_values(["scan_date", "stock_id"])
     df_all.to_parquet(path, index=False)
+    clear_cache()
     return path

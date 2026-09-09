@@ -103,6 +103,7 @@ def sync_offline_signal_shards_from_hf() -> bool:
 
 def clear_market_query_caches() -> None:
     """Clear in-memory query caches after HF overwrites historical DB files."""
+    from pattern.activity_store import clear_cache as clear_activity_store_cache
     from pattern.pattern_api import clear_pattern_cache, reload_universe_cache
     from pattern.vwap_activity import clear_cache as clear_activity_cache
     from pattern.vwap_macd_div import clear_cache as clear_macd_cache
@@ -112,6 +113,7 @@ def clear_market_query_caches() -> None:
 
     clear_pattern_cache()
     reload_universe_cache()
+    clear_activity_store_cache()
     clear_signal_store_cache()
     clear_vwap_sr_caches()
     clear_activity_cache()

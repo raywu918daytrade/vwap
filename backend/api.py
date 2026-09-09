@@ -97,7 +97,6 @@ _lock = threading.Lock()
 _today_date: date | None = None
 _collector_status = "stopped"
 _collector_coverage: dict = {"arrived": 0, "total": 0}
-_candles: dict[str, list[dict]] = {}
 _quotes: dict[str, dict] = {}
 _vwap_breakout_signals: list[dict] = []
 _sr_vwap_cross_signals: list[dict] = []
@@ -205,7 +204,6 @@ def _reset_if_new_day() -> None:
     if _today_date == today:
         return
     _today_date = today
-    _candles.clear()
     _quotes.clear()
     _vwap_breakout_signals.clear()
     _sr_vwap_cross_signals.clear()
@@ -315,9 +313,9 @@ def _sr_vwap_event_key(e: dict) -> tuple[str, str, str, str]:
 
 
 def push_candles(stock_id: str, candles: list[dict]) -> None:
+    """Notify clients that a stock's persisted live candles changed."""
     with _lock:
         _reset_if_new_day()
-        _candles[str(stock_id)] = candles
     _broadcast({"type": "candles", "stock_id": str(stock_id)})
 
 
@@ -462,6 +460,14 @@ def _activity_metrics_for_date(date_str: str, universe: str) -> dict:
     return metrics_for_date(date_str, universe=universe)
 
 
+def _stored_activity_for_date(date_str: str, universe: str) -> dict:
+    """Read GHA-produced activity data without runtime calculation."""
+    from pattern.activity_store import read_vwap_activity
+    from pattern.vwap_sr_scan import stock_ids_for_universe
+
+    return read_vwap_activity(date_str, stock_ids=stock_ids_for_universe(universe)) or {}
+
+
 def _catchup_today_into_memory() -> tuple[list, list]:
     global _vwap_macd_live, _vwap_obv_live, _vwap_chg
     today = datetime.now(_TW).strftime("%Y-%m-%d")
@@ -598,6 +604,8 @@ def vwap_sr_replay(date: str, universe: str = "daytrade"):
 @app.get("/vwap_activity", tags=["VWAP"], summary="VWAP 篩選用活動度資料")
 def vwap_activity(date: Optional[str] = None, universe: str = "daytrade"):
     date_str = date or datetime.now(_TW).strftime("%Y-%m-%d")
+    if date_str == _today_str():
+        return {"date": date_str, "stocks": _stored_activity_for_date(date_str, universe)}
     from pattern.vwap_activity import metrics_for_date
 
     return {"date": date_str, "stocks": metrics_for_date(date_str, universe=universe)}
@@ -611,10 +619,9 @@ def vwap_macd_div(date: Optional[str] = None, universe: str = "daytrade"):
         return {"date": date_str, "stocks": _historical_vwap_bundle(date_str, universe=universe)["macd"]}
     if date_str == today:
         with _lock:
-            if _vwap_macd_live is not None:
-                return {"date": date_str, "stocks": _vwap_macd_live}
-    from pattern.vwap_macd_div import metrics_for_date
+            return {"date": date_str, "stocks": dict(_vwap_macd_live or {})}
 
+    from pattern.vwap_macd_div import metrics_for_date
     return {"date": date_str, "stocks": metrics_for_date(date_str, universe=universe)}
 
 
@@ -626,10 +633,9 @@ def vwap_obv_div(date: Optional[str] = None, universe: str = "daytrade"):
         return {"date": date_str, "stocks": _historical_vwap_bundle(date_str, universe=universe)["obv"]}
     if date_str == today:
         with _lock:
-            if _vwap_obv_live is not None:
-                return {"date": date_str, "stocks": _vwap_obv_live}
-    from pattern.vwap_obv_div import metrics_for_date
+            return {"date": date_str, "stocks": dict(_vwap_obv_live or {})}
 
+    from pattern.vwap_obv_div import metrics_for_date
     return {"date": date_str, "stocks": metrics_for_date(date_str, universe=universe)}
 
 
@@ -668,29 +674,19 @@ def vwap_signal_bundle(date: Optional[str] = None, universe: str = "daytrade", r
     with _lock:
         vwap_rows = list(reversed(_vwap_breakout_signals))
         sr_rows = list(reversed(_sr_vwap_cross_signals))
-        macd_missing = _vwap_macd_live is None
-        obv_missing = _vwap_obv_live is None
         macd_live = dict(_vwap_macd_live or {})
         obv_live = dict(_vwap_obv_live or {})
         chg_live = dict(_vwap_chg)
 
     if not repeat:
         vwap_rows = _latest_signal_by_stock(vwap_rows)
-    if macd_missing:
-        from pattern.vwap_macd_div import metrics_for_date as macd_metrics
-
-        macd_live = macd_metrics(date_str, universe=universe)
-    if obv_missing:
-        from pattern.vwap_obv_div import metrics_for_date as obv_metrics
-
-        obv_live = obv_metrics(date_str, universe=universe)
     return {
         "date": date_str,
         "vwap": vwap_rows,
         "sr": sr_rows,
         "m1_bars": 0,
         "chg": chg_live,
-        "activity": _activity_metrics_for_date(date_str, universe),
+        "activity": _stored_activity_for_date(date_str, universe),
         "macd": macd_live,
         "obv": obv_live,
     }
@@ -711,10 +707,7 @@ def vwap_signal_dates():
 
 @app.get("/chart/{stock_id}/candles", tags=["圖表"], summary="今日即時 M1 K 線")
 def chart_candles(stock_id: str):
-    with _lock:
-        candles = list(_candles.get(str(stock_id), []))
-    candles = _legacy_candle_shape(candles)
-    return {"stock_id": str(stock_id), "candles": candles, "vwap": _session_vwap_from_candles(candles)}
+    return chart_candles_history(str(stock_id), _today_str())
 
 
 @app.get("/chart/{stock_id}/candles/history", tags=["圖表"], summary="歷史 M1 K 線")

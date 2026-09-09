@@ -34,6 +34,7 @@ MAP_KINDS = {"macd", "obv"}
 _CACHE_LIMIT = max(3, int(os.environ.get("VWAP_SIGNAL_CACHE_DATES", "80")))
 _cache: dict[str, dict[str, Any]] = {}
 _cache_order: list[str] = []
+_dates_cache: list[str] | None = None
 _lock = threading.Lock()
 
 
@@ -134,9 +135,11 @@ def _filter_bundle(bundle: dict[str, Any], stock_ids: set[str] | None) -> dict[s
 
 def clear_cache() -> None:
     """Clear cached signal bundles after HF-sync overwrites parquet files."""
+    global _dates_cache
     with _lock:
         _cache.clear()
         _cache_order.clear()
+        _dates_cache = None
 
 
 def _remember(date: str, bundle: dict[str, Any]) -> None:
@@ -157,6 +160,11 @@ def has_vwap_signal_store() -> bool:
 
 def available_signal_dates() -> list[str]:
     """Return dates present in precomputed intraday signal shards."""
+    global _dates_cache
+    with _lock:
+        if _dates_cache is not None:
+            return list(_dates_cache)
+
     dates: set[str] = set()
     for path in sorted(VWAP_SIGNAL_DIR.glob("*.parquet")):
         try:
@@ -166,7 +174,10 @@ def available_signal_dates() -> list[str]:
         if df.empty:
             continue
         dates.update(_date_key(value) for value in df["scan_date"].dropna().unique())
-    return sorted(date for date in dates if date)
+    result = sorted(date for date in dates if date)
+    with _lock:
+        _dates_cache = result
+    return list(result)
 
 
 def read_vwap_signals(
@@ -355,4 +366,5 @@ def write_vwap_signals(
     if not df_all.empty:
         df_all = df_all.sort_values(["scan_date", "kind", "stock_id", "time"])
     df_all.to_parquet(path, index=False)
+    clear_cache()
     return path

@@ -75,8 +75,17 @@ _COVERAGE_POLL_SEC = 1.0
 # 多執行緒下大家共用同一個節流時鐘，各自的網路等待時間可以互相重疊。
 _BACKFILL_INTERVAL = float(os.environ.get("FUBON_REST_INTERVAL", "0.25"))
 _BACKFILL_WORKERS = int(os.environ.get("FUBON_BACKFILL_WORKERS", "10"))
+_MARKET_OPEN_HOUR = int(os.environ.get("MARKET_OPEN_HOUR", "9"))
+_MARKET_OPEN_MIN = int(os.environ.get("MARKET_OPEN_MIN", "0"))
 _MARKET_CLOSE_HOUR = int(os.environ.get("MARKET_CLOSE_HOUR", "13"))
 _MARKET_CLOSE_MIN = int(os.environ.get("MARKET_CLOSE_MIN", "30"))
+
+
+def _is_regular_session(dt: datetime) -> bool:
+    if dt.weekday() >= 5:
+        return False
+    hhmm = (dt.hour, dt.minute)
+    return (_MARKET_OPEN_HOUR, _MARKET_OPEN_MIN) <= hhmm <= (_MARKET_CLOSE_HOUR, _MARKET_CLOSE_MIN)
 
 
 def _live_path(date_str: str) -> Path:
@@ -338,6 +347,15 @@ class FubonM1Collector:
                 time.sleep(wait)
             if self._stop:
                 break
+
+            # Keep WebSocket connections alive outside market hours, but do not
+            # reread and transform the complete trading-day file every minute.
+            if not _is_regular_session(closed_minute):
+                try:
+                    set_collector_coverage(0, self._total_subscribed or 0)
+                except Exception:
+                    pass
+                continue
 
             # 涵蓋率達標或等到上限，先到先觸發：資料到得快就不用死等 15 秒，
             # 到得慢也不會像原本固定 5 秒那樣太早截斷、漏掉一大半股票。

@@ -22,7 +22,6 @@ from api import (
     push_vwap_macd_div,
     push_vwap_obv_div,
     register_vwap_sr_catchup_hook,
-    tw_naive_to_epoch,
     vwap_sr_catchup as _vwap_sr_catchup,
 )
 from data.query import load_m1_live
@@ -79,8 +78,16 @@ register_vwap_sr_catchup_hook(_on_vwap_sr_catchup)
 
 def _startup() -> None:
     """Sync local historical data from HF, then prepare realtime subscriptions."""
+    global _last_hf_sync_date, _next_hf_sync_retry_at
     try:
         sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
+        now = datetime.now(_TW)
+        if (now.hour, now.minute) >= (HF_DAILY_SYNC_HOUR, HF_DAILY_SYNC_MIN):
+            expected_signal_date = _startup_data.latest_market_db_check_date(now)
+            if sync_status in ("synced", "signals_synced", "fresh") and _startup_data.offline_signal_date_available(expected_signal_date):
+                _last_hf_sync_date = now.date()
+            else:
+                _next_hf_sync_retry_at = now + timedelta(minutes=30)
         if sync_status in ("synced", "signals_synced"):
             _clear_after_hf_sync()
         _start_cache_prewarm("startup")
@@ -151,18 +158,21 @@ def _start_cache_prewarm(reason: str) -> None:
     threading.Thread(target=_run, daemon=True).start()
 
 
+_last_hf_sync_date = None
+_next_hf_sync_retry_at = None
+
+
 def _daily_hf_sync() -> None:
     """Check HF for a fresh market DB once a day while the service stays online."""
-    last_sync_date = None
-    next_retry_at = None
+    global _last_hf_sync_date, _next_hf_sync_retry_at
     while True:
         now = datetime.now(_TW)
         today = now.date()
         scheduled = (HF_DAILY_SYNC_HOUR, HF_DAILY_SYNC_MIN)
-        retry_ready = next_retry_at is None or now >= next_retry_at
+        retry_ready = _next_hf_sync_retry_at is None or now >= _next_hf_sync_retry_at
         should_sync = (
             _startup_done.is_set()
-            and last_sync_date != today
+            and _last_hf_sync_date != today
             and (now.hour, now.minute) >= scheduled
             and retry_ready
         )
@@ -172,25 +182,25 @@ def _daily_hf_sync() -> None:
             sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
             expected_signal_date = _startup_data.latest_market_db_check_date(now)
             if sync_status in ("synced", "signals_synced", "fresh") and not _startup_data.offline_signal_date_available(expected_signal_date):
-                next_retry_at = now + timedelta(minutes=30)
+                _next_hf_sync_retry_at = now + timedelta(minutes=30)
                 print(
-                    f"  尚未看到 {expected_signal_date} 的離線盤勢訊號，將於 {next_retry_at.strftime('%H:%M')} 後重試",
+                    f"  尚未看到 {expected_signal_date} 的離線盤勢訊號，將於 {_next_hf_sync_retry_at.strftime('%H:%M')} 後重試",
                     flush=True,
                 )
                 _log_sys(f"每日 HF 同步尚未取得 {expected_signal_date} 離線盤勢訊號，30 分鐘後重試", "warning")
             elif sync_status in ("synced", "signals_synced"):
                 _clear_after_hf_sync()
                 _start_cache_prewarm("daily-hf-sync")
-                last_sync_date = today
-                next_retry_at = None
+                _last_hf_sync_date = today
+                _next_hf_sync_retry_at = None
                 _log_sys("每日 HF 同步完成：已下載歷史/離線訊號資料並清空查詢快取")
             elif sync_status == "fresh":
-                last_sync_date = today
-                next_retry_at = None
+                _last_hf_sync_date = today
+                _next_hf_sync_retry_at = None
                 _log_sys("每日 HF 同步檢查完成：本機歷史資料已新鮮")
             else:
-                next_retry_at = now + timedelta(minutes=30)
-                print(f"  每日 HF 同步失敗，將於 {next_retry_at.strftime('%H:%M')} 後重試", flush=True)
+                _next_hf_sync_retry_at = now + timedelta(minutes=30)
+                print(f"  每日 HF 同步失敗，將於 {_next_hf_sync_retry_at.strftime('%H:%M')} 後重試", flush=True)
                 _log_sys("每日 HF 同步失敗，30 分鐘後重試", "error")
         time.sleep(60)
 
@@ -296,23 +306,6 @@ def _ensure_vwap_catchup_after_collector_backfill(date_str: str) -> None:
         _log_sys(f"VWAP catchup 補齊失敗: {exc}", "error")
 
 
-def _candles_from_group(g: pd.DataFrame) -> list[dict]:
-    candles = []
-    for _, row in g.sort_values("date").iterrows():
-        dt = pd.Timestamp(row["date"])
-        candles.append(
-            {
-                "time": tw_naive_to_epoch(dt),
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-                "volume": int(row["volume"]),
-            }
-        )
-    return candles
-
-
 def on_minute(minute_str: str, df: pd.DataFrame) -> None:
     """Collector callback: push K lines, quotes, and VWAP-related events."""
     dt = pd.Timestamp(minute_str)
@@ -350,12 +343,11 @@ def on_minute(minute_str: str, df: pd.DataFrame) -> None:
 
     for raw_sid, g in m1_live.groupby("stock_id", sort=False):
         sid = str(raw_sid)
-        candles = _candles_from_group(g)
-        push_candles(sid, candles)
+        push_candles(sid, [])
 
-        if candles:
+        if not g.empty:
             prev_close = pc_map.get(sid)
-            last_close = float(candles[-1]["close"])
+            last_close = float(g.sort_values("date").iloc[-1]["close"])
             if prev_close and prev_close > 0:
                 chg_map[sid] = round((last_close / prev_close - 1.0) * 100, 2)
             if sid in WATCHLIST_QUOTES and (h, m) <= (MARKET_CLOSE_HOUR, MARKET_CLOSE_MIN):
