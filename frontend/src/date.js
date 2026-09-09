@@ -26,3 +26,21 @@ export function formatTaipeiClock() {
     hour12: false,
   });
 }
+
+export function isTaipeiMarketHours(now = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Taipei",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(now)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  if (["Sat", "Sun"].includes(parts.weekday)) return false;
+  const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+  return minutes >= 8 * 60 && minutes < 13 * 60 + 30;
+}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiUrl, fetchJson, patternDetailPath } from "./api.js";
-import { formatTaipeiClock, previousTaipeiWeekdayIso, taipeiTodayIso } from "./date.js";
+import { formatTaipeiClock, isTaipeiMarketHours, previousTaipeiWeekdayIso, taipeiTodayIso } from "./date.js";
 import { TIMEFRAME_LABEL, priceSummary } from "./chartData.js";
 import TradingViewChart, { indicatorLabel } from "./TradingViewChart.jsx";
 
@@ -518,7 +518,7 @@ function ChartIndicatorControls({ value, onChange }) {
   );
 }
 
-function DateCalendarPicker({ value, dates, today, onChange }) {
+function DateCalendarPicker({ value, dates, today, onChange, disabled = false }) {
   const sortedDates = useMemo(() => [...new Set(dates || [])].filter(Boolean).sort(), [dates]);
   const dateSet = useMemo(() => new Set(sortedDates), [sortedDates]);
   const minMonth = monthKey(sortedDates[0]);
@@ -534,6 +534,10 @@ function DateCalendarPicker({ value, dates, today, onChange }) {
     const nextMonth = clampMonth(monthKey(value) || maxMonth || monthKey(today), minMonth, maxMonth);
     setViewMonth(nextMonth);
   }, [maxMonth, minMonth, today, value]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -660,9 +664,10 @@ function DateCalendarPicker({ value, dates, today, onChange }) {
     <div ref={rootRef} className="relative shrink-0">
       <button
         type="button"
-        className="btn btn-xs w-36 justify-between rounded border-base-300 bg-base-100"
-        title="選擇已有資料的日期"
+        className="btn btn-xs w-36 justify-between rounded border-base-300 bg-base-100 disabled:text-base-content/50"
+        title={disabled ? "盤中固定顯示今日" : "選擇已有資料的日期"}
         aria-label="選擇日期"
+        disabled={disabled}
         onClick={() => setOpen((current) => !current)}
       >
         <span>{value ? displayDate(value) : "即時/今日"}</span>
@@ -735,6 +740,7 @@ export default function App() {
   const chartLoadSeqRef = useRef(0);
   const idxCacheRef = useRef(new Map());
   const today = useMemo(() => taipeiTodayIso(), [clock]);
+  const marketHours = useMemo(() => isTaipeiMarketHours(), [clock]);
   const stockName = dayData?.stock_name || intradayData?.stock_name || "";
   const titleStock = stockName && stockName !== stockId ? `${stockId} ${stockName}` : stockId;
   const daySummary = useMemo(() => priceSummary(dayData?.candles), [dayData]);
@@ -1063,6 +1069,12 @@ export default function App() {
       setVwapDate(patternScanDates[patternScanDates.length - 1] || "");
     }
   }, [patternScanDates, vwapDate]);
+
+  useEffect(() => {
+    if (!marketHours) return;
+    setVwapDate("");
+    setSelectedChartDate("");
+  }, [marketHours]);
 
   useEffect(() => {
     let stopped = false;
@@ -1519,7 +1531,13 @@ export default function App() {
             <div className="relative z-20 shrink-0 border-b border-base-300 bg-base-200">
               <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.5rem] items-start gap-1 px-2 py-1">
                 <div className="flex min-w-0 w-full gap-1 overflow-x-auto pb-1">
-                  <DateCalendarPicker value={vwapDate} dates={patternScanDates} today={today} onChange={setVwapDate} />
+                  <DateCalendarPicker
+                    value={vwapDate}
+                    dates={patternScanDates}
+                    today={today}
+                    onChange={setVwapDate}
+                    disabled={marketHours}
+                  />
                   <input
                     className="input input-bordered input-xs w-20 shrink-0 rounded uppercase"
                     placeholder="代號"
