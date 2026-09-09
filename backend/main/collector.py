@@ -49,6 +49,8 @@ def start_collector(on_minute, backfill_done=None) -> None:
                 time.sleep(15)
             if not collector_finished.is_set():
                 collector.stop()
+                set_collector_status("stopped")
+                print("富邦 WebSocket 已停止並登出", flush=True)
 
         threading.Thread(target=stop_after_session, daemon=True).start()
         try:
