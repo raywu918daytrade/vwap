@@ -1,4 +1,6 @@
-FROM node:22-alpine AS frontend-build
+ARG RUNTIME_PLATFORM=linux/amd64
+
+FROM --platform=$RUNTIME_PLATFORM node:22-alpine AS frontend-build
 
 WORKDIR /frontend
 
@@ -11,7 +13,7 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM python:3.13-slim
+FROM --platform=$RUNTIME_PLATFORM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
