@@ -40,51 +40,6 @@ body {
   font-family: SFMono-Regular, Consolas, Menlo, monospace;
 }
 
-.d1-toolbar-hidden-row {
-  display: none !important;
-}
-
-.d1-menu-section-label {
-  margin-top: 0.75rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid hsl(var(--bc) / 0.15);
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: hsl(var(--bc) / 0.7);
-}
-
-.d1-menu-inline {
-  position: static !important;
-  display: block !important;
-  width: 100% !important;
-  max-height: none !important;
-  margin-top: 0.25rem !important;
-  padding: 0 !important;
-  overflow: visible !important;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.d1-menu-inline > div:first-child {
-  display: none !important;
-}
-
-.pattern-header-filter {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 0.35rem;
-  vertical-align: middle;
-  cursor: pointer;
-}
-
-.pattern-header-checkbox {
-  width: 0.8rem;
-  height: 0.8rem;
-  min-width: 0.8rem;
-  min-height: 0.8rem;
-}
-
 /*
  * Mobile layout is intentionally independent from the desktop 45/55 viewport grid.
  * The signal table keeps a bounded viewport, while each chart gets its own full-height

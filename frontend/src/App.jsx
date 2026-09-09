@@ -214,7 +214,7 @@ function Panel({ title, count, children, actions, className = "", bodyClassName 
 
 function ChartPanel({ title, subtitle, loading, error, children, actions }) {
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden border border-base-300 bg-base-100">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden border border-base-300 bg-base-100">
       <div className="flex min-h-10 items-center justify-between border-b border-base-300 bg-base-200 px-3">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-base-content">{title}</div>
