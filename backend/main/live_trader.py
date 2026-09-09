@@ -96,7 +96,10 @@ def _startup() -> None:
         _startup_data.load_fubon_subscription_universe(state)
         print(f"  即時訂閱標的：{len(state.tickers)} 支", flush=True)
         _log_sys(f"即時訂閱清單就緒：{len(state.tickers)} 支")
-        _ensure_sr_vwap_day(datetime.now(_TW).strftime("%Y-%m-%d"))
+        if _collector.within_collection_window(now):
+            _ensure_sr_vwap_day(now.strftime("%Y-%m-%d"))
+        else:
+            print("盤後啟動：略過只供即時盤勢使用的 SR 水位載入", flush=True)
         print("就緒：等待 M1 即時資料與 VWAP/型態事件", flush=True)
     except Exception as exc:
         print(f"啟動資料準備失敗，仍啟動 API/collector: {exc}", flush=True)

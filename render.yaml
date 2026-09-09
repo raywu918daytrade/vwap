@@ -35,6 +35,10 @@ services:
         value: "2"
       - key: FUBON_BACKFILL_WORKERS
         value: "2"
+      - key: MARKET_INTRADAY_RETENTION_MONTHS
+        value: "3"
+      - key: VWAP_SIGNAL_CACHE_DATES
+        value: "3"
       - key: CACHE_PREWARM_MONTHS
         value: "1"
       - key: CACHE_PREWARM_STARTUP_MONTHS

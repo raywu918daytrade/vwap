@@ -19,6 +19,11 @@ def _within_collection_window(now: datetime) -> bool:
     return now.weekday() < 5 and _START_TIME <= (now.hour, now.minute) < _STOP_TIME
 
 
+def within_collection_window(now: datetime | None = None) -> bool:
+    """Return whether the configured Fubon collection session is active."""
+    return _within_collection_window(now or datetime.now(_TW))
+
+
 def start_collector(on_minute, backfill_done=None) -> None:
     """Run the M1 collector forever and retry with a fresh instance on errors."""
     from fubon import fubon_api
