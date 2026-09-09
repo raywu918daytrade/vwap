@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 import pyarrow.dataset as ds
 
+from main.runtime_profile import uses_on_demand_hf
+
 _ROOT = Path(__file__).resolve().parent.parent
 _TW = timezone(timedelta(hours=8))
 _ENTRY = dtime(9, 5)
@@ -285,7 +287,7 @@ def metrics_for_date(date_str: str, universe: str = "daytrade") -> dict[str, dic
     key = (date_str, universe)
     today = datetime.now(_TW).strftime("%Y-%m-%d")
     with _lock:
-        if date_str != today and key in _cache:
+        if not uses_on_demand_hf() and date_str != today and key in _cache:
             return _cache[key]
 
     from pattern.activity_store import read_vwap_activity
@@ -293,19 +295,20 @@ def metrics_for_date(date_str: str, universe: str = "daytrade") -> dict[str, dic
     offline = read_vwap_activity(date_str, stock_ids=stock_ids)
     if offline is not None:
         if offline or date_str != today or _is_weekend(date_str):
-            if date_str != today:
+            if not uses_on_demand_hf() and date_str != today:
                 with _lock:
                     _cache[key] = offline
             return offline
     if date_str != today:
-        with _lock:
-            _cache[key] = {}
+        if not uses_on_demand_hf():
+            with _lock:
+                _cache[key] = {}
         return {}
     if date_str == today and _is_weekend(date_str):
         return {}
 
     result = compute_activity_metrics(date_str, universe)
-    if date_str != today:
+    if not uses_on_demand_hf() and date_str != today:
         with _lock:
             _cache[key] = result
     return result

@@ -12,6 +12,8 @@ Kept surfaces:
 from __future__ import annotations
 
 import asyncio
+import ctypes
+import gc
 import gzip
 import hashlib
 import json
@@ -28,10 +30,26 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from main.runtime_profile import uses_on_demand_hf
 
 _TW = timezone(timedelta(hours=8))
+_BUILD_VERSION_PATH = Path(__file__).parent / "BUILD_VERSION"
+try:
+    _APP_VERSION = _BUILD_VERSION_PATH.read_text(encoding="ascii").strip()
+except OSError:
+    _APP_VERSION = os.environ.get("APP_VERSION", "local")
+_REQUIRE_DATA_READY = os.environ.get("REQUIRE_DATA_READY", "0").lower() in {"1", "true", "yes"}
+_LOW_MEMORY_RUNTIME = uses_on_demand_hf()
+_data_ready = not _REQUIRE_DATA_READY
+_heavy_request_lock = asyncio.Lock()
+
+
+def set_data_ready(ready: bool) -> None:
+    """Publish whether deployment startup data is ready for API requests."""
+    global _data_ready
+    _data_ready = bool(ready)
 
 
 def tw_naive_to_epoch(dt) -> int:
@@ -60,10 +78,30 @@ _SKIP_LOG_PATHS = {"/stream", "/health"}
 
 @app.middleware("http")
 async def _log_http(request: Request, call_next):
+    if _REQUIRE_DATA_READY and not _data_ready:
+        path = request.url.path
+        if path != "/health" and path != "/" and not path.startswith("/assets/"):
+            return JSONResponse(status_code=503, content={"detail": "歷史資料同步中"})
     if request.url.path in _SKIP_LOG_PATHS:
         return await call_next(request)
     t0 = _time_mod.time()
-    response = await call_next(request)
+    is_heavy = request.url.path.startswith(("/api/pattern/", "/vwap_"))
+    if _LOW_MEMORY_RUNTIME and is_heavy:
+        async with _heavy_request_lock:
+            response = await call_next(request)
+            try:
+                import pyarrow as pa
+
+                pa.default_memory_pool().release_unused()
+            except Exception:
+                pass
+            gc.collect()
+            try:
+                ctypes.CDLL(None).malloc_trim(0)
+            except (AttributeError, OSError):
+                pass
+    else:
+        response = await call_next(request)
     elapsed_ms = int((_time_mod.time() - t0) * 1000)
     qs = f"?{request.url.query}" if request.url.query else ""
     append_system_log(
@@ -110,7 +148,7 @@ _system_logs: deque = deque(maxlen=500)
 _LOG_DIR = Path(__file__).parent / "logs"
 _VWAP_BUNDLE_CACHE: dict[tuple, dict] = {}
 _VWAP_BUNDLE_CACHE_ORDER: deque = deque()
-_VWAP_BUNDLE_CACHE_LIMIT = max(3, int(os.environ.get("VWAP_BUNDLE_CACHE_DATES", "80")))
+_VWAP_BUNDLE_CACHE_LIMIT = 0 if uses_on_demand_hf() else max(0, int(os.environ.get("VWAP_BUNDLE_CACHE_DATES", "80")))
 _VWAP_BUNDLE_DISK_CACHE_DIR = Path(os.environ.get(
     "VWAP_BUNDLE_CACHE_DIR",
     Path(__file__).parent / ".cache/vwap_bundle",
@@ -171,6 +209,8 @@ def _read_vwap_bundle_cache(cache_key: tuple) -> dict | None:
 
 
 def _remember_vwap_bundle_cache(cache_key: tuple, payload: dict) -> None:
+    if _VWAP_BUNDLE_CACHE_LIMIT <= 0:
+        return
     with _vwap_bundle_cache_lock:
         _VWAP_BUNDLE_CACHE[cache_key] = payload
         if cache_key in _VWAP_BUNDLE_CACHE_ORDER:
@@ -530,15 +570,19 @@ _COLLECTOR_MSG = {
 
 @app.get("/health", tags=["系統"], summary="健康檢查")
 def health():
-    return {
-        "status": "ok",
+    payload = {
+        "status": "ok" if _data_ready else "starting",
         "collector": _collector_status,
         "message": _COLLECTOR_MSG.get(_collector_status, _collector_status),
         "sse_clients": len(_sse_clients),
         "ws_clients": len(_sse_clients),
         "last_signal_at": None,
         "coverage": _collector_coverage,
+        "version": _APP_VERSION,
     }
+    if _REQUIRE_DATA_READY and not _data_ready:
+        return JSONResponse(status_code=503, content=payload)
+    return payload
 
 
 @app.get("/settings", tags=["系統"], summary="讀取本機設定")

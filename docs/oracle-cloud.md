@@ -302,13 +302,15 @@ runtime 目錄用 bind mount 留在 VM：
 - `db/m1_live`：最近 14 個交易檔。
 - `log`：最近 7 個日曆天。
 - `logs`：最近 14 個日曆天。
-- `d1`, `adjustment_day`, `adjustment_factor`, `tick_adjust_factor`, `tickers`,
-  flags：全量保留。
+- `d1`, `adjustment_day`, `adjustment_factor`, `tick_adjust_factor`：按需下載，
+  本機合計各自最多保留 12 個月。
+- `tickers` 與離線結果：啟動及每日 18:00 從 HF 同步。
 
 可在 `backend/.env` 調整：
 
 ```bash
-MARKET_INTRADAY_RETENTION_MONTHS=24
+HF_DATA_MODE=on-demand
+CHART_CACHE_MONTHS=12
 M1_LIVE_RETENTION_FILES=14
 SDK_LOG_RETENTION_DAYS=7
 APP_LOG_RETENTION_DAYS=14

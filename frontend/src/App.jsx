@@ -7,7 +7,7 @@ import TradingViewChart, { indicatorLabel } from "./TradingViewChart.jsx";
 
 const DEFAULT_STOCK = "0050";
 const PRODUCT_NAME = "盤勢雷達";
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "local";
+const APP_VERSION = "local";
 const SIGNAL_LABEL = "盤中訊號";
 const BASELINE_LABEL = "基準線";
 const PATTERN_TIMEFRAME = "day";
@@ -149,7 +149,7 @@ function HealthLine({ health, clock, version }) {
     <div className="hidden items-center gap-3 text-xs text-base-content/60 md:flex">
       <span>連線數：{health?.ws_clients ?? health?.sse_clients ?? "-"}</span>
       <span>更新：{clock}</span>
-      <span>版本：{version}</span>
+      <span>版本：{health?.version || version}</span>
     </div>
   );
 }

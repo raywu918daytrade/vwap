@@ -9,8 +9,6 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-      args:
-        VITE_APP_VERSION: ${APP_VERSION:-local}
     restart: unless-stopped
     env_file:
       - ./backend/.env
@@ -18,6 +16,10 @@ services:
       TZ: Asia/Taipei
       PYTHONUNBUFFERED: "1"
       HF_HOME: /app/.cache/huggingface
+      HF_DATA_MODE: on-demand
+      CHART_CACHE_MONTHS: "12"
+      HF_DOWNLOAD_WORKERS: "4"
+      REQUIRE_DATA_READY: "1"
       OMP_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"

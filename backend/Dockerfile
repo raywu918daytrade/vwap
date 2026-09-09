@@ -4,9 +4,6 @@ FROM --platform=$RUNTIME_PLATFORM node:22-alpine AS frontend-build
 
 WORKDIR /frontend
 
-ARG VITE_APP_VERSION=local
-ENV VITE_APP_VERSION=${VITE_APP_VERSION}
-
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
@@ -18,7 +15,9 @@ FROM --platform=$RUNTIME_PLATFORM python:3.13-slim
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     TZ=Asia/Taipei \
-    HF_HOME=/app/.cache/huggingface
+    HF_HOME=/app/.cache/huggingface \
+    PYTHONMALLOC=malloc \
+    MALLOC_TRIM_THRESHOLD_=65536
 
 WORKDIR /app
 
@@ -35,7 +34,8 @@ RUN python -m pip install --upgrade pip \
 
 COPY backend/ .
 COPY --from=frontend-build /frontend/dist ./static
+RUN TZ=Asia/Taipei date +'%Y%m%d-%H%M' > ./BUILD_VERSION
 
 EXPOSE 8000
 
-CMD ["python", "-m", "main.live_trader"]
+CMD ["sh", "-c", "if [ \"$RUNTIME_PROFILE\" = \"render-reader\" ]; then exec python -m main.render_reader; else exec python -m main.live_trader; fi"]

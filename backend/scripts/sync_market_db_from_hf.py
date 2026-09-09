@@ -7,8 +7,8 @@ manually when local historical data needs to catch up with the externally
 maintained HF dataset.
 
 By default this mirrors only the retained market DB folders used by the slim
-backend. Long-lived daily datasets are mirrored in full, while large intraday
-history folders (`m1`, `m5_std`) are limited to the latest 24 monthly parquet
+backend. Daily/adjustment datasets are limited to the latest 12 months, while
+large intraday history folders (`m1`, `m5_std`) default to 24 monthly parquet
 files. Local live M1 files (`m1_live`) are not downloaded from HF, but are
 pruned to the latest 14 trading-date files after scheduled sync checks. Pass
 `--only` to override the pull with selected `db/` children such as `m1`,
@@ -70,7 +70,9 @@ DEFAULT_MARKET_DB_SYNC_FOLDERS = [
 ]
 
 INTRADAY_RETENTION_FOLDERS = {"m1", "m5_std"}
+HISTORY_RETENTION_FOLDERS = {"d1", "adjustment_day", "adjustment_factor", "tick_adjust_factor"}
 DEFAULT_INTRADAY_RETENTION_MONTHS = 24
+DEFAULT_HISTORY_RETENTION_MONTHS = 12
 DEFAULT_M1_LIVE_RETENTION_FILES = 14
 DEFAULT_SDK_LOG_RETENTION_DAYS = 7
 DEFAULT_APP_LOG_RETENTION_DAYS = 14
@@ -101,6 +103,21 @@ def _resolve_intraday_months(value: int | None = None) -> int:
             raise RuntimeError("MARKET_INTRADAY_RETENTION_MONTHS 必須是整數") from exc
     if value < 0:
         raise RuntimeError("intraday-months 不可小於 0；0 代表不限制月份")
+    return value
+
+
+def _resolve_history_months(value: int | None = None) -> int:
+    """Return the rolling month count for daily and adjustment shards."""
+    if value is None:
+        raw = os.environ.get("MARKET_HISTORY_RETENTION_MONTHS")
+        if raw in (None, ""):
+            return DEFAULT_HISTORY_RETENTION_MONTHS
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise RuntimeError("MARKET_HISTORY_RETENTION_MONTHS 必須是整數") from exc
+    if value < 0:
+        raise RuntimeError("history-months 不可小於 0；0 代表不限制月份")
     return value
 
 
@@ -212,13 +229,21 @@ def _prune_dated_files(folder: Path, pattern: re.Pattern[str], fmt: str, retenti
     return count
 
 
-def _build_allow_patterns(folders: list[str], intraday_months: int) -> list[str]:
+def _build_allow_patterns(
+    folders: list[str],
+    intraday_months: int,
+    history_months: int | None = None,
+) -> list[str]:
     """Build HF allow_patterns, limiting large intraday folders by month."""
-    month_stems = _month_stems_to_keep(intraday_months)
+    intraday_stems = _month_stems_to_keep(intraday_months)
+    history_months = _resolve_history_months(history_months)
+    history_stems = _month_stems_to_keep(history_months)
     allow_patterns: list[str] = []
     for name in folders:
         if name in INTRADAY_RETENTION_FOLDERS and intraday_months > 0:
-            allow_patterns.extend(f"db/{name}/{stem}.parquet" for stem in month_stems)
+            allow_patterns.extend(f"db/{name}/{stem}.parquet" for stem in intraday_stems)
+        elif name in HISTORY_RETENTION_FOLDERS and history_months > 0:
+            allow_patterns.extend(f"db/{name}/{stem}.parquet" for stem in history_stems)
         elif name == "pattern_scan":
             allow_patterns.append("db/pattern_scan/**")
         else:
@@ -248,6 +273,29 @@ def prune_local_intraday_history(
             if _MONTH_FILE_RE.match(path.stem) and path.stem not in keep:
                 path.unlink()
                 count += 1
+        removed[name] = count
+    return removed
+
+
+def prune_local_long_history(
+    folders: list[str] | None = None,
+    history_months: int | None = None,
+) -> dict[str, int]:
+    """Delete daily/adjustment monthly shards outside the rolling window."""
+    months = _resolve_history_months(history_months)
+    if months <= 0:
+        return {}
+    selected = folders or DEFAULT_MARKET_DB_SYNC_FOLDERS
+    keep = set(_month_stems_to_keep(months))
+    removed: dict[str, int] = {}
+    for name in sorted(HISTORY_RETENTION_FOLDERS.intersection(selected)):
+        folder = _ROOT / "db" / name
+        count = 0
+        if folder.exists():
+            for path in sorted(folder.glob("*.parquet")):
+                if _MONTH_FILE_RE.match(path.stem) and path.stem not in keep:
+                    path.unlink()
+                    count += 1
         removed[name] = count
     return removed
 
@@ -299,6 +347,7 @@ def sync_market_db_from_hf(
     only: list[str] | None = None,
     repo_id: str | None = None,
     intraday_months: int | None = None,
+    history_months: int | None = None,
     m1_live_files: int | None = None,
     sdk_log_days: int | None = None,
     app_log_days: int | None = None,
@@ -313,6 +362,8 @@ def sync_market_db_from_hf(
             value is read from `HF_REPO_ID` in `backend/.env`.
         intraday_months: Retention window for large intraday folders. `None`
             uses MARKET_INTRADAY_RETENTION_MONTHS or the default 24 months.
+        history_months: Retention window for D1 and adjustment folders. `None`
+            uses MARKET_HISTORY_RETENTION_MONTHS or the default 12 months.
         m1_live_files: Retention count for local `db/m1_live` daily files.
             `None` uses M1_LIVE_RETENTION_FILES or the default 14 files.
         sdk_log_days: Calendar-day retention for broker SDK logs in `log/`.
@@ -327,7 +378,8 @@ def sync_market_db_from_hf(
 
     folders = only or DEFAULT_MARKET_DB_SYNC_FOLDERS
     months = _resolve_intraday_months(intraday_months)
-    allow_patterns = _build_allow_patterns(folders, months)
+    history = _resolve_history_months(history_months)
+    allow_patterns = _build_allow_patterns(folders, months, history)
     label = "指定子集" if only else "預設保留子集"
     print(f"從 HF Hub（{repo_id}）下載 db/ 的{label}：{folders} ...")
     limited = sorted(INTRADAY_RETENTION_FOLDERS.intersection(folders))
@@ -335,6 +387,13 @@ def sync_market_db_from_hf(
         month_stems = _month_stems_to_keep(months)
         print(
             f"其中 {limited} 只同步最近 {months} 個月份：{month_stems[0]} ~ {month_stems[-1]}",
+            flush=True,
+        )
+    history_limited = sorted(HISTORY_RETENTION_FOLDERS.intersection(folders))
+    if history > 0 and history_limited:
+        history_stems = _month_stems_to_keep(history)
+        print(
+            f"其中 {history_limited} 只同步最近 {history} 個月份：{history_stems[0]} ~ {history_stems[-1]}",
             flush=True,
         )
 
@@ -349,10 +408,15 @@ def sync_market_db_from_hf(
         allow_patterns=allow_patterns,
         ignore_patterns=_IGNORE_PATTERNS,
         local_dir=str(_ROOT),
+        max_workers=max(1, int(os.environ.get("HF_DOWNLOAD_WORKERS", "4"))),
     )
     if prune:
         removed = prune_local_intraday_history(folders=list(folders), intraday_months=months)
         for name, count in removed.items():
+            if count:
+                print(f"已刪除 db/{name}/ 超過保留期限的月檔 {count} 個", flush=True)
+        long_removed = prune_local_long_history(folders=list(folders), history_months=history)
+        for name, count in long_removed.items():
             if count:
                 print(f"已刪除 db/{name}/ 超過保留期限的月檔 {count} 個", flush=True)
         m1_live_removed = prune_local_m1_live_history(m1_live_files)
@@ -373,6 +437,7 @@ def main(
     only: list[str] | None = None,
     repo_id: str | None = None,
     intraday_months: int | None = None,
+    history_months: int | None = None,
     m1_live_files: int | None = None,
     sdk_log_days: int | None = None,
     app_log_days: int | None = None,
@@ -383,6 +448,7 @@ def main(
         only=only,
         repo_id=repo_id,
         intraday_months=intraday_months,
+        history_months=history_months,
         m1_live_files=m1_live_files,
         sdk_log_days=sdk_log_days,
         app_log_days=app_log_days,
@@ -395,6 +461,7 @@ if __name__ == "__main__":
     parser.add_argument("--only", nargs="+", default=None, help="只下載指定的 db/ 子資料夾，例如 --only m1 d1")
     parser.add_argument("--repo-id", default=None, help="覆蓋 .env 的 HF_REPO_ID，改從指定的其他 HF dataset repo 下載")
     parser.add_argument("--intraday-months", type=int, default=None, help="m1/m5_std 只下載並保留最近 N 個月；0 表示不限制")
+    parser.add_argument("--history-months", type=int, default=None, help="d1/adjustment/factor 只下載並保留最近 N 個月；0 表示不限制")
     parser.add_argument("--m1-live-files", type=int, default=None, help="m1_live 只保留最近 N 個交易日檔；0 表示不限制")
     parser.add_argument("--sdk-log-days", type=int, default=None, help="log/ 只保留最近 N 個日曆天；0 表示不限制")
     parser.add_argument("--app-log-days", type=int, default=None, help="logs/ 只保留最近 N 個日曆天；0 表示不限制")
@@ -404,6 +471,7 @@ if __name__ == "__main__":
         only=args.only,
         repo_id=args.repo_id,
         intraday_months=args.intraday_months,
+        history_months=args.history_months,
         m1_live_files=args.m1_live_files,
         sdk_log_days=args.sdk_log_days,
         app_log_days=args.app_log_days,

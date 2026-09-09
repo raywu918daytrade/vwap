@@ -15,10 +15,20 @@ services:
         value: Asia/Taipei
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: RUNTIME_PROFILE
+        value: render-reader
+      - key: HF_DATA_MODE
+        value: on-demand
+      - key: REQUIRE_DATA_READY
+        value: "1"
+      - key: CHART_CACHE_MONTHS
+        value: "12"
       - key: HF_HOME
         value: /app/.cache/huggingface
       - key: HF_HUB_DISABLE_XET
         value: "1"
+      - key: HF_DOWNLOAD_WORKERS
+        value: "4"
       - key: OMP_NUM_THREADS
         value: "1"
       - key: OPENBLAS_NUM_THREADS
@@ -35,10 +45,6 @@ services:
         value: "2"
       - key: FUBON_BACKFILL_WORKERS
         value: "2"
-      - key: MARKET_INTRADAY_RETENTION_MONTHS
-        value: "3"
-      - key: VWAP_SIGNAL_CACHE_DATES
-        value: "3"
       - key: CACHE_PREWARM_MONTHS
         value: "1"
       - key: CACHE_PREWARM_STARTUP_MONTHS
@@ -61,16 +67,6 @@ services:
         value: "1"
       - key: WATCHLIST_QUOTES
         value: "0050"
-      - key: FUGLE
-        sync: false
-      - key: FUGLE_DAYTRADE
-        sync: false
-      - key: FUBON_ID
-        sync: false
-      - key: FUBON_API_KEY
-        sync: false
-      - key: FUBON_CERT_B64
-        sync: false
       - key: HF_REPO_ID
         sync: false
       - key: HF_TOKEN

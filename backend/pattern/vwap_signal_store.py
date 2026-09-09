@@ -19,6 +19,8 @@ from typing import Any
 import pandas as pd
 import pyarrow.dataset as ds
 
+from main.runtime_profile import uses_on_demand_hf
+
 _ROOT = Path(__file__).parent.parent
 VWAP_SIGNAL_DIR = _ROOT / "db/vwap_signals"
 VWAP_SIGNAL_COLUMNS = [
@@ -31,7 +33,7 @@ VWAP_SIGNAL_COLUMNS = [
 ]
 EVENT_KINDS = {"vwap", "sr"}
 MAP_KINDS = {"macd", "obv"}
-_CACHE_LIMIT = max(3, int(os.environ.get("VWAP_SIGNAL_CACHE_DATES", "80")))
+_CACHE_LIMIT = 0 if uses_on_demand_hf() else max(0, int(os.environ.get("VWAP_SIGNAL_CACHE_DATES", "80")))
 _cache: dict[str, dict[str, Any]] = {}
 _cache_order: list[str] = []
 _dates_cache: list[str] | None = None
@@ -143,6 +145,8 @@ def clear_cache() -> None:
 
 
 def _remember(date: str, bundle: dict[str, Any]) -> None:
+    if _CACHE_LIMIT <= 0:
+        return
     with _lock:
         _cache[date] = bundle
         if date in _cache_order:

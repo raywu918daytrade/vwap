@@ -25,6 +25,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 import pandas as pd
 
+from main.runtime_profile import uses_on_demand_hf
+
 from pattern.abcd_bear.detector import AbcdBearDetector
 from pattern.abcd_bull.detector import AbcdBullDetector
 from pattern.breakdown_retest.detector import BreakdownRetestDetector
@@ -238,6 +240,7 @@ _SCAN_DISK_CACHE_DIR = Path(os.environ.get(
 ))
 _DETAIL_DISK_CACHE_ENABLED = os.environ.get("PATTERN_DETAIL_DISK_CACHE", "1").lower() not in {"0", "false", "no"}
 _SCAN_DISK_CACHE_ENABLED = os.environ.get("PATTERN_SCAN_DISK_CACHE", "1").lower() not in {"0", "false", "no"}
+_MEMORY_CACHE_ENABLED = not uses_on_demand_hf()
 
 
 def _month_file_mtime(path: Path) -> str:
@@ -529,12 +532,13 @@ def scan_patterns(
         float(min_score),
         _historical_scan_version(date_key) if date_key != "latest" else "missing",
     )
-    if cache_key in _SCAN_CACHE:
+    if _MEMORY_CACHE_ENABLED and cache_key in _SCAN_CACHE:
         return _SCAN_CACHE[cache_key]
     if _SCAN_DISK_CACHE_ENABLED and date_key != "latest":
         cached = _read_json_disk_cache(_SCAN_DISK_CACHE_DIR, cache_key)
         if cached is not None:
-            _SCAN_CACHE[cache_key] = cached
+            if _MEMORY_CACHE_ENABLED:
+                _SCAN_CACHE[cache_key] = cached
             return cached
     scan_date, matches = read_pattern_scan(
         effective_date,
@@ -551,7 +555,8 @@ def scan_patterns(
         "total_matches": len(matches),
         "results": matches,
     }
-    _SCAN_CACHE[cache_key] = result
+    if _MEMORY_CACHE_ENABLED:
+        _SCAN_CACHE[cache_key] = result
     if _SCAN_DISK_CACHE_ENABLED and date_key != "latest":
         _write_json_disk_cache(_SCAN_DISK_CACHE_DIR, cache_key, result)
     return result
@@ -635,6 +640,11 @@ def get_pattern_detail(
     if not skip_pattern:
         timeframe = _normalize_scan_timeframe(timeframe)
 
+    if date and uses_on_demand_hf():
+        from main.hf_on_demand import ensure_chart_data
+
+        ensure_chart_data(timeframe, str(date)[:10], limit=limit, full_day=full_day)
+
     # 歷史日期資料由 HF 同步後清快取，不需要每次先讀 2330 取版本戳。
     # 那個預讀在 Oracle 小主機上會和頁面刷新時的 detail 請求互相搶 IO。
     latest_ts = (
@@ -644,12 +654,13 @@ def get_pattern_detail(
     )
     cache_key = (stock_id, pattern_type if not skip_pattern else "none", timeframe, date or "latest", limit, full_day, latest_ts)
 
-    if not force_live and cache_key in _DETAIL_CACHE:
+    if _MEMORY_CACHE_ENABLED and not force_live and cache_key in _DETAIL_CACHE:
         return _DETAIL_CACHE[cache_key]
     if not force_live:
         disk_payload = _read_detail_disk_cache(cache_key)
         if disk_payload is not None:
-            _DETAIL_CACHE[cache_key] = disk_payload
+            if _MEMORY_CACHE_ENABLED:
+                _DETAIL_CACHE[cache_key] = disk_payload
             return disk_payload
 
     df_candles = get_stock_candles(stock_id=stock_id, timeframe=timeframe, date=date, limit=limit, full_day=full_day)
@@ -742,7 +753,8 @@ def get_pattern_detail(
         "sr_lines": sr_lines_output,
     }
 
-    _DETAIL_CACHE[cache_key] = result
+    if _MEMORY_CACHE_ENABLED:
+        _DETAIL_CACHE[cache_key] = result
     if not force_live:
         _write_detail_disk_cache(cache_key, result)
     return result

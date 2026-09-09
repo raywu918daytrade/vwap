@@ -6,9 +6,8 @@ useful: a fresh enough local market DB and the Fubon subscription universe.
 
 from __future__ import annotations
 
-from fubon.subscribe_list import build_and_save_subscribe_list, load_realtime_candidates
-
 _OFFLINE_SIGNAL_FOLDERS = ["pattern_scan", "vwap_activity", "vwap_signals"]
+_RUNTIME_QUERY_FOLDERS = [*_OFFLINE_SIGNAL_FOLDERS, "tickers"]
 
 
 def _latest_market_db_check_date(now) -> str:
@@ -101,6 +100,22 @@ def sync_offline_signal_shards_from_hf() -> bool:
         return False
 
 
+def sync_runtime_query_data_from_hf() -> bool:
+    """Pull only precomputed API inputs needed by on-demand deployments."""
+    try:
+        from scripts.sync_market_db_from_hf import sync_market_db_from_hf
+
+        sync_market_db_from_hf(only=_RUNTIME_QUERY_FOLDERS, prune=False)
+        from main.hf_on_demand import prune_month_cache
+
+        prune_month_cache()
+        print("[HF同步檢查] 離線結果與股票清單已同步", flush=True)
+        return True
+    except Exception as exc:
+        print(f"[HF同步檢查] 小型同步失敗，沿用現有檔案: {exc}", flush=True)
+        return False
+
+
 def clear_market_query_caches() -> None:
     """Clear in-memory query caches after HF overwrites historical DB files."""
     from pattern.activity_store import clear_cache as clear_activity_store_cache
@@ -151,6 +166,8 @@ def prune_local_runtime_history() -> None:
 
 def refresh_fubon_subscription_universe(state) -> None:
     """Rebuild the realtime Fubon subscription universe and store it on state."""
+    from fubon.subscribe_list import build_and_save_subscribe_list
+
     df = build_and_save_subscribe_list()
     if df.empty:
         print("  警告：無法取得候選股清單（非盤中或富邦 API 失敗），不過濾股票", flush=True)
@@ -168,6 +185,8 @@ def load_fubon_subscription_universe(state) -> None:
     substantial memory. Startup only needs the last saved subscription groups;
     the scheduled refresh updates them separately for the next connection.
     """
+    from fubon.subscribe_list import load_realtime_candidates
+
     df = load_realtime_candidates()
     if df.empty:
         print("  警告：找不到富邦訂閱清單，改為即時重建", flush=True)

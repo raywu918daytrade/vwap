@@ -81,6 +81,9 @@ def get_stock_candles(
             limit = int(limit)
         except Exception:
             limit = 120
+    from main.hf_on_demand import ensure_chart_data
+
+    ensure_chart_data(timeframe, date, limit=limit, full_day=full_day)
     if timeframe == "day":
         ref_date = date or pd.Timestamp.now(tz="Asia/Taipei").strftime("%Y-%m-%d")
         lookback_days = max(180, int((limit or 120) * 1.8))

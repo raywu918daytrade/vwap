@@ -23,11 +23,13 @@ from api import (
     push_vwap_macd_div,
     push_vwap_obv_div,
     register_vwap_sr_catchup_hook,
+    set_data_ready,
     vwap_sr_catchup as _vwap_sr_catchup,
 )
 from data.query import load_m1_live
 from main import collector as _collector
 from main import startup_data as _startup_data
+from main.runtime_profile import uses_on_demand_hf
 from main.config import (
     CACHE_PREWARM_CHART_ROWS,
     CACHE_PREWARM_CHART_DATES,
@@ -81,7 +83,10 @@ def _startup() -> None:
     """Sync local historical data from HF, then prepare realtime subscriptions."""
     global _last_hf_sync_date, _next_hf_sync_retry_at
     try:
-        sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
+        if uses_on_demand_hf():
+            sync_status = "signals_synced" if _startup_data.sync_runtime_query_data_from_hf() else "failed"
+        else:
+            sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
         now = datetime.now(_TW)
         if (now.hour, now.minute) >= (HF_DAILY_SYNC_HOUR, HF_DAILY_SYNC_MIN):
             expected_signal_date = _startup_data.latest_market_db_check_date(now)
@@ -105,6 +110,7 @@ def _startup() -> None:
         print(f"啟動資料準備失敗，仍啟動 API/collector: {exc}", flush=True)
         _log_sys(f"啟動資料準備失敗: {exc}", "error")
     finally:
+        set_data_ready(True)
         _startup_done.set()
 
 
@@ -119,6 +125,8 @@ def _clear_after_hf_sync() -> None:
 
 def _start_cache_prewarm(reason: str) -> None:
     """Warm historical caches in the background without blocking API startup."""
+    if uses_on_demand_hf():
+        return
     month_limit = CACHE_PREWARM_STARTUP_MONTHS if reason == "startup" else CACHE_PREWARM_MONTHS
     list_date_limit = CACHE_PREWARM_STARTUP_LIST_DATES if reason == "startup" else 0
     chart_date_limit = CACHE_PREWARM_STARTUP_CHART_DATES if reason == "startup" else CACHE_PREWARM_CHART_DATES
@@ -183,7 +191,14 @@ def _daily_hf_sync() -> None:
         if should_sync:
             hhmm = now.strftime("%H:%M")
             print(f"[{hhmm}] 每日 HF 同步檢查：下載外部維護的歷史 market DB", flush=True)
-            sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
+            if uses_on_demand_hf():
+                sync_status = "signals_synced" if _startup_data.sync_runtime_query_data_from_hf() else "failed"
+                if sync_status == "signals_synced":
+                    from main.hf_on_demand import invalidate_current_month
+
+                    invalidate_current_month()
+            else:
+                sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
             expected_signal_date = _startup_data.latest_market_db_check_date(now)
             if sync_status in ("synced", "signals_synced", "fresh") and not _startup_data.offline_signal_date_available(expected_signal_date):
                 _next_hf_sync_retry_at = now + timedelta(minutes=30)
@@ -234,9 +249,15 @@ def _watchlist_prev_close(stock_id: str, date_str: str) -> float | None:
     if cached and cached[0] == date_str:
         return cached[1]
 
-    from data.query import load_day_by_stock
+    if stock_id in state.sr_prev_close:
+        return state.sr_prev_close[stock_id]
 
-    df = load_day_by_stock(stock_id)
+    from main.hf_on_demand import ensure_chart_data
+    from data.adjustment_query import load_pattern_day_by_stock
+
+    ensure_chart_data("day", date_str, limit=120)
+    start_date = (pd.Timestamp(date_str) - pd.Timedelta(days=216)).strftime("%Y-%m-%d")
+    df = load_pattern_day_by_stock(stock_id, start_date=start_date, end_date=date_str)
     if df.empty:
         return None
     df = df[df["date"] < pd.Timestamp(date_str)]
@@ -248,6 +269,7 @@ def _watchlist_prev_close(stock_id: str, date_str: str) -> float | None:
 
 
 def _refresh_sr_levels(date_str: str) -> None:
+    from main.hf_on_demand import ensure_chart_data
     from data.adjustment_query import load_pattern_day
     from pattern.horizontal_sr import horizontal_sr_prices
 
@@ -259,6 +281,7 @@ def _refresh_sr_levels(date_str: str) -> None:
         return
 
     hist_start = (pd.Timestamp(date_str) - pd.Timedelta(days=180)).strftime("%Y-%m-%d")
+    ensure_chart_data("day", date_str, limit=120)
     print(f"[SR水位] 計算 {len(stocks)} 檔（日K < {date_str}）", flush=True)
     day = load_pattern_day(start_date=hist_start, end_date=date_str)
     if day.empty:

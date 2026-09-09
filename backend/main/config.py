@@ -23,7 +23,7 @@ MARKET_CLOSE_MIN = int(os.environ.get("MARKET_CLOSE_MIN", "30"))
 
 # Daily post-market HF sync time. The app stays online 24/7, so this replaces
 # the old "restart in the morning to pull fresh history" workflow.
-HF_DAILY_SYNC_HOUR = int(os.environ.get("HF_DAILY_SYNC_HOUR", "19"))
+HF_DAILY_SYNC_HOUR = int(os.environ.get("HF_DAILY_SYNC_HOUR", "18"))
 HF_DAILY_SYNC_MIN = int(os.environ.get("HF_DAILY_SYNC_MIN", "0"))
 
 # Warm the most common historical reads after startup/HF sync so the first user

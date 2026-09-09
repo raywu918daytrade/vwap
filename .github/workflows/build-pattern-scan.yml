@@ -60,6 +60,7 @@ jobs:
           python -m scripts.sync_market_db_from_hf \
             --only m1 m5_std d1 adjustment_day tickers adjustment_factor tick_adjust_factor pattern_scan vwap_activity vwap_signals d1_flags adjustment_day_flags \
             --intraday-months "${SYNC_INTRADAY_MONTHS}" \
+            --history-months 12 \
             --no-prune
 
       - name: Build and upload offline parquet

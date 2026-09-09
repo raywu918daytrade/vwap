@@ -42,9 +42,9 @@ push 到 `main` 後會由 GitHub Actions 自動部署到 Oracle Cloud；workflow
 
 ## Render
 
-`render` branch 可用根目錄的 `render.yaml` 建立單一 Render Web Service。Render 會用 `backend/Dockerfile` build 一個 Docker image：先建置 `frontend/`，再把 Vite 產物放進 FastAPI 的 `/app/static`，最後由同一個後端 process 服務 `/`、`/api/*`、SSE 與 `/health`。
+`render` branch 可用根目錄的 `render.yaml` 建立單一 Render Web Service。Render 會用 `backend/Dockerfile` build 一個 Docker image：先建置 `frontend/`，再把 Vite 產物放進 FastAPI 的 `/app/static`，最後由輕量 reader process 服務 `/`、歷史 API 與 `/health`。
 
-部署時在 Render Blueprint 填入 secrets：`FUGLE`、`FUGLE_DAYTRADE`、`FUBON_ID`、`FUBON_API_KEY`、`FUBON_CERT_B64`、`HF_REPO_ID`、`HF_TOKEN`。若富邦憑證有密碼，再手動加 `FUBON_CERT_PASS`。不要手動設定 `PORT`；Render 會注入，後端會綁定 `0.0.0.0:$PORT`。詳細注意事項見 `docs/render.md`。
+部署時在 Render Blueprint 只需填入 `HF_REPO_ID`、`HF_TOKEN`。Render 不登入富邦；Oracle 才負責即時行情。不要手動設定 `PORT`；Render 會注入，後端會綁定 `0.0.0.0:$PORT`。詳細注意事項見 `docs/render.md`。
 
 ## 保留功能
 
@@ -54,7 +54,7 @@ push 到 `main` 後會由 GitHub Actions 自動部署到 Oracle Cloud；workflow
 - K線圖：`/api/pattern/{stock_id}/detail` 提供日K、M1K、型態線、轉折點、VWAP、日壓力支撐疊圖；VWAP/觀察列另保留 MACD、OBV、0050 子面板
 - 歷史資料同步：`backend/scripts/sync_market_db_from_hf.py` 從外部維護的 Hugging Face dataset 下載 `db/`，包含 `db/pattern_scan/d1`、`db/vwap_activity` 與 `db/vwap_signals`
 - 離線訊號產生：`backend/scripts/build_pattern_scan.py`、`backend/scripts/build_vwap_activity.py`、`backend/scripts/build_vwap_signals.py` 可在本機初始化最近 N 個月結果並上傳 HF；`.github/workflows/build-pattern-scan.yml` 會每天台北 19:00 掃當日 D1 型態、09:05 activity、VWAP/SR/MACD/OBV/chg 並上傳 HF
-- HF 同步：`backend/main/startup_data.py` 會視本機 D1 flag 新鮮度呼叫 HF 同步；`backend/main/live_trader.py` 在服務常駐時預設每天 19:00 再檢查一次。D1 已新鮮時仍會同步 GHA 產出的 `pattern_scan` / `vwap_activity` / `vwap_signals` 小型離線檔；若當天 `vwap_signals` 還沒上傳完成，30 分鐘後自動重試
+- HF 同步：Render 與 Oracle 統一使用 `HF_DATA_MODE=on-demand`。啟動只同步 GHA 產出的 `pattern_scan` / `vwap_activity` / `vwap_signals` 與 `tickers`；D1/M1 圖表按日期下載月份檔，本機最多快取 12 個月。服務每天 18:00 檢查新結果，尚未上傳完成時 30 分鐘後重試
 - 即時連線：`backend/fubon/marketdata_ws.py`
 
 ## 盤中補資料
