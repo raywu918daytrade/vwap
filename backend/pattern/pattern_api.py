@@ -17,7 +17,9 @@ import hashlib
 import json
 import os
 import shutil
+import threading
 import uuid
+from functools import wraps
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
@@ -40,6 +42,19 @@ from pattern.w_bottom.detector import WBottomDetector
 
 router = APIRouter(prefix="/api/pattern", tags=["技術型態"])
 PATTERN_SCAN_TIMEFRAME = "day"
+_DETAIL_FLIGHT_LOCKS = [threading.Lock() for _ in range(32)]
+
+
+def _singleflight_detail(fn):
+    """Collapse concurrent identical detail reads into one cache fill."""
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        key = (args, tuple(sorted(kwargs.items())))
+        lock = _DETAIL_FLIGHT_LOCKS[hash(key) % len(_DETAIL_FLIGHT_LOCKS)]
+        with lock:
+            return fn(*args, **kwargs)
+
+    return wrapped
 
 # 註冊所有可用型態檢測器
 DETECTORS = {
@@ -581,6 +596,7 @@ async def submit_scan(
 
 
 @router.get("/{stock_id}/detail", summary="單一股票 K 線與型態繪圖細節")
+@_singleflight_detail
 def get_pattern_detail(
     stock_id: str,
     pattern_type: str = Query(
