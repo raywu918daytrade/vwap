@@ -84,8 +84,8 @@ def _startup() -> None:
         if sync_status in ("synced", "signals_synced"):
             _clear_after_hf_sync()
         _start_cache_prewarm("startup")
-        print("更新富邦即時訂閱清單...", flush=True)
-        _startup_data.refresh_fubon_subscription_universe(state)
+        print("載入富邦即時訂閱清單...", flush=True)
+        _startup_data.load_fubon_subscription_universe(state)
         print(f"  即時訂閱標的：{len(state.tickers)} 支", flush=True)
         _log_sys(f"即時訂閱清單就緒：{len(state.tickers)} 支")
         _ensure_sr_vwap_day(datetime.now(_TW).strftime("%Y-%m-%d"))

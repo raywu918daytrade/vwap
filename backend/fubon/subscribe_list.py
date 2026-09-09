@@ -373,9 +373,33 @@ def load_candidates() -> pd.DataFrame:
     return df[df["daytrade_ok"] == True]  # noqa: E712
 
 
+def load_realtime_candidates() -> pd.DataFrame:
+    """Load a usable WebSocket universe without running REST verification.
+
+    HF may publish the ranked universe without the runtime-only daytrade fields.
+    In that case subscribe to the ranked pool directly so realtime collection is
+    available immediately; the separate daily refresh can still verify and save
+    eligibility later.
+    """
+    from finmind.tick_universe import _universe_file_path
+
+    path = _universe_file_path()
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_parquet(path)
+    if df.empty:
+        return df
+    if "daytrade_ok" in df.columns and df["daytrade_ok"].notna().any():
+        eligible = df[df["daytrade_ok"] == True].copy()  # noqa: E712
+        if not eligible.empty:
+            return _assign_connections(eligible)
+    print("警告：候選清單尚未驗證當沖資格，先依 HF 排名清單啟動即時訂閱", flush=True)
+    return _assign_connections(df.copy())
+
+
 def load_subscribe_batches() -> list[list[str]]:
     """開 WebSocket 連線時用：回傳依 connection_id 分組、依 rank 排序的 batches。"""
-    df = load_candidates()
+    df = load_realtime_candidates()
     if df.empty:
         return []
     df = df.dropna(subset=["connection_id"])

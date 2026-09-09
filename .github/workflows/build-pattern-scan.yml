@@ -2,8 +2,8 @@ name: Build Offline Signals
 
 on:
   schedule:
-    # 19:00 Asia/Taipei = 11:00 UTC
-    - cron: "0 11 * * *"
+    # 18:00 Asia/Taipei = 10:00 UTC
+    - cron: "0 10 * * *"
   workflow_dispatch:
     inputs:
       date:
@@ -77,7 +77,10 @@ jobs:
             python -m scripts.build_vwap_signals --date "${TARGET_DATE}" --upload
           else
             TARGET="$(TZ=Asia/Taipei date +%F)"
-            python -m scripts.build_pattern_scan --date "${TARGET}" --upload
-            python -m scripts.build_vwap_activity --date "${TARGET}" --upload
-            python -m scripts.build_vwap_signals --date "${TARGET}" --upload
+            FROM_DATE="$(date -u -d "${TARGET} - 7 days" +%F)"
+            # Rebuild a short rolling window so a raw M1 shard that reaches HF
+            # after the prior evening's run cannot leave a permanent date gap.
+            python -m scripts.build_pattern_scan --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload
+            python -m scripts.build_vwap_activity --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload
+            python -m scripts.build_vwap_signals --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload
           fi

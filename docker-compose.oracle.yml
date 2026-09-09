@@ -4,6 +4,8 @@ services:
   backend:
     image: vwap-backend:local
     platform: linux/amd64
+    mem_limit: 448m
+    mem_reservation: 256m
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -20,6 +22,8 @@ services:
       NUMEXPR_NUM_THREADS: "1"
       VECLIB_MAXIMUM_THREADS: "1"
       ARROW_NUM_THREADS: "1"
+      MALLOC_ARENA_MAX: "2"
+      FUBON_BACKFILL_WORKERS: "2"
     volumes:
       - ./backend/db:/app/db
       - ./backend/log:/app/log
@@ -37,6 +41,8 @@ services:
   web:
     image: vwap-frontend:local
     platform: linux/amd64
+    mem_limit: 64m
+    mem_reservation: 32m
     build:
       context: ./frontend
       dockerfile: Dockerfile

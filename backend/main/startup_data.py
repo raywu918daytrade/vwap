@@ -6,7 +6,7 @@ useful: a fresh enough local market DB and the Fubon subscription universe.
 
 from __future__ import annotations
 
-from fubon.subscribe_list import build_and_save_subscribe_list
+from fubon.subscribe_list import build_and_save_subscribe_list, load_realtime_candidates
 
 _OFFLINE_SIGNAL_FOLDERS = ["pattern_scan", "vwap_activity", "vwap_signals"]
 
@@ -154,6 +154,22 @@ def refresh_fubon_subscription_universe(state) -> None:
         print("  警告：無法取得候選股清單（非盤中或富邦 API 失敗），不過濾股票", flush=True)
         state.tickers = {}
         state.day_trade_stocks = None
+        return
+    state.tickers = df.set_index("stock_id")["name"].to_dict()
+    state.day_trade_stocks = set(state.tickers.keys()) or None
+
+
+def load_fubon_subscription_universe(state) -> None:
+    """Load the saved HF-produced universe without delaying WebSocket startup.
+
+    Daily eligibility verification can take several minutes and briefly consume
+    substantial memory. Startup only needs the last saved subscription groups;
+    the scheduled refresh updates them separately for the next connection.
+    """
+    df = load_realtime_candidates()
+    if df.empty:
+        print("  警告：找不到富邦訂閱清單，改為即時重建", flush=True)
+        refresh_fubon_subscription_universe(state)
         return
     state.tickers = df.set_index("stock_id")["name"].to_dict()
     state.day_trade_stocks = set(state.tickers.keys()) or None
