@@ -148,7 +148,7 @@ _system_logs: deque = deque(maxlen=500)
 _LOG_DIR = Path(__file__).parent / "logs"
 _VWAP_BUNDLE_CACHE: dict[tuple, dict] = {}
 _VWAP_BUNDLE_CACHE_ORDER: deque = deque()
-_VWAP_BUNDLE_CACHE_LIMIT = 0 if uses_on_demand_hf() else max(0, int(os.environ.get("VWAP_BUNDLE_CACHE_DATES", "80")))
+_VWAP_BUNDLE_CACHE_LIMIT = 1 if uses_on_demand_hf() else max(0, int(os.environ.get("VWAP_BUNDLE_CACHE_DATES", "80")))
 _VWAP_BUNDLE_DISK_CACHE_DIR = Path(os.environ.get(
     "VWAP_BUNDLE_CACHE_DIR",
     Path(__file__).parent / ".cache/vwap_bundle",
