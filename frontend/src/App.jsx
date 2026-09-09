@@ -945,6 +945,24 @@ export default function App() {
     }
   }, [repeatEvents, signalLoadKey, universe, vwapDate]);
 
+  const changeVwapDate = useCallback((nextDate) => {
+    if (nextDate === vwapDate) return;
+    signalLoadSeqRef.current += 1;
+    setVwapRowsRaw([]);
+    setSrRowsRaw([]);
+    setChgMap({});
+    setActivityMap({});
+    setMacdMap({});
+    setObvMap({});
+    setPatternRows([]);
+    setSignalLoadedKey("");
+    setSelectedEventKey("");
+    setVwapError("");
+    setPatternError("");
+    setVwapLoading(true);
+    setVwapDate(nextDate);
+  }, [vwapDate]);
+
   useEffect(() => {
     localStorage.setItem("chartStock", stockId);
     localStorage.setItem("vwapDate", vwapDate);
@@ -1535,7 +1553,7 @@ export default function App() {
                     value={vwapDate}
                     dates={patternScanDates}
                     today={today}
-                    onChange={setVwapDate}
+                    onChange={changeVwapDate}
                     disabled={marketHours}
                   />
                   <input
