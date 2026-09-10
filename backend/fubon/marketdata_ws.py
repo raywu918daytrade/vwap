@@ -137,6 +137,8 @@ class FubonM1Collector:
         # （2026-07-13 實際發生過，導致 collector 整個掛掉、不會自動重連）。
         self._save_lock = threading.Lock()
         self._stop = False
+        self._connection_failed = threading.Event()
+        self._connection_failure_reason = ""
         # 涵蓋率追蹤：只記股票代號，不存報價內容（報價內容仍在 self._buffer）。
         # _target_minute 是目前這一輪在等的那根已收盤分鐘，只有訊息剛好屬於這
         # 一分鐘才會被算進涵蓋率，避免跨分鐘的訊息把下一輪的涵蓋率灌水。
@@ -163,8 +165,8 @@ class FubonM1Collector:
         for i, batch in enumerate(batches, 1):
             stock = trade_api.open_candles_connection(token)
             stock.on("message", self._make_handler(i))
-            stock.on("disconnect", lambda code, msg, i=i: print(f"[連線{i}] disconnected: {code} {msg}", flush=True))
-            stock.on("error", lambda e, i=i: print(f"[連線{i}] error: {e}", flush=True))
+            stock.on("disconnect", self._make_disconnect_handler(i))
+            stock.on("error", self._make_error_handler(i))
             stock.connect()  # 內部會 block 到 auth 完成（或失敗直接 raise）
             print(f"[連線{i}] 已連線，訂閱 {len(batch)} 支...", flush=True)
 
@@ -225,6 +227,27 @@ class FubonM1Collector:
             trade_api.logout(self._sdk)
 
     # ── 訊息處理 ──────────────────────────────────────────────────────────
+
+    def _mark_connection_failed(self, conn_id: int, reason: str) -> None:
+        if self._stop:
+            return
+        message = f"[連線{conn_id}] {reason}"
+        print(message, flush=True)
+        if not self._connection_failed.is_set():
+            self._connection_failure_reason = message
+            self._connection_failed.set()
+
+    def _make_disconnect_handler(self, conn_id: int):
+        def handler(code, msg):
+            self._mark_connection_failed(conn_id, f"disconnected: {code} {msg}")
+
+        return handler
+
+    def _make_error_handler(self, conn_id: int):
+        def handler(error):
+            self._mark_connection_failed(conn_id, f"error: {error}")
+
+        return handler
 
     def _make_handler(self, conn_id: int):
         def handler(raw):
@@ -334,6 +357,8 @@ class FubonM1Collector:
         if not self._on_minute:
             return
         while not self._stop:
+            if self._connection_failed.is_set():
+                raise RuntimeError(self._connection_failure_reason or "富邦 WebSocket 子連線中斷")
             now = datetime.now(_TW)
             min_tick = now.replace(second=5, microsecond=0) + timedelta(minutes=1)
             closed_minute = (min_tick - timedelta(minutes=1)).replace(second=0, microsecond=0)
@@ -343,8 +368,10 @@ class FubonM1Collector:
                 self._arrived_this_minute = set()
 
             wait = (min_tick - datetime.now(_TW)).total_seconds()
-            if wait > 0:
-                time.sleep(wait)
+            while wait > 0 and not self._stop and not self._connection_failed.wait(timeout=min(wait, 1)):
+                wait = (min_tick - datetime.now(_TW)).total_seconds()
+            if self._connection_failed.is_set():
+                raise RuntimeError(self._connection_failure_reason or "富邦 WebSocket 子連線中斷")
             if self._stop:
                 break
 
