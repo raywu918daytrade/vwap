@@ -178,6 +178,15 @@ def upload_to_hf(paths: list[Path], repo_id: str | None, token: str | None) -> N
         )
 
 
+def sync_to_tidb(paths: list[Path], dates: list[str]) -> None:
+    if not paths:
+        return
+    from data.tidb_offline_store import sync_offline_paths_to_tidb
+
+    summary = sync_offline_paths_to_tidb(paths, dates=dates)
+    print(f"TiDB 盤中訊號同步完成：{summary or {'vwap_signals': 0}}", flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build offline VWAP dashboard intraday signals")
     parser.add_argument("--date", default=None, help="產生單一交易日 YYYY-MM-DD；預設為台北今天")
@@ -186,6 +195,7 @@ def main() -> None:
     parser.add_argument("--init-months", type=int, default=0, help="第一次初始化最近 N 個月交易日")
     parser.add_argument("--universe", default="full", choices=["daytrade", "full"], help="預算股票池，預設 full")
     parser.add_argument("--upload", action="store_true", help="產生完成後上傳 monthly parquet shard 到 HF")
+    parser.add_argument("--sync-tidb", action="store_true", help="產生完成後同步到 TiDB 線上查詢表")
     parser.add_argument("--repo-id", default=os.environ.get("HF_REPO_ID"), help="HF dataset repo id")
     parser.add_argument("--hf-token", default=os.environ.get("HF_TOKEN"), help="HF write token")
     args = parser.parse_args()
@@ -199,6 +209,8 @@ def main() -> None:
     written = build_vwap_signals(dates, args.universe)
     if args.upload:
         upload_to_hf(written, args.repo_id, args.hf_token)
+    if args.sync_tidb:
+        sync_to_tidb(written, dates)
 
 
 if __name__ == "__main__":

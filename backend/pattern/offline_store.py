@@ -108,6 +108,15 @@ def _summary_from_row(row: pd.Series) -> dict[str, Any]:
 
 def available_scan_dates() -> list[str]:
     """Return all scan dates present in local monthly parquet shards."""
+    try:
+        from data.tidb_offline_store import DATASET_PATTERN_SCAN, tidb_available_dates
+
+        tidb_dates = tidb_available_dates(DATASET_PATTERN_SCAN)
+        if tidb_dates:
+            return tidb_dates
+    except Exception as exc:
+        print(f"[TiDB] pattern date lookup failed; falling back to parquet: {exc}", flush=True)
+
     dates: set[str] = set()
     for path in sorted(PATTERN_SCAN_DIR.glob("*.parquet")):
         try:
@@ -139,6 +148,20 @@ def read_pattern_scan(
     if not date:
         return None, []
     date = _date_key(date)
+
+    try:
+        from data.tidb_offline_store import tidb_read_pattern_scan
+
+        tidb_rows = tidb_read_pattern_scan(
+            date,
+            pattern_types,
+            min_score,
+            include_payload=include_payload,
+        )
+        if tidb_rows is not None:
+            return date, tidb_rows
+    except Exception as exc:
+        print(f"[TiDB] pattern scan read failed; falling back to parquet: {exc}", flush=True)
 
     path = _month_path(date)
     if not path.exists():
@@ -179,6 +202,15 @@ def read_pattern_for_stock(
     if not date:
         return None
     date = _date_key(date)
+
+    try:
+        from data.tidb_offline_store import tidb_read_pattern_for_stock
+
+        tidb_row = tidb_read_pattern_for_stock(stock_id, pattern_type, date, min_score)
+        if tidb_row is not None:
+            return tidb_row
+    except Exception as exc:
+        print(f"[TiDB] pattern detail read failed; falling back to parquet: {exc}", flush=True)
 
     path = _month_path(date)
     if not path.exists():

@@ -166,10 +166,29 @@ def _mtime_token(path: Path) -> str:
 
 def _vwap_bundle_source_version(date_str: str) -> str:
     month = date_str[:7].replace("-", "_")
+    tickers_path = Path(__file__).parent / "db/tickers/tick_universe.parquet"
+    try:
+        from data.tidb_offline_store import (
+            DATASET_VWAP_ACTIVITY,
+            DATASET_VWAP_SIGNALS,
+            tidb_dataset_version,
+        )
+
+        signal_version = tidb_dataset_version(DATASET_VWAP_SIGNALS, date_str)
+        activity_version = tidb_dataset_version(DATASET_VWAP_ACTIVITY, date_str)
+        if signal_version or activity_version:
+            return (
+                f"tidb-signals:{signal_version or 'missing'}|"
+                f"tidb-activity:{activity_version or 'missing'}|"
+                f"{tickers_path.name}:{_mtime_token(tickers_path)}"
+            )
+    except Exception as exc:
+        print(f"[TiDB] vwap bundle version read failed; falling back to parquet version: {exc}", flush=True)
+
     paths = [
         Path(__file__).parent / f"db/vwap_signals/{month}.parquet",
         Path(__file__).parent / f"db/vwap_activity/{month}.parquet",
-        Path(__file__).parent / "db/tickers/tick_universe.parquet",
+        tickers_path,
     ]
     return "|".join(f"{p.name}:{_mtime_token(p)}" for p in paths)
 

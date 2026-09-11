@@ -118,15 +118,18 @@ repo，也不要放 `GITHUB_DAY_TRADE` token。
 .github/workflows/build-pattern-scan.yml
 ```
 
-離線訊號 workflow 預設每天台北時間 19:00 執行，會產生當天 D1 型態、
+離線訊號 workflow 預設每天台北時間 18:00 執行，會產生最近 7 天 D1 型態、
 `09:05` activity（ATR / 5分幅 / 量PR），以及歷史查表用的
 VWAP/SR/MACD/OBV/chg bundle，並上傳到 HF。第一次初始化最近三個月時，
 可以手動 dispatch 並填 `init_months=3`；也可以在本機跑
 `python -m scripts.build_pattern_scan --init-months 3 --upload` 與
 `python -m scripts.build_vwap_activity --init-months 3 --upload`、
-`python -m scripts.build_vwap_signals --init-months 3 --upload`。
+`python -m scripts.build_vwap_signals --init-months 3 --upload`。若有設定 TiDB
+direct connection，也可以加 `--sync-tidb`，把同一批離線查表資料寫入 TiDB；
+再跑 `python -m scripts.sync_chart_to_tidb --init-months 3`，讓日期/股票切換用的
+D1/M1 圖表 K 線也先查 TiDB。
 
-Oracle backend 也預設 19:00 同步 HF；若 GHA 還沒把當天 `vwap_signals`
+Oracle backend 也預設 18:00 同步 HF；若 GHA 還沒把當天 `vwap_signals`
 上傳完成，backend 會保留這次同步未完成狀態，30 分鐘後自動重試。
 
 GitHub repo 需要設定這些 Secrets / Variables：
@@ -135,6 +138,10 @@ GitHub repo 需要設定這些 Secrets / Variables：
 
 - `ORACLE_SSH_PRIVATE_KEY`：GitHub Actions 登入 Oracle VM 用的私鑰。
 - `HF_TOKEN`：Hugging Face dataset 寫入 token，供離線訊號 workflow 上傳 parquet。
+- `TIDB_DAY_TRADE_DATABASE_URL`：可選。TiDB MySQL 相容連線字串，供離線訊號與
+  chart K 線 workflow 批次 upsert 到 TiDB。若改用拆開的欄位，則設定
+  `TIDB_DAY_TRADE_HOST`、`TIDB_DAY_TRADE_USER`、`TIDB_DAY_TRADE_PASSWORD`、
+  `TIDB_DAY_TRADE_DATABASE`。
 
 建議 Secret：
 
@@ -206,6 +213,8 @@ nano backend/.env
 - `FUBON_CERT_PASS`
 - `HF_REPO_ID`
 - `HF_TOKEN`
+- `TIDB_DAY_TRADE_DATABASE_URL`：可選；設定後 Oracle runtime 會優先讀 TiDB，
+  讀離線結果與歷史圖表 K 線，未命中或連線失敗時退回 HF/local parquet。
 
 `FUBON_CERT_B64` 在本機可這樣產生，再貼到雲端 `.env`：
 
@@ -304,7 +313,8 @@ runtime 目錄用 bind mount 留在 VM：
 - `logs`：最近 14 個日曆天。
 - `d1`, `adjustment_day`, `adjustment_factor`, `tick_adjust_factor`：按需下載，
   本機合計各自最多保留 12 個月。
-- `tickers` 與離線結果：啟動及每日 18:00 從 HF 同步。
+- `tickers` 與離線結果：啟動及每日 18:00 從 HF 同步；若 TiDB 查詢已啟用，
+  小型啟動同步只拉 `tickers`，離線結果與歷史圖表 K 線由 TiDB 優先查詢。
 
 可在 `backend/.env` 調整：
 
@@ -339,6 +349,12 @@ cd backend
 python -m scripts.build_pattern_scan --init-months 3 --upload
 python -m scripts.build_vwap_activity --init-months 3 --upload
 python -m scripts.build_vwap_signals --init-months 3 --upload
+
+# 同步到 TiDB 線上查詢表
+python -m scripts.build_pattern_scan --init-months 3 --upload --sync-tidb
+python -m scripts.build_vwap_activity --init-months 3 --upload --sync-tidb
+python -m scripts.build_vwap_signals --init-months 3 --upload --sync-tidb
+python -m scripts.sync_chart_to_tidb --init-months 3 --timeframe all
 
 # 本機或 GitHub Actions 手動補單日離線訊號
 cd backend
@@ -378,4 +394,4 @@ du -sh backend/db backend/log backend/logs backend/.cache
 - 1GB RAM 偏緊，建議保留 2GB swap；build 或 HF sync 時尤其有幫助。
 - 公開 IP `129.225.130.75` 若不是 Reserved Public IP，重開機後有機會改變。
 - 目前只有 HTTP。要 HTTPS 可以接 Cloudflare、Caddy，或在 OCI 上另外放反向代理。
-- 第一輪 HF sync 會下載 rolling 24 個月的 `m1` / `m5_std`，第一次啟動會比平常久；離線訊號只下載 `pattern_scan` / `vwap_activity` / `vwap_signals` 小檔時會快很多。
+- 未開 TiDB 時，第一輪 HF sync 會下載 rolling 24 個月的 `m1` / `m5_std`，第一次啟動會比平常久；開 TiDB 後，小型啟動同步只拉 `tickers`，歷史圖表 DB miss 時才回退下載 HF/parquet。

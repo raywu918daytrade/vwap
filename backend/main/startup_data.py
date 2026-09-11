@@ -10,6 +10,29 @@ _OFFLINE_SIGNAL_FOLDERS = ["pattern_scan", "vwap_activity", "vwap_signals"]
 _RUNTIME_QUERY_FOLDERS = [*_OFFLINE_SIGNAL_FOLDERS, "tickers"]
 
 
+def _tidb_offline_reads_enabled() -> bool:
+    try:
+        from data.tidb_offline_store import tidb_reads_enabled
+
+        return tidb_reads_enabled()
+    except Exception:
+        return False
+
+
+def warm_tidb_query_connection() -> bool:
+    """Warm one pooled TiDB connection so the first chart click stays fast."""
+    try:
+        from data.tidb_offline_store import warm_tidb_read_pool
+
+        warmed = warm_tidb_read_pool()
+        if warmed:
+            print("[TiDB] 查詢連線已預熱", flush=True)
+        return warmed
+    except Exception as exc:
+        print(f"[TiDB] 查詢連線預熱失敗，首次查詢時重試: {exc}", flush=True)
+        return False
+
+
 def _latest_market_db_check_date(now) -> str:
     """Return the trading date whose D1 flag should exist before live startup.
 
@@ -89,6 +112,9 @@ def sync_local_market_db_from_hf_if_stale() -> str:
 
 def sync_offline_signal_shards_from_hf() -> bool:
     """Pull small GHA-produced signal shards even when raw market DB is fresh."""
+    if _tidb_offline_reads_enabled():
+        print("[HF同步檢查] TiDB 查詢已啟用，跳過 pattern/activity/signals parquet 同步", flush=True)
+        return False
     try:
         from scripts.sync_market_db_from_hf import sync_market_db_from_hf
 
@@ -105,11 +131,15 @@ def sync_runtime_query_data_from_hf() -> bool:
     try:
         from scripts.sync_market_db_from_hf import sync_market_db_from_hf
 
-        sync_market_db_from_hf(only=_RUNTIME_QUERY_FOLDERS, prune=False)
+        folders = ["tickers"] if _tidb_offline_reads_enabled() else _RUNTIME_QUERY_FOLDERS
+        sync_market_db_from_hf(only=folders, prune=False)
         from main.hf_on_demand import prune_month_cache
 
         prune_month_cache()
-        print("[HF同步檢查] 離線結果與股票清單已同步", flush=True)
+        if folders == ["tickers"]:
+            print("[HF同步檢查] TiDB 查詢已啟用，僅同步股票清單", flush=True)
+        else:
+            print("[HF同步檢查] 離線結果與股票清單已同步", flush=True)
         return True
     except Exception as exc:
         print(f"[HF同步檢查] 小型同步失敗，沿用現有檔案: {exc}", flush=True)

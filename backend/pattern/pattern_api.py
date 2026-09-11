@@ -265,6 +265,15 @@ def _month_file_mtime(path: Path) -> str:
 
 def _historical_detail_version(timeframe: str, date: str, pattern_type: str) -> str:
     """Cheap version token for persisted historical detail cache invalidation."""
+    try:
+        from data.tidb_offline_store import tidb_chart_version
+
+        tidb_version = tidb_chart_version(timeframe, date, pattern_type)
+        if tidb_version:
+            return tidb_version
+    except Exception as exc:
+        print(f"[TiDB] chart detail version read failed; falling back to parquet version: {exc}", flush=True)
+
     month = str(date)[:7].replace("-", "_")
     timeframe_dir = {
         "1m": "m1",
@@ -284,6 +293,15 @@ def _historical_detail_version(timeframe: str, date: str, pattern_type: str) -> 
 
 
 def _historical_scan_version(date: str) -> str:
+    try:
+        from data.tidb_offline_store import DATASET_PATTERN_SCAN, tidb_dataset_version
+
+        tidb_version = tidb_dataset_version(DATASET_PATTERN_SCAN, date)
+        if tidb_version:
+            return tidb_version
+    except Exception as exc:
+        print(f"[TiDB] pattern scan version read failed; falling back to parquet version: {exc}", flush=True)
+
     month = str(date)[:7].replace("-", "_")
     path = Path(__file__).parent.parent / f"db/pattern_scan/d1/{month}.parquet"
     return f"{path.name}:{_month_file_mtime(path)}"
@@ -657,7 +675,16 @@ def get_pattern_detail(
     if not skip_pattern:
         timeframe = _normalize_scan_timeframe(timeframe)
 
-    if date and uses_on_demand_hf():
+    tidb_chart_enabled = False
+    if date:
+        try:
+            from data.tidb_offline_store import tidb_chart_reads_enabled
+
+            tidb_chart_enabled = tidb_chart_reads_enabled()
+        except Exception:
+            tidb_chart_enabled = False
+
+    if date and uses_on_demand_hf() and not tidb_chart_enabled:
         from main.hf_on_demand import ensure_chart_data
 
         ensure_chart_data(timeframe, str(date)[:10], limit=limit, full_day=full_day)

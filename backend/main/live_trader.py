@@ -87,6 +87,7 @@ def _startup() -> None:
             sync_status = "signals_synced" if _startup_data.sync_runtime_query_data_from_hf() else "failed"
         else:
             sync_status = _startup_data.sync_local_market_db_from_hf_if_stale()
+        _startup_data.warm_tidb_query_connection()
         now = datetime.now(_TW)
         if (now.hour, now.minute) >= (HF_DAILY_SYNC_HOUR, HF_DAILY_SYNC_MIN):
             expected_signal_date = _startup_data.latest_market_db_check_date(now)

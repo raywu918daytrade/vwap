@@ -67,7 +67,13 @@ services:
         value: "1"
       - key: WATCHLIST_QUOTES
         value: "0050"
+      - key: TIDB_DAY_TRADE_READ
+        value: "1"
+      - key: TIDB_DAY_TRADE_CHART_READ
+        value: "1"
       - key: HF_REPO_ID
         sync: false
       - key: HF_TOKEN
+        sync: false
+      - key: TIDB_DAY_TRADE_DATABASE_URL
         sync: false

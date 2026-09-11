@@ -83,11 +83,35 @@ def get_stock_candles(
             limit = 120
     from main.hf_on_demand import ensure_chart_data
 
-    ensure_chart_data(timeframe, date, limit=limit, full_day=full_day)
+    chart_data_ensured = False
+
+    def _ensure_chart_data_once() -> None:
+        nonlocal chart_data_ensured
+        if chart_data_ensured:
+            return
+        ensure_chart_data(timeframe, date, limit=limit, full_day=full_day)
+        chart_data_ensured = True
+
     if timeframe == "day":
         ref_date = date or pd.Timestamp.now(tz="Asia/Taipei").strftime("%Y-%m-%d")
         lookback_days = max(180, int((limit or 120) * 1.8))
         start_date = (pd.Timestamp(ref_date) - pd.Timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        if date:
+            try:
+                from data.tidb_offline_store import tidb_read_chart_day
+
+                df_tidb = tidb_read_chart_day(
+                    stock_id,
+                    start_date=start_date,
+                    end_date=str(ref_date)[:10],
+                    limit=limit,
+                )
+                if df_tidb is not None and not df_tidb.empty:
+                    return df_tidb
+            except Exception as exc:
+                print(f"[TiDB] day chart read failed; falling back to parquet/HF: {exc}", flush=True)
+
+        _ensure_chart_data_once()
         df = load_pattern_day_by_stock(
             stock_id,
             start_date=start_date,
@@ -138,6 +162,17 @@ def get_stock_candles(
         # 不到當天資料、圖表空白。
         today_str = pd.Timestamp.now(tz="Asia/Taipei").strftime("%Y-%m-%d")
         effective_date = date or today_str
+        if date:
+            try:
+                from data.tidb_offline_store import tidb_read_chart_m1
+
+                df_tidb = tidb_read_chart_m1(stock_id, effective_date, limit=limit, full_day=full_day)
+                if df_tidb is not None and not df_tidb.empty:
+                    return df_tidb
+            except Exception as exc:
+                print(f"[TiDB] 1m chart read failed; falling back to parquet/HF: {exc}", flush=True)
+
+        _ensure_chart_data_once()
 
         # 2026-08-12改：db/m1（隔夜批次）跟 db/m1_live（當天即時）改成
         # 「聯集去重複」，不是原本的「live 有資料就直接回傳、不然才查
@@ -250,6 +285,25 @@ def get_stock_candles(
         # 預先算好、涵蓋多年歷史的資料，只好整個 fallback 到別的資料源）。
         today_str = pd.Timestamp.now(tz="Asia/Taipei").strftime("%Y-%m-%d")
         effective_date = date or today_str
+        if date:
+            try:
+                from data.tidb_offline_store import tidb_read_chart_m1
+
+                df_1m_tidb = tidb_read_chart_m1(
+                    stock_id,
+                    effective_date,
+                    limit=None if full_day else limit * 5,
+                    full_day=full_day,
+                )
+                if df_1m_tidb is not None and not df_1m_tidb.empty:
+                    df_res = compute_m3_std(df_1m_tidb) if timeframe == "3m" else compute_m5_std(df_1m_tidb)
+                    if not full_day and limit and len(df_res) > limit:
+                        df_res = df_res.iloc[-limit:].reset_index(drop=True)
+                    return df_res
+            except Exception as exc:
+                print(f"[TiDB] {timeframe} chart read failed; falling back to parquet/HF: {exc}", flush=True)
+
+        _ensure_chart_data_once()
         std_dir = _ROOT / f"db/m{timeframe[:-1]}_std"
         if std_dir.exists():
             try:

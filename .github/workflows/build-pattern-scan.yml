@@ -28,6 +28,15 @@ jobs:
       HF_REPO_ID: ${{ secrets.HF_REPO_ID || vars.HF_REPO_ID || 'raywu918daytrade/daytrade' }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_HUB_DISABLE_XET: "1"
+      TIDB_DAY_TRADE_DATABASE_URL: ${{ secrets.TIDB_DAY_TRADE_DATABASE_URL }}
+      TIDB_DAY_TRADE_HOST: ${{ secrets.TIDB_DAY_TRADE_HOST }}
+      TIDB_DAY_TRADE_PORT: ${{ secrets.TIDB_DAY_TRADE_PORT }}
+      TIDB_DAY_TRADE_USER: ${{ secrets.TIDB_DAY_TRADE_USER }}
+      TIDB_DAY_TRADE_PASSWORD: ${{ secrets.TIDB_DAY_TRADE_PASSWORD }}
+      TIDB_DAY_TRADE_DATABASE: ${{ secrets.TIDB_DAY_TRADE_DATABASE }}
+      TIDB_DAY_TRADE_SSL_CA: ${{ secrets.TIDB_DAY_TRADE_SSL_CA }}
+      TIDB_DAY_TRADE_PUBLIC_KEY: ${{ secrets.TIDB_DAY_TRADE_PUBLIC_KEY }}
+      TIDB_DAY_TRADE_PRIVATE_KEY: ${{ secrets.TIDB_DAY_TRADE_PRIVATE_KEY }}
       TARGET_DATE: ${{ inputs.date }}
       INIT_MONTHS: ${{ inputs.init_months }}
 
@@ -68,20 +77,44 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          TIDB_ARGS=()
+          TIDB_SYNC_ENABLED=0
+          if [ -n "${TIDB_DAY_TRADE_DATABASE_URL:-}" ] || {
+            [ -n "${TIDB_DAY_TRADE_HOST:-}" ] &&
+            [ -n "${TIDB_DAY_TRADE_USER:-}" ] &&
+            [ -n "${TIDB_DAY_TRADE_PASSWORD:-}" ] &&
+            [ -n "${TIDB_DAY_TRADE_DATABASE:-}" ]
+          }; then
+            TIDB_ARGS+=(--sync-tidb)
+            TIDB_SYNC_ENABLED=1
+          elif [ -n "${TIDB_DAY_TRADE_PUBLIC_KEY:-}" ] || [ -n "${TIDB_DAY_TRADE_PRIVATE_KEY:-}" ]; then
+            echo "TiDB Data Service keys are present, but direct TiDB connection vars are missing; skip bulk TiDB sync."
+          else
+            echo "TiDB direct connection not configured; skip TiDB sync."
+          fi
           if [ -n "${INIT_MONTHS:-}" ]; then
-            python -m scripts.build_pattern_scan --init-months "${INIT_MONTHS}" --upload
-            python -m scripts.build_vwap_activity --init-months "${INIT_MONTHS}" --upload
-            python -m scripts.build_vwap_signals --init-months "${INIT_MONTHS}" --upload
+            python -m scripts.build_pattern_scan --init-months "${INIT_MONTHS}" --upload "${TIDB_ARGS[@]}"
+            python -m scripts.build_vwap_activity --init-months "${INIT_MONTHS}" --upload "${TIDB_ARGS[@]}"
+            python -m scripts.build_vwap_signals --init-months "${INIT_MONTHS}" --upload "${TIDB_ARGS[@]}"
+            if [ "${TIDB_SYNC_ENABLED}" = "1" ]; then
+              python -m scripts.sync_chart_to_tidb --init-months "${INIT_MONTHS}" --timeframe all
+            fi
           elif [ -n "${TARGET_DATE:-}" ]; then
-            python -m scripts.build_pattern_scan --date "${TARGET_DATE}" --upload
-            python -m scripts.build_vwap_activity --date "${TARGET_DATE}" --upload
-            python -m scripts.build_vwap_signals --date "${TARGET_DATE}" --upload
+            python -m scripts.build_pattern_scan --date "${TARGET_DATE}" --upload "${TIDB_ARGS[@]}"
+            python -m scripts.build_vwap_activity --date "${TARGET_DATE}" --upload "${TIDB_ARGS[@]}"
+            python -m scripts.build_vwap_signals --date "${TARGET_DATE}" --upload "${TIDB_ARGS[@]}"
+            if [ "${TIDB_SYNC_ENABLED}" = "1" ]; then
+              python -m scripts.sync_chart_to_tidb --date "${TARGET_DATE}" --timeframe all
+            fi
           else
             TARGET="$(TZ=Asia/Taipei date +%F)"
             FROM_DATE="$(date -u -d "${TARGET} - 7 days" +%F)"
             # Rebuild a short rolling window so a raw M1 shard that reaches HF
             # after the prior evening's run cannot leave a permanent date gap.
-            python -m scripts.build_pattern_scan --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload
-            python -m scripts.build_vwap_activity --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload
-            python -m scripts.build_vwap_signals --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload
+            python -m scripts.build_pattern_scan --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload "${TIDB_ARGS[@]}"
+            python -m scripts.build_vwap_activity --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload "${TIDB_ARGS[@]}"
+            python -m scripts.build_vwap_signals --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload "${TIDB_ARGS[@]}"
+            if [ "${TIDB_SYNC_ENABLED}" = "1" ]; then
+              python -m scripts.sync_chart_to_tidb --from-date "${FROM_DATE}" --to-date "${TARGET}" --timeframe all
+            fi
           fi

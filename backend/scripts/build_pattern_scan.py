@@ -246,6 +246,15 @@ def upload_to_hf(paths: list[Path], repo_id: str | None, token: str | None) -> N
         )
 
 
+def sync_to_tidb(paths: list[Path], dates: list[str]) -> None:
+    if not paths:
+        return
+    from data.tidb_offline_store import sync_offline_paths_to_tidb
+
+    summary = sync_offline_paths_to_tidb(paths, dates=dates)
+    print(f"TiDB 型態掃描同步完成：{summary or {'pattern_scan': 0}}", flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build offline D1 pattern scan results")
     parser.add_argument("--date", default=None, help="掃描單一交易日 YYYY-MM-DD；預設為台北今天")
@@ -256,6 +265,7 @@ def main() -> None:
     parser.add_argument("--min-score", type=float, default=60.0, help="最低型態分數")
     parser.add_argument("--limit", type=int, default=120, help="每支股票 D1 K 線根數")
     parser.add_argument("--upload", action="store_true", help="掃描完成後上傳 monthly parquet shard 到 HF")
+    parser.add_argument("--sync-tidb", action="store_true", help="掃描完成後同步到 TiDB 線上查詢表")
     parser.add_argument("--repo-id", default=os.environ.get("HF_REPO_ID"), help="HF dataset repo id")
     parser.add_argument("--hf-token", default=os.environ.get("HF_TOKEN"), help="HF write token")
     args = parser.parse_args()
@@ -272,6 +282,8 @@ def main() -> None:
     written = build_pattern_scan(dates, pattern_types, float(args.min_score), int(args.limit))
     if args.upload:
         upload_to_hf(written, args.repo_id, args.hf_token)
+    if args.sync_tidb:
+        sync_to_tidb(written, dates)
 
 
 if __name__ == "__main__":

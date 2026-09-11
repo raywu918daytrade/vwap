@@ -59,6 +59,15 @@ def has_activity_store() -> bool:
 
 def available_activity_dates() -> list[str]:
     """Return all dates present in local VWAP activity parquet shards."""
+    try:
+        from data.tidb_offline_store import DATASET_VWAP_ACTIVITY, tidb_available_dates
+
+        tidb_dates = tidb_available_dates(DATASET_VWAP_ACTIVITY)
+        if tidb_dates:
+            return tidb_dates
+    except Exception as exc:
+        print(f"[TiDB] activity date lookup failed; falling back to parquet: {exc}", flush=True)
+
     global _dates_cache
     with _dates_lock:
         if _dates_cache is not None:
@@ -101,6 +110,15 @@ def read_vwap_activity(
     date = _date_key(date)
     if not date:
         return {}
+    try:
+        from data.tidb_offline_store import tidb_read_vwap_activity
+
+        tidb_result = tidb_read_vwap_activity(date, stock_ids=stock_ids)
+        if tidb_result is not None:
+            return tidb_result
+    except Exception as exc:
+        print(f"[TiDB] activity read failed; falling back to parquet: {exc}", flush=True)
+
     path = _month_path(date)
     if not path.exists():
         return None

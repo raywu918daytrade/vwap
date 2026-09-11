@@ -31,6 +31,7 @@ def _startup() -> None:
     try:
         print("[Render reader] 同步離線結果與股票清單...", flush=True)
         _refresh_reader_data()
+        startup_data.warm_tidb_query_connection()
     finally:
         _startup_attempt_at = datetime.now(_TW)
         set_data_ready(True)

@@ -164,6 +164,15 @@ def has_vwap_signal_store() -> bool:
 
 def available_signal_dates() -> list[str]:
     """Return dates present in precomputed intraday signal shards."""
+    try:
+        from data.tidb_offline_store import DATASET_VWAP_SIGNALS, tidb_available_dates
+
+        tidb_dates = tidb_available_dates(DATASET_VWAP_SIGNALS)
+        if tidb_dates:
+            return tidb_dates
+    except Exception as exc:
+        print(f"[TiDB] signal date lookup failed; falling back to parquet: {exc}", flush=True)
+
     global _dates_cache
     with _lock:
         if _dates_cache is not None:
@@ -201,6 +210,16 @@ def read_vwap_signals(
         cached = _cache.get(date)
         if cached is not None:
             return _filter_bundle(cached, stock_ids)
+
+    try:
+        from data.tidb_offline_store import tidb_read_vwap_signals
+
+        tidb_bundle = tidb_read_vwap_signals(date, stock_ids=stock_ids)
+        if tidb_bundle is not None:
+            _remember(date, tidb_bundle)
+            return _filter_bundle(tidb_bundle, stock_ids)
+    except Exception as exc:
+        print(f"[TiDB] signal read failed; falling back to parquet: {exc}", flush=True)
 
     path = _month_path(date)
     if not path.exists():

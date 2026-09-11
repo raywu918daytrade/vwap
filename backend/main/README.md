@@ -21,14 +21,14 @@
 ## 每日 HF 同步
 
 雲端 24 小時常駐時，不需要靠重啟服務來更新歷史資料。`live_trader.py` 會啟動
-每日背景同步 thread，預設台北時間 19:00 呼叫同一支
+每日背景同步 thread，預設台北時間 18:00 呼叫同一支
 `startup_data.sync_local_market_db_from_hf_if_stale()`。若 HF 下載成功，會同步清掉
 型態、VWAP、MACD、OBV 的歷史查詢快取，讓前端之後讀到更新後的 parquet。
 
 時間可用 `.env` 或部署環境變數調整：
 
 ```bash
-HF_DAILY_SYNC_HOUR=19
+HF_DAILY_SYNC_HOUR=18
 HF_DAILY_SYNC_MIN=0
 ```
 
