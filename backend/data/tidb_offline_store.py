@@ -255,7 +255,13 @@ def connect_tidb(use_database: bool = True, *, autocommit: bool = False):
         "cursorclass": pymysql.cursors.DictCursor,
         "ssl": ssl_args,
         "connect_timeout": max(1, _int_env("TIDB_DAY_TRADE_CONNECT_TIMEOUT", 8)),
-        "read_timeout": max(1, _int_env("TIDB_DAY_TRADE_READ_TIMEOUT", 20)),
+        "read_timeout": max(
+            1,
+            _int_env(
+                "TIDB_DAY_TRADE_READ_TIMEOUT" if autocommit else "TIDB_DAY_TRADE_COMMIT_TIMEOUT",
+                20 if autocommit else 120,
+            ),
+        ),
         "write_timeout": max(1, _int_env("TIDB_DAY_TRADE_WRITE_TIMEOUT", 20)),
     }
     if use_database:
