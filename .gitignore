@@ -12,6 +12,7 @@
 
 # Virtual environments
 **/venv/
+**/.venv/
 
 # Contains deployment secrets in this workspace
 frontend/render.yaml
