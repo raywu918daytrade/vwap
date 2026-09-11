@@ -59,12 +59,13 @@ def has_activity_store() -> bool:
 
 def available_activity_dates() -> list[str]:
     """Return all dates present in local VWAP activity parquet shards."""
+    dates: set[str] = set()
     try:
         from data.tidb_offline_store import DATASET_VWAP_ACTIVITY, tidb_available_dates
 
         tidb_dates = tidb_available_dates(DATASET_VWAP_ACTIVITY)
         if tidb_dates:
-            return tidb_dates
+            dates.update(tidb_dates)
     except Exception as exc:
         print(f"[TiDB] activity date lookup failed; falling back to parquet: {exc}", flush=True)
 
@@ -73,7 +74,6 @@ def available_activity_dates() -> list[str]:
         if _dates_cache is not None:
             return list(_dates_cache)
 
-    dates: set[str] = set()
     for path in sorted(VWAP_ACTIVITY_DIR.glob("*.parquet")):
         try:
             df = pd.read_parquet(path, columns=["scan_date"])

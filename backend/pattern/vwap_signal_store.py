@@ -164,12 +164,13 @@ def has_vwap_signal_store() -> bool:
 
 def available_signal_dates() -> list[str]:
     """Return dates present in precomputed intraday signal shards."""
+    dates: set[str] = set()
     try:
         from data.tidb_offline_store import DATASET_VWAP_SIGNALS, tidb_available_dates
 
         tidb_dates = tidb_available_dates(DATASET_VWAP_SIGNALS)
         if tidb_dates:
-            return tidb_dates
+            dates.update(tidb_dates)
     except Exception as exc:
         print(f"[TiDB] signal date lookup failed; falling back to parquet: {exc}", flush=True)
 
@@ -178,7 +179,6 @@ def available_signal_dates() -> list[str]:
         if _dates_cache is not None:
             return list(_dates_cache)
 
-    dates: set[str] = set()
     for path in sorted(VWAP_SIGNAL_DIR.glob("*.parquet")):
         try:
             df = pd.read_parquet(path, columns=["scan_date"])

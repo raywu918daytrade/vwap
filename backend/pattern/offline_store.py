@@ -108,16 +108,16 @@ def _summary_from_row(row: pd.Series) -> dict[str, Any]:
 
 def available_scan_dates() -> list[str]:
     """Return all scan dates present in local monthly parquet shards."""
+    dates: set[str] = set()
     try:
         from data.tidb_offline_store import DATASET_PATTERN_SCAN, tidb_available_dates
 
         tidb_dates = tidb_available_dates(DATASET_PATTERN_SCAN)
         if tidb_dates:
-            return tidb_dates
+            dates.update(tidb_dates)
     except Exception as exc:
         print(f"[TiDB] pattern date lookup failed; falling back to parquet: {exc}", flush=True)
 
-    dates: set[str] = set()
     for path in sorted(PATTERN_SCAN_DIR.glob("*.parquet")):
         try:
             df = pd.read_parquet(path, columns=["scan_date"])
