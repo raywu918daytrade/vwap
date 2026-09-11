@@ -25,6 +25,20 @@ const PATTERN_TYPE_META = {
   breakdown_retest: { side: "bear", rank: 20 },
   macd_hist_bear: { side: "bear", rank: 30 },
 };
+const PATTERN_TYPE_LABELS = {
+  triangle: "三角收斂",
+  abcd_bull: "ABCD 上漲",
+  abcd_bear: "ABCD 下跌",
+  w_bottom: "W底",
+  m_top: "M頭",
+  head_shoulders_bottom: "頭肩底",
+  head_shoulders_top: "頭肩頂",
+  cup_handle: "杯柄型態",
+  breakout_retest: "突破壓力回測",
+  breakdown_retest: "跌破支撐反彈",
+  macd_hist_bull: "MACD柱底背離",
+  macd_hist_bear: "MACD柱頂背離",
+};
 const PATTERN_SIDE_ORDER = { bull: 0, bear: 1 };
 const PATTERN_SIDE_STYLE = {
   bull: {
@@ -90,7 +104,18 @@ function patternTypeId(type) {
 }
 
 function patternTypeName(type) {
-  return type?.name || type?.pattern_name || type?.pattern_type || type?.id || "型態";
+  const id = patternTypeId(type);
+  return type?.name || type?.pattern_name || PATTERN_TYPE_LABELS[id] || type?.pattern_type || id || "型態";
+}
+
+function normalizePatternType(type) {
+  const id = patternTypeId(type);
+  if (!id) return null;
+  return {
+    ...(type && typeof type === "object" ? type : {}),
+    id,
+    name: patternTypeName(type),
+  };
 }
 
 function patternSide(type) {
@@ -1159,14 +1184,19 @@ export default function App() {
   }, [srRowsRaw]);
 
   const patternColumns = useMemo(() => {
-    if (patternTypes.length) return sortPatternTypes(patternTypes);
     const seen = new Map();
+    const addType = (type) => {
+      const normalized = normalizePatternType(type);
+      if (normalized && !seen.has(normalized.id)) seen.set(normalized.id, normalized);
+    };
+    patternTypes.forEach(addType);
     for (const row of patternRows) {
       const id = String(row.pattern_type || "");
-      if (id && !seen.has(id)) seen.set(id, { id, name: patternDisplayName(row) });
+      if (id) addType({ id, name: patternDisplayName(row) });
     }
+    selectedPatternTypes.forEach(addType);
     return sortPatternTypes([...seen.values()]);
-  }, [patternRows, patternTypes]);
+  }, [patternRows, patternTypes, selectedPatternTypes]);
 
   const patternsByStock = useMemo(() => {
     const out = new Map();
@@ -1289,6 +1319,12 @@ export default function App() {
     vwapSearch,
     vwapSort,
   ]);
+
+  const signalColumnCount = 6 + patternColumns.length;
+  const showSignalTable = vwapRows.length > 0 || selectedPatternTypes.length > 0;
+  const signalEmptyText = selectedPatternTypes.length
+    ? "目前沒有符合型態過濾的盤中 / SR 訊號，可取消上方型態勾選。"
+    : "該日尚無盤中 / SR 訊號";
 
   const obsRows = useMemo(() => {
     const latest = new Map(latestByStock(vwapRowsRaw).map((row) => [String(row.stock_id), row]));
@@ -1571,17 +1607,17 @@ export default function App() {
               </div>
             </div>
             {patternError ? <div className="border-b border-base-300 px-3 py-1 text-xs text-warning">型態：{patternError}</div> : null}
-            {vwapError ? <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-error">{vwapError}</div> : vwapRows.length ? (
+            {vwapError ? <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-error">{vwapError}</div> : showSignalTable ? (
               <div className="min-h-0 flex-1 overflow-auto">
                 <table className="table table-xs table-pin-rows min-w-max">
                   <thead><tr>
                     <th className="cursor-pointer" onClick={() => sortVwap("stock_id")}>股票</th><th className="cursor-pointer" onClick={() => sortVwap("chg_pct")}>漲幅</th><th className="cursor-pointer text-right" onClick={() => sortVwap("time")}>時間</th><th className="cursor-pointer text-center" onClick={() => sortVwap("sr_on")}>SR</th><th className="cursor-pointer text-center" onClick={() => sortVwap("macd_on")}>MACD</th><th className="cursor-pointer text-center" onClick={() => sortVwap("obv_on")}>OBV</th>
                     {patternColumns.map((type) => { const style = patternSideStyle(type); const checked = selectedPatternTypes.includes(type.id); return <th key={type.id} className={`cursor-pointer border-l border-base-300/40 text-center ${style.head}`} onClick={() => sortVwap(`pattern:${type.id}`)}><div className="flex items-center justify-center gap-1.5 whitespace-nowrap"><span>{type.name}</span><input type="checkbox" className="checkbox checkbox-xs" checked={checked} title={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`} aria-label={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); togglePatternType(type.id); }} /></div></th>; })}
                   </tr></thead>
-                  <tbody className={vwapLoading ? "invisible pointer-events-none" : ""}>{vwapRows.map((row, idx) => { const key = eventKey(row); const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id); return <tr key={`${key}-${idx}`} data-panel="vwap" data-row-index={idx} className={selected ? "bg-primary/15" : ""} onClick={() => selectMarketRow(row, key, "vwap")} onDoubleClick={() => toggleObsStock(row.stock_id)}><StockCell row={row}>{row.direction ? <div className={`mt-1 text-[10px] ${row.direction === "up" ? "text-error" : "text-success"}`}>{row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} ({BASELINE_LABEL} {Number(row.vwap).toFixed(2)})</div> : null}</StockCell><td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>{row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}</td><td className="text-right text-base-content/50">{hm(row.time)}</td><td className="text-center"><Lamp on={row.sr_on} kind="both" title="SR" /></td><td className="text-center"><Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" /></td><td className="text-center"><Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" /></td>{patternColumns.map((type) => <PatternSignalCell key={type.id} type={type} hit={row.pattern_hits?.get(type.id)} label={type.name} onSelect={() => selectMarketRow(row, key, "vwap", type.id)} />)}</tr>; })}</tbody>
+                  <tbody className={vwapLoading ? "invisible pointer-events-none" : ""}>{vwapRows.length ? vwapRows.map((row, idx) => { const key = eventKey(row); const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id); return <tr key={`${key}-${idx}`} data-panel="vwap" data-row-index={idx} className={selected ? "bg-primary/15" : ""} onClick={() => selectMarketRow(row, key, "vwap")} onDoubleClick={() => toggleObsStock(row.stock_id)}><StockCell row={row}>{row.direction ? <div className={`mt-1 text-[10px] ${row.direction === "up" ? "text-error" : "text-success"}`}>{row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} ({BASELINE_LABEL} {Number(row.vwap).toFixed(2)})</div> : null}</StockCell><td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>{row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}</td><td className="text-right text-base-content/50">{hm(row.time)}</td><td className="text-center"><Lamp on={row.sr_on} kind="both" title="SR" /></td><td className="text-center"><Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" /></td><td className="text-center"><Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" /></td>{patternColumns.map((type) => <PatternSignalCell key={type.id} type={type} hit={row.pattern_hits?.get(type.id)} label={type.name} onSelect={() => selectMarketRow(row, key, "vwap", type.id)} />)}</tr>; }) : <tr><td colSpan={signalColumnCount} className="py-8 text-center text-xs text-base-content/50">{signalEmptyText}</td></tr>}</tbody>
                 </table>
               </div>
-            ) : <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">該日尚無盤中 / SR 訊號</div>}
+            ) : <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">{signalEmptyText}</div>}
           </Panel>
         </div>
 
