@@ -106,7 +106,14 @@ def get_stock_candles(
                     end_date=str(ref_date)[:10],
                     limit=limit,
                 )
-                if df_tidb is not None and not df_tidb.empty:
+                # TiDB 日 K 可能仍在分批回填。只要不足呼叫端要求的根數，
+                # 就不能把這份稀疏結果當成完整歷史，應繼續走 parquet/HF。
+                expected_rows = int(limit) if limit else 0
+                if (
+                    df_tidb is not None
+                    and not df_tidb.empty
+                    and (expected_rows <= 0 or len(df_tidb) >= expected_rows)
+                ):
                     return df_tidb
             except Exception as exc:
                 print(f"[TiDB] day chart read failed; falling back to parquet/HF: {exc}", flush=True)

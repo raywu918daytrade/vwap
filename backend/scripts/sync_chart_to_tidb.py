@@ -68,6 +68,25 @@ def _read_trading_dates() -> list[str]:
     return []
 
 
+def _read_day_dates() -> list[str]:
+    """Read the actual dates present in day parquet files.
+
+    The flag file is an incremental-download marker and may contain only a
+    subset of the history, so it cannot be used as the source of truth for a
+    day-chart backfill.
+    """
+    paths = sorted((_ROOT / "db/adjustment_day").glob("*.parquet"))
+    if not paths:
+        return []
+    try:
+        table = ds.dataset([str(path) for path in paths], format="parquet").to_table(columns=["date"])
+    except Exception as exc:
+        print(f"[TiDB chart sync] 讀取日 K 日期失敗: {exc}", flush=True)
+        return []
+    dates = sorted({_date_text(value) for value in table.column("date").to_pylist()})
+    return [date for date in dates if date and pd.Timestamp(date).weekday() < 5]
+
+
 def _filter_dates(values: Iterable[str], from_date: str | None, to_date: str | None) -> list[str]:
     out = []
     for value in values:
@@ -86,9 +105,9 @@ def _target_dates(args: argparse.Namespace) -> list[str]:
     if args.date:
         return _filter_dates([args.date], args.from_date, args.to_date)
 
-    trading_dates = _read_trading_dates()
+    trading_dates = _read_day_dates() if args.timeframe == "day" else _read_trading_dates()
     if not trading_dates:
-        raise RuntimeError("找不到交易日 flag，請先同步 db/adjustment_day_flags 或 db/d1_flags")
+        raise RuntimeError("找不到可用交易日，請先同步 chart parquet 與交易日 flag")
 
     if args.init_months:
         to_bound = args.to_date or _today_tw()
