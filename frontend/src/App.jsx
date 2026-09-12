@@ -954,6 +954,7 @@ export default function App() {
     setVwapError("");
     setPatternError("");
     setVwapLoading(true);
+    setSelectedChartDate(nextDate);
     setVwapDate(nextDate);
   }, [vwapDate]);
 
