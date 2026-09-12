@@ -17,6 +17,8 @@ const GROUP_BY_LABEL = new Map(
 const TABLE_SELECTOR = "table.table-pin-rows";
 const FIXED_COLUMN_COUNT = 6;
 const MIN_PATTERN_COLUMN_WIDTH = 104;
+const pendingTables = new Set();
+let frame = 0;
 
 function headerLabel(cell) {
   return cell?.querySelector("span")?.textContent?.trim() || cell?.textContent?.trim() || "";
@@ -29,9 +31,6 @@ function showFullStockText(cell) {
   cell.style.whiteSpace = "normal";
   cell.style.overflow = "visible";
 
-  // StockCell uses Tailwind's `truncate` for symbol/name.  Once the table is
-  // converted to grid/flex that truncation becomes overly aggressive on
-  // narrow screens, so explicitly restore wrapping for the stock column.
   cell.querySelectorAll(".truncate").forEach((node) => {
     node.style.maxWidth = "100%";
     node.style.overflow = "visible";
@@ -40,14 +39,13 @@ function showFullStockText(cell) {
     node.style.wordBreak = "keep-all";
   });
 
-  // The breakout/breakdown description is longer; let it wrap naturally
-  // without forcing the symbol/name off screen.
   [...cell.children].forEach((node) => {
     node.style.maxWidth = "100%";
   });
 }
 
 function compactTable(table) {
+  if (!table?.isConnected) return;
   const headRow = table.tHead?.rows?.[0];
   if (!headRow || headRow.cells.length <= FIXED_COLUMN_COUNT) return;
 
@@ -55,7 +53,6 @@ function compactTable(table) {
   const recognized = patternHeaders
     .map((cell) => ({ cell, meta: GROUP_BY_LABEL.get(headerLabel(cell)) }))
     .filter((item) => item.meta);
-
   if (!recognized.length) return;
 
   const visibleGroups = [];
@@ -113,9 +110,9 @@ function compactTable(table) {
       cell.style.display = "flex";
       cell.style.alignItems = "center";
       cell.style.justifyContent = "center";
-      if (meta.paired && meta.rowIndex === 1) {
-        cell.style.borderTop = "1px solid color-mix(in oklab, currentColor 14%, transparent)";
-      }
+      cell.style.borderTop = meta.paired && meta.rowIndex === 1
+        ? "1px solid color-mix(in oklab, currentColor 14%, transparent)"
+        : "";
     });
   }
 
@@ -123,34 +120,41 @@ function compactTable(table) {
   table.style.width = "max-content";
 }
 
-function compactPatternColumns() {
-  document.querySelectorAll(TABLE_SELECTOR).forEach(compactTable);
-}
-
-let scheduled = false;
-function scheduleCompact() {
-  if (scheduled) return;
-  scheduled = true;
-  requestAnimationFrame(() => {
-    scheduled = false;
-    compactPatternColumns();
+function queueTable(table) {
+  if (!table) return;
+  pendingTables.add(table);
+  if (frame) return;
+  frame = requestAnimationFrame(() => {
+    frame = 0;
+    const tables = [...pendingTables];
+    pendingTables.clear();
+    tables.forEach(compactTable);
   });
 }
 
-if (typeof document !== "undefined") {
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", scheduleCompact, { once: true });
-  } else {
-    scheduleCompact();
-  }
+function queueTablesFromNode(node) {
+  if (!(node instanceof Element)) return;
+  if (node.matches(TABLE_SELECTOR)) queueTable(node);
+  node.querySelectorAll?.(TABLE_SELECTOR).forEach(queueTable);
+}
 
+function start() {
+  document.querySelectorAll(TABLE_SELECTOR).forEach(queueTable);
+
+  // React, charts and drawer updates used to trigger a full-document table scan
+  // for every child-list mutation. Only queue the signal table that actually
+  // changed, so live ticks do not repeatedly re-layout unrelated DOM.
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
-      if (mutation.type === "childList") {
-        scheduleCompact();
-        break;
-      }
+      const table = mutation.target instanceof Element ? mutation.target.closest(TABLE_SELECTOR) : null;
+      if (table) queueTable(table);
+      mutation.addedNodes.forEach(queueTablesFromNode);
     }
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
+}
+
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+  else start();
 }
