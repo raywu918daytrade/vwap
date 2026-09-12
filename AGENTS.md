@@ -14,7 +14,17 @@ For Codex cloud environments, use:
 bash scripts/codex_cloud_setup.sh
 ```
 
-The setup script installs backend and frontend dependencies. It can also prepare an optional SSH key from the `ORACLE_CODEX_VWAP_SSH_KEY` secret, but normal development should not need direct SSH access to Oracle.
+The setup script installs backend and frontend dependencies. It can also prepare optional runtime secrets from Codex cloud environment secrets:
+
+- `ORACLE_CODEX_VWAP_SSH_KEY`: optional direct SSH key for Oracle diagnostics.
+- `TIDB_DAY_TRADE_DATABASE_URL`: optional direct TiDB MySQL-compatible connection URL.
+- Split TiDB alternatives: `TIDB_DAY_TRADE_HOST`, `TIDB_DAY_TRADE_PORT`, `TIDB_DAY_TRADE_USER`, `TIDB_DAY_TRADE_PASSWORD`, `TIDB_DAY_TRADE_DATABASE`, `TIDB_DAY_TRADE_SSL_CA`.
+
+Normal development should not need direct SSH access to Oracle. If a Codex cloud task needs TiDB access after setup, source the private runtime env file first:
+
+```bash
+source ~/.config/vwap/tidb.env
+```
 
 ## Useful Checks
 
@@ -39,6 +49,6 @@ GitHub Actions deploys to Oracle using the repository secret `ORACLE_SSH_PRIVATE
 Runtime secrets live outside git:
 
 - Oracle VM: `/home/ubuntu/vwap/backend/.env`
-- GitHub Actions: repository secrets such as `ORACLE_SSH_PRIVATE_KEY`, `ORACLE_KNOWN_HOSTS`, and `HF_TOKEN`
+- GitHub Actions: repository secrets such as `ORACLE_SSH_PRIVATE_KEY`, `ORACLE_KNOWN_HOSTS`, `HF_TOKEN`, and `TIDB_DAY_TRADE_DATABASE_URL`
 - Optional Codex cloud direct SSH: environment secret `ORACLE_CODEX_VWAP_SSH_KEY`
-
+- Optional Codex cloud TiDB access: environment secret `TIDB_DAY_TRADE_DATABASE_URL`, or the split TiDB env vars listed in `codex-tidb-connection.md`

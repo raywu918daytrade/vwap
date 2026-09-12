@@ -17,6 +17,49 @@ pip install -r backend/requirements.txt
   npm ci
 )
 
+tidb_env_dir="${HOME}/.config/vwap"
+tidb_env="${tidb_env_dir}/tidb.env"
+mkdir -p "${tidb_env_dir}"
+chmod 700 "${tidb_env_dir}"
+: > "${tidb_env}"
+chmod 600 "${tidb_env}"
+
+write_export_if_set() {
+  local name="$1"
+  local value="${!name-}"
+  if [ -n "${value}" ]; then
+    printf 'export %s=%q\n' "${name}" "${value}" >> "${tidb_env}"
+  fi
+}
+
+for name in \
+  TIDB_DAY_TRADE_DATABASE_URL \
+  TIDB_DAY_TRADE_HOST \
+  TIDB_DAY_TRADE_PORT \
+  TIDB_DAY_TRADE_USER \
+  TIDB_DAY_TRADE_PASSWORD \
+  TIDB_DAY_TRADE_DATABASE \
+  TIDB_DAY_TRADE_SSL_CA \
+  TIDB_DAY_TRADE_SSL_DISABLED \
+  TIDB_DAY_TRADE_READ \
+  TIDB_DAY_TRADE_CHART_READ \
+  TIDB_DAY_TRADE_CONNECT_TIMEOUT \
+  TIDB_DAY_TRADE_READ_TIMEOUT \
+  TIDB_DAY_TRADE_WRITE_TIMEOUT \
+  TIDB_DAY_TRADE_COMMIT_TIMEOUT \
+  TIDB_DAY_TRADE_POOL_SIZE \
+  TIDB_DAY_TRADE_POOL_PING_SECONDS \
+  TIDB_DAY_TRADE_VERSION_CACHE_SECONDS
+do
+  write_export_if_set "${name}"
+done
+
+if [ -s "${tidb_env}" ]; then
+  echo "Wrote optional TiDB runtime env to ${tidb_env}."
+else
+  rm -f "${tidb_env}"
+fi
+
 if [ -n "${ORACLE_CODEX_VWAP_SSH_KEY:-}" ]; then
   mkdir -p "${HOME}/.ssh"
   chmod 700 "${HOME}/.ssh"
