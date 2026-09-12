@@ -22,6 +22,31 @@ function headerLabel(cell) {
   return cell?.querySelector("span")?.textContent?.trim() || cell?.textContent?.trim() || "";
 }
 
+function showFullStockText(cell) {
+  cell.style.flexDirection = "column";
+  cell.style.alignItems = "flex-start";
+  cell.style.justifyContent = "center";
+  cell.style.whiteSpace = "normal";
+  cell.style.overflow = "visible";
+
+  // StockCell uses Tailwind's `truncate` for symbol/name.  Once the table is
+  // converted to grid/flex that truncation becomes overly aggressive on
+  // narrow screens, so explicitly restore wrapping for the stock column.
+  cell.querySelectorAll(".truncate").forEach((node) => {
+    node.style.maxWidth = "100%";
+    node.style.overflow = "visible";
+    node.style.textOverflow = "clip";
+    node.style.whiteSpace = "normal";
+    node.style.wordBreak = "keep-all";
+  });
+
+  // The breakout/breakdown description is longer; let it wrap naturally
+  // without forcing the symbol/name off screen.
+  [...cell.children].forEach((node) => {
+    node.style.maxWidth = "100%";
+  });
+}
+
 function compactTable(table) {
   const headRow = table.tHead?.rows?.[0];
   if (!headRow || headRow.cells.length <= FIXED_COLUMN_COUNT) return;
@@ -40,7 +65,7 @@ function compactTable(table) {
 
   const groupColumn = new Map(visibleGroups.map((groupIndex, index) => [groupIndex, FIXED_COLUMN_COUNT + index + 1]));
   const templateColumns = [
-    "minmax(112px,1.25fr)",
+    "minmax(150px,1.35fr)",
     "72px",
     "64px",
     "40px",
@@ -64,8 +89,14 @@ function compactTable(table) {
       cell.style.gridRow = "1 / span 2";
       cell.style.display = "flex";
       cell.style.alignItems = "center";
-      if (index === 2) cell.style.justifyContent = "flex-end";
-      if (index >= 3) cell.style.justifyContent = "center";
+
+      if (index === 0 && row !== headRow) {
+        showFullStockText(cell);
+      } else {
+        cell.style.flexDirection = "row";
+        if (index === 2) cell.style.justifyContent = "flex-end";
+        if (index >= 3) cell.style.justifyContent = "center";
+      }
     });
 
     patternHeaders.forEach((header, patternIndex) => {
