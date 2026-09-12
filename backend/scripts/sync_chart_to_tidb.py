@@ -105,7 +105,15 @@ def _target_dates(args: argparse.Namespace) -> list[str]:
     if args.date:
         return _filter_dates([args.date], args.from_date, args.to_date)
 
-    trading_dates = _read_day_dates() if args.timeframe == "day" else _read_trading_dates()
+    flag_dates = _read_trading_dates()
+    if args.timeframe == "day":
+        trading_dates = _read_day_dates()
+    elif args.timeframe == "all":
+        # Daily runs sync both timeframes. Keep dates found by either source so
+        # an incomplete incremental flag cannot prevent day candles updating.
+        trading_dates = sorted(set(_read_day_dates()) | set(flag_dates))
+    else:
+        trading_dates = flag_dates
     if not trading_dates:
         raise RuntimeError("找不到可用交易日，請先同步 chart parquet 與交易日 flag")
 
