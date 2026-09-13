@@ -1,0 +1,8 @@
+day-trade.just1stock.com {
+	encode zstd gzip
+	reverse_proxy backend:8000
+}
+
+http://127.0.0.1, http://localhost, http://129.225.130.75 {
+	reverse_proxy backend:8000
+}

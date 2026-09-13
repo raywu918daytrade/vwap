@@ -64,12 +64,11 @@ OCI Security List 或 NSG 至少開：
 
 - TCP `22`：SSH
 - TCP `80`：Web UI
-
-有網域與 HTTPS 後再開：
-
 - TCP `443`：HTTPS
 
-目前 compose 只對外開 `80`，直接映射到單一 app container 的 `8000`。
+目前 compose 透過 Caddy 對外開 `80`/`443`，Caddy 會自動為
+`day-trade.just1stock.com` 申請和續期 Let's Encrypt 憑證，並反向代理到
+backend container 的 `8000`。
 
 ## 新 VM 初始安裝
 
@@ -276,13 +275,14 @@ docker compose -f docker-compose.oracle.yml up -d --build --remove-orphans
 若只要重啟服務：
 
 ```bash
-docker compose -f docker-compose.oracle.yml restart backend
+docker compose -f docker-compose.oracle.yml restart backend caddy
 ```
 
 ## 架構
 
-`docker-compose.oracle.yml` 只跑一個 container：
+`docker-compose.oracle.yml` 跑兩個 container：
 
+- `caddy`：對外提供 HTTP/HTTPS、自動 TLS、反向代理到 backend。
 - `backend`：FastAPI + React build + `main.live_trader`，負責靜態頁面、HF 同步、富邦即時 M1、API 與 SSE。
 
 對外路徑：
