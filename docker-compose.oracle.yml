@@ -1,6 +1,22 @@
 name: vwap
 
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      TZ: Asia/Taipei
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
   backend:
     image: vwap-app:local
     platform: linux/amd64
@@ -33,11 +49,15 @@ services:
       - ./backend/log:/app/log
       - ./backend/logs:/app/logs
       - ./backend/.cache:/app/.cache
-    ports:
-      - "${HTTP_PORT:-80}:8000"
+    expose:
+      - "8000"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=5)\""]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 60s
+
+volumes:
+  caddy_data:
+  caddy_config:
