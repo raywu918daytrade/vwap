@@ -218,13 +218,23 @@ class FubonM1Collector:
 
     def stop(self):
         self._stop = True
-        for stock in self._clients:
-            try:
-                stock.disconnect()
-            except Exception:
-                pass
-        if self._sdk is not None:
-            trade_api.logout(self._sdk)
+        # A disconnect can happen between the five-second flushes. Persist the
+        # rows already received before tearing down the clients; otherwise the
+        # automatic reconnect leaves a visible hole even when REST backfill
+        # later succeeds for the rest of the session.
+        try:
+            self._flush()
+        except Exception as exc:
+            print(f"[flush] 斷線收尾存檔失敗: {exc}", flush=True)
+            _log_sys(f"富邦斷線收尾存檔失敗: {exc}", "error")
+        finally:
+            for stock in self._clients:
+                try:
+                    stock.disconnect()
+                except Exception:
+                    pass
+            if self._sdk is not None:
+                trade_api.logout(self._sdk)
 
     # ── 訊息處理 ──────────────────────────────────────────────────────────
 
