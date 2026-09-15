@@ -108,8 +108,25 @@ def live_diagnostics() -> dict:
     # Import lazily because api.py installs this router while it is initializing.
     import api
 
+    now = datetime.now(_TW)
     with _snapshot_lock:
         m1 = dict(_minute_snapshot)
+    if not m1:
+        # After a deploy/restart there may be no new minute callback yet. Load the
+        # current day's parquet once so the panel remains useful after hours.
+        try:
+            from data.query import load_m1_live
+
+            frame = load_m1_live(now.strftime("%Y-%m-%d"))
+            if frame is not None and not frame.empty and "date" in frame.columns:
+                latest = pd.to_datetime(frame["date"], errors="coerce").max()
+                if not pd.isna(latest):
+                    update_minute_snapshot(latest.strftime("%Y-%m-%d %H:%M:00"), frame)
+                    with _snapshot_lock:
+                        m1 = dict(_minute_snapshot)
+        except Exception:
+            # Diagnostics must never make the trading API unavailable.
+            pass
     with api._lock:
         vwap_rows = list(api._vwap_breakout_signals)
         sr_rows = list(api._sr_vwap_cross_signals)
@@ -125,7 +142,6 @@ def live_diagnostics() -> dict:
     events.extend(_safe_event("SR", row) for row in sr_rows)
     events.sort(key=lambda row: (row["time"], row["stock_id"], row["kind"]))
 
-    now = datetime.now(_TW)
     delay = m1.get("latest_delay_seconds")
     market_minutes = now.weekday() < 5 and (9, 0) <= (now.hour, now.minute) <= (13, 32)
     freshness_ok = bool(m1.get("latest_minute")) and (not market_minutes or (delay is not None and delay <= 180))
