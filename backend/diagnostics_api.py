@@ -13,6 +13,10 @@ router = APIRouter()
 _TW = timezone(timedelta(hours=8))
 _snapshot_lock = threading.Lock()
 _minute_snapshot: dict = {}
+_signal_snapshot_lock = threading.Lock()
+_signal_snapshot_date = ""
+_signal_snapshot_vwap: list[dict] = []
+_signal_snapshot_sr: list[dict] = []
 
 
 def _scalar(value):
@@ -105,6 +109,7 @@ def _safe_event(kind: str, row: dict) -> dict:
 
 @router.get("/api/diagnostics/live", tags=["系統"], summary="安全的盤中診斷摘要")
 def live_diagnostics() -> dict:
+    global _signal_snapshot_date, _signal_snapshot_vwap, _signal_snapshot_sr
     # Import lazily because api.py installs this router while it is initializing.
     import api
 
@@ -137,6 +142,22 @@ def live_diagnostics() -> dict:
             if str(row.get("msg") or "").startswith(("富邦 WebSocket 訂閱完成", "富邦 backfill 完成"))
         ][-10:]
         error_count = sum(1 for row in api._system_logs if row.get("level") == "error")
+
+    if not vwap_rows and not sr_rows and m1.get("latest_minute"):
+        # A restart after the collector has stopped leaves the live lists empty.
+        # Reconstruct today's events once from M1 for the read-only diagnostics UI.
+        date_str = now.strftime("%Y-%m-%d")
+        with _signal_snapshot_lock:
+            if _signal_snapshot_date != date_str:
+                try:
+                    scanned_vwap, scanned_sr = api._scan_vwap_sr(date_str)
+                except Exception:
+                    scanned_vwap, scanned_sr = [], []
+                _signal_snapshot_date = date_str
+                _signal_snapshot_vwap = scanned_vwap
+                _signal_snapshot_sr = scanned_sr
+            vwap_rows = list(_signal_snapshot_vwap)
+            sr_rows = list(_signal_snapshot_sr)
 
     events = [_safe_event("VWAP", row) for row in vwap_rows]
     events.extend(_safe_event("SR", row) for row in sr_rows)

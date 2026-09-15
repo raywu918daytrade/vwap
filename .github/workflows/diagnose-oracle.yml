@@ -114,7 +114,7 @@ jobs:
 
           health, health_error = endpoint("/health")
           gateway, gateway_error = endpoint_url("http://caddy/health", host="localhost")
-          bundle, bundle_error = endpoint("/vwap_signal/bundle?universe=daytrade&repeat=1")
+          bundle, bundle_error = endpoint(f"/vwap_sr_replay?date={today}&universe=daytrade")
 
           m1 = {
               "file_exists": False,
