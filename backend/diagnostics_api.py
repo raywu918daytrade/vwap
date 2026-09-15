@@ -69,7 +69,9 @@ def update_minute_snapshot(minute_str: str, frame: pd.DataFrame) -> None:
                 pass
 
             start = datetime.strptime(f"{minute_str[:10]} 09:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo=_TW)
-            close = start.replace(hour=13, minute=29)
+            # 13:25-13:30 is the closing call auction, so candle feeds normally
+            # have no 13:25-13:29 trades and then publish the 13:30 close.
+            close = start.replace(hour=13, minute=24)
             target = datetime.strptime(minute_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_TW)
             end = min(target, close)
             if end >= start:

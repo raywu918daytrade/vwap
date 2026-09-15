@@ -156,7 +156,9 @@ jobs:
                               "latest_delay_seconds": max(0, int((now - latest_dt).total_seconds())),
                           })
                           session_start = datetime(now.year, now.month, now.day, 9, 0, tzinfo=TW)
-                          session_end = datetime(now.year, now.month, now.day, 13, 29, tzinfo=TW)
+                          # 13:25-13:30 is the closing call auction; no continuous
+                          # one-minute candles are expected until the 13:30 print.
+                          session_end = datetime(now.year, now.month, now.day, 13, 24, tzinfo=TW)
                           if now < session_start:
                               m1["freshness_ok"] = latest_dt.date() == now.date()
                           elif now <= session_end + timedelta(minutes=3):
