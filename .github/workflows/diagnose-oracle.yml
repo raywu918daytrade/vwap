@@ -73,7 +73,7 @@ jobs:
           import json
           from datetime import datetime, timedelta
           from pathlib import Path
-          from urllib.request import urlopen
+          from urllib.request import Request, urlopen
           from zoneinfo import ZoneInfo
 
           import pandas as pd
@@ -83,8 +83,12 @@ jobs:
           today = now.strftime("%Y-%m-%d")
 
           def endpoint(path: str):
+              return endpoint_url(f"http://127.0.0.1:8000{path}")
+
+          def endpoint_url(url: str, host: str | None = None):
               try:
-                  with urlopen(f"http://127.0.0.1:8000{path}", timeout=10) as response:
+                  request = Request(url, headers={"Host": host} if host else {})
+                  with urlopen(request, timeout=10) as response:
                       return json.load(response), None
               except Exception as exc:
                   return None, type(exc).__name__
@@ -109,6 +113,7 @@ jobs:
               }
 
           health, health_error = endpoint("/health")
+          gateway, gateway_error = endpoint_url("http://caddy/health", host="localhost")
           bundle, bundle_error = endpoint("/vwap_signal/bundle?universe=daytrade&repeat=1")
 
           m1 = {
@@ -197,6 +202,8 @@ jobs:
               "trading_date": today,
               "health": health,
               "health_error": health_error,
+              "gateway": gateway,
+              "gateway_error": gateway_error,
               "bundle_error": bundle_error,
               "m1": m1,
               "signals": {
@@ -216,6 +223,23 @@ jobs:
           fi
           echo "exit_code=${rc}" >> "${GITHUB_OUTPUT}"
 
+      - name: Check public gateway
+        run: |
+          python - <<'PY'
+          import json
+          from urllib.request import urlopen
+
+          result = {"ok": False, "status": None, "error": None}
+          try:
+              with urlopen("https://day-trade.just1stock.com/health", timeout=15) as response:
+                  body = json.load(response)
+                  result.update(ok=response.status == 200 and body.get("status") == "ok", status=response.status)
+          except Exception as exc:
+              result["error"] = f"{type(exc).__name__}: {exc}"[:180]
+          with open("public-health.json", "w", encoding="utf-8") as handle:
+              json.dump(result, handle, ensure_ascii=False)
+          PY
+
       - name: Render report
         run: |
           python - <<'PY'
@@ -226,6 +250,8 @@ jobs:
 
           with open("diagnostic.json", encoding="utf-8") as handle:
               data = json.load(handle)
+          with open("public-health.json", encoding="utf-8") as handle:
+              public = json.load(handle)
 
           def cell(value):
               if value is None or value == "":
@@ -243,7 +269,7 @@ jobs:
               "",
               f"- 報告時間：{cell(data.get('generated_at') or now)}",
               f"- 交易日期：{cell(data.get('trading_date'))}",
-              f"- 整體狀態：{'正常' if data.get('ok') else '異常／資料不足'}",
+              f"- 整體狀態：{'正常' if data.get('ok') and public.get('ok') else '異常／資料不足'}",
               f"- 執行紀錄：{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
               "",
           ]
@@ -252,6 +278,7 @@ jobs:
               lines.extend([f"診斷失敗：`{cell(data['error'])}`", ""])
           else:
               health = data.get("health") or {}
+              gateway = data.get("gateway") or {}
               m1 = data.get("m1") or {}
               signals = data.get("signals") or {}
               lines.extend([
@@ -260,6 +287,8 @@ jobs:
                   "| 項目 | 值 |",
                   "|---|---|",
                   f"| API | {cell(health.get('status'))} |",
+                  f"| Caddy → backend | {cell(gateway.get('status') or data.get('gateway_error'))} |",
+                  f"| 公開 HTTPS | {'正常' if public.get('ok') else cell(public.get('error') or public.get('status'))} |",
                   f"| Collector | {cell(health.get('collector'))} / {cell(health.get('message'))} |",
                   f"| SSE clients | {cell(health.get('sse_clients'))} |",
                   f"| 最新分鐘涵蓋率 | {percent(health.get('coverage'))} |",
