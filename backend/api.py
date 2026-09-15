@@ -345,8 +345,10 @@ def _broadcast(data: dict) -> None:
 
 
 from pattern.pattern_api import router as pattern_router
+from diagnostics_api import router as diagnostics_router
 
 app.include_router(pattern_router)
+app.include_router(diagnostics_router)
 
 
 # Public push functions used by realtime collectors.

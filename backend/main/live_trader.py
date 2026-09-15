@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import uvicorn
 
+from diagnostics_api import update_minute_snapshot
 from api import (
     append_system_log as _log_sys,
     clear_vwap_bundle_cache as _clear_vwap_bundle_cache,
@@ -343,6 +344,7 @@ def on_minute(minute_str: str, df: pd.DataFrame) -> None:
 
     _ensure_sr_vwap_day(date_str)
     m1_live = load_m1_live(date_str)
+    update_minute_snapshot(minute_str, m1_live)
     if m1_live.empty:
         print(f"[on_minute] {hhmm} 無 M1 資料", flush=True)
         return
