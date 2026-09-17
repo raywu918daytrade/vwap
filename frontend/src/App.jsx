@@ -98,6 +98,30 @@ const VWAP_FILTER_DEFAULT_VERSION = "4";
 const VWAP_FILTER_DEFAULT_VERSION_KEY = "vwapFilterDefaultVersion";
 const CHART_INDICATOR_DEFAULT_VERSION = "2";
 const CHART_INDICATOR_DEFAULT_VERSION_KEY = "chartIndicatorDefaultVersion";
+const ONBOARDING_TOUR_VERSION = "1";
+const ONBOARDING_TOUR_KEY = `vwapOnboardingTour:${ONBOARDING_TOUR_VERSION}`;
+const ONBOARDING_TOUR_STEPS = [
+  {
+    target: "filters",
+    title: "先用常用條件篩選",
+    body: "可依日期、股票代號、SR、MACD 或 OBV 快速縮小盤中訊號範圍。亮起的按鈕代表條件已啟用。",
+  },
+  {
+    target: "patterns",
+    title: "再選擇想看的型態",
+    body: "型態名稱旁的核取方塊可只保留符合該型態的股票；可同時選擇多個型態。",
+  },
+  {
+    target: "intraday-chart",
+    title: "查看股票的 M1 走勢",
+    body: "點選上方訊號後，右下圖表會切換到該股票；M1 代表一分鐘 K 線。",
+  },
+  {
+    target: "chart-indicators",
+    title: "切換 MACD、OBV 或 0050",
+    body: "用這三個按鈕切換圖表下方的輔助資訊，方便比較訊號與大盤走勢。",
+  },
+];
 
 function patternTypeId(type) {
   return String(type?.id || type?.pattern_type || type || "");
@@ -505,7 +529,7 @@ function nextShowAllSort(showAll, currentSort) {
 
 function ChartIndicatorControls({ value, onChange }) {
   return (
-    <div className="join">
+    <div className="join" data-tour="chart-indicators">
       {[
         ["macd", "MACD", "下方子面板顯示MACD柱體背離"],
         ["obv", "OBV", "下方子面板顯示OBV背離"],
@@ -522,6 +546,63 @@ function ChartIndicatorControls({ value, onChange }) {
         </button>
       ))}
     </div>
+  );
+}
+
+function OnboardingTour({ open, onClose }) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const step = ONBOARDING_TOUR_STEPS[stepIndex];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    setStepIndex(0);
+    return undefined;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !step) return undefined;
+    const target = document.querySelector(`[data-tour="${step.target}"]`);
+    target?.classList.add("onboarding-tour-target");
+    target?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    return () => target?.classList.remove("onboarding-tour-target");
+  }, [open, step]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function onKeyDown(event) {
+      if (event.key === "Escape") onClose();
+      if (event.key === "ArrowRight" && stepIndex < ONBOARDING_TOUR_STEPS.length - 1) setStepIndex((value) => value + 1);
+      if (event.key === "ArrowLeft" && stepIndex > 0) setStepIndex((value) => value - 1);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose, open, stepIndex]);
+
+  if (!open || !step) return null;
+  const isLast = stepIndex === ONBOARDING_TOUR_STEPS.length - 1;
+
+  return createPortal(
+    <div className="pointer-events-none fixed inset-0 z-[100]" role="dialog" aria-modal="true" aria-labelledby="onboarding-tour-title">
+      <div className="absolute inset-0 bg-black/55" />
+      <div className="pointer-events-auto absolute inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] mx-auto max-w-md rounded-lg border border-primary/50 bg-base-100 p-4 shadow-2xl">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <div className="mb-1 text-[11px] font-semibold text-primary">快速導覽 {stepIndex + 1}/{ONBOARDING_TOUR_STEPS.length}</div>
+            <h2 id="onboarding-tour-title" className="text-base font-bold text-base-content">{step.title}</h2>
+          </div>
+          <button type="button" className="btn btn-ghost btn-square btn-xs rounded" aria-label="略過導覽" title="略過導覽" onClick={onClose}>×</button>
+        </div>
+        <p className="mb-4 text-sm leading-6 text-base-content/75">{step.body}</p>
+        <div className="flex items-center justify-between gap-2">
+          <button type="button" className="btn btn-ghost btn-sm rounded" onClick={onClose}>略過</button>
+          <div className="flex gap-2">
+            <button type="button" className="btn btn-sm rounded" disabled={stepIndex === 0} onClick={() => setStepIndex((value) => value - 1)}>上一步</button>
+            <button type="button" className="btn btn-primary btn-sm rounded" onClick={() => isLast ? onClose() : setStepIndex((value) => value + 1)}>{isLast ? "開始使用" : "下一步"}</button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -737,6 +818,7 @@ export default function App() {
   const [focusedPanel, setFocusedPanel] = useState("vwap");
   const [signalLoadedKey, setSignalLoadedKey] = useState("");
   const [selectedChartDate, setSelectedChartDate] = useState(null);
+  const [tourOpen, setTourOpen] = useState(() => localStorage.getItem(ONBOARDING_TOUR_KEY) !== "done");
 
   const stockIdRef = useRef(stockId);
   const activeChartDateRef = useRef("");
@@ -1422,6 +1504,11 @@ export default function App() {
     setFocusedPanel("vwap");
   }
 
+  const closeOnboardingTour = useCallback(() => {
+    localStorage.setItem(ONBOARDING_TOUR_KEY, "done");
+    setTourOpen(false);
+  }, []);
+
   function sortVwap(key) {
     setVwapSort((prev) =>
       prev.key === key
@@ -1519,6 +1606,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <HealthLine health={health} clock={clock} version={APP_VERSION} />
+            <button type="button" className="btn btn-ghost btn-square btn-xs rounded" title="重新觀看快速導覽" aria-label="重新觀看快速導覽" onClick={() => setTourOpen(true)}>?</button>
             <button
               type="button"
               className={`btn btn-xs rounded ${watchDrawerOpen ? "btn-primary" : ""}`}
@@ -1544,7 +1632,7 @@ export default function App() {
             onFocusPanel={() => setFocusedPanel("vwap")}
           >
             <div className="relative z-20 shrink-0 border-b border-base-300 bg-base-200">
-              <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.5rem] items-start gap-1 px-2 py-1">
+              <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.5rem] items-start gap-1 px-2 py-1" data-tour="filters">
                 <div className="flex min-w-0 w-full gap-1 overflow-x-auto pb-1">
                   <DateCalendarPicker
                     value={vwapDate}
@@ -1611,7 +1699,7 @@ export default function App() {
             {vwapError ? <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-error">{vwapError}</div> : showSignalTable ? (
               <div className="min-h-0 flex-1 overflow-auto">
                 <table className="table table-xs table-pin-rows min-w-max">
-                  <thead><tr>
+                  <thead data-tour="patterns"><tr>
                     <th className="cursor-pointer" onClick={() => sortVwap("stock_id")}>股票</th><th className="cursor-pointer" onClick={() => sortVwap("chg_pct")}>漲幅</th><th className="cursor-pointer text-right" onClick={() => sortVwap("time")}>時間</th><th className="cursor-pointer text-center" onClick={() => sortVwap("sr_on")}>SR</th><th className="cursor-pointer text-center" onClick={() => sortVwap("macd_on")}>MACD</th><th className="cursor-pointer text-center" onClick={() => sortVwap("obv_on")}>OBV</th>
                     {patternColumns.map((type) => { const style = patternSideStyle(type); const checked = selectedPatternTypes.includes(type.id); return <th key={type.id} className={`cursor-pointer border-l border-base-300/40 text-center ${style.head}`} onClick={() => sortVwap(`pattern:${type.id}`)}><div className="flex items-center justify-center gap-1.5 whitespace-nowrap"><span>{type.name}</span><input type="checkbox" className="checkbox checkbox-xs" checked={checked} title={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`} aria-label={checked ? `取消${type.name}過濾` : `只看有${type.name}的股票`} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); togglePatternType(type.id); }} /></div></th>; })}
                   </tr></thead>
@@ -1630,14 +1718,17 @@ export default function App() {
           </div>
 
           <div className="min-h-[360px] sm:min-h-[440px] lg:min-h-0">
+            <div className="h-full" data-tour="intraday-chart">
             <ChartPanel title={rightChartTitle} loading={loadingCharts} error={intradayError} actions={<><ChartIndicatorControls value={chartIndicatorMode} onChange={setChartIndicatorMode} /><PriceChange summary={rightSummary} /></>}>
               <div className="h-full min-h-0"><TradingViewChart data={intradayData} dayLevels={dayData} extraSr={extraSr} idxData={idxData} variant={rightChartVariant} timeframe={activeChartTimeframe} emptyMessage={`尚無${activeChartLabel}資料`} showIndicatorPane={showIndicatorPane} daySrMode="horizontal" indicatorMode={chartIndicatorMode} indicatorStockId={stockId} indicatorEventTime={indicatorEventTime} macdMap={macdMap} obvMap={obvMap} /></div>
             </ChartPanel>
+            </div>
           </div>
         </div>
       </main>
 
       {watchDrawerOpen ? <><button type="button" className="fixed inset-0 z-40 cursor-default bg-black/35" aria-label="關閉觀察清單" onClick={closeWatchDrawer} /><aside ref={watchDrawerRef} tabIndex={-1} className="fixed right-0 top-0 z-50 flex h-dvh w-[min(420px,calc(100vw-1rem))] flex-col border-l border-base-300 bg-base-100 shadow-2xl" aria-label="觀察清單" onFocusCapture={() => setFocusedPanel("obs")} onMouseDown={() => setFocusedPanel("obs")}><div className="flex min-h-12 items-center justify-between border-b border-base-300 bg-base-200 px-3"><div className="min-w-0 truncate text-sm font-semibold text-primary">觀察 <span className="font-normal text-base-content/45">({obsRows.length})</span></div><button type="button" className="btn btn-ghost btn-square btn-xs rounded" title="關閉" aria-label="關閉" onClick={closeWatchDrawer}>×</button></div><div className="min-h-0 flex-1 overflow-auto">{obsRows.length ? <table className="table table-xs table-pin-rows min-w-max"><thead><tr><th>股票</th><th>漲幅</th><th className="text-right">時間</th><th className="text-center">SR</th><th className="text-center">MACD</th><th className="text-center">OBV</th></tr></thead><tbody>{obsRows.map((row, idx) => { const key = eventKey(row); const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id); return <tr key={row.stock_id} data-panel="obs" data-row-index={idx} className={selected ? "bg-primary/15" : ""} onClick={() => selectMarketRow(row, key, "obs", "", false)} onDoubleClick={() => toggleObsStock(row.stock_id)}><StockCell row={row} /><td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>{row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}</td><td className="text-right text-base-content/50">{hm(row.time)}</td><td className="text-center"><Lamp on={row.sr_on} kind="both" title="SR" /></td><td className="text-center"><Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" /></td><td className="text-center"><Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" /></td></tr>; })}</tbody></table> : <div className="flex h-full items-center justify-center p-6 text-center text-sm text-base-content/50">在盤中訊號框雙擊股票加入觀察</div>}</div></aside></> : null}
+      <OnboardingTour open={tourOpen} onClose={closeOnboardingTour} />
     </div>
   );
 }
