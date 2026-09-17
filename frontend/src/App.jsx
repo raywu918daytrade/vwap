@@ -582,9 +582,9 @@ function OnboardingTour({ open, onClose }) {
   const isLast = stepIndex === ONBOARDING_TOUR_STEPS.length - 1;
 
   return createPortal(
-    <div className="pointer-events-none fixed inset-0 z-[100]" role="dialog" aria-modal="true" aria-labelledby="onboarding-tour-title">
-      <div className="absolute inset-0 bg-black/55" />
-      <div className="pointer-events-auto absolute inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] mx-auto max-w-md rounded-lg border border-primary/50 bg-base-100 p-4 shadow-2xl">
+    <div className="pointer-events-none fixed inset-0" role="dialog" aria-modal="true" aria-labelledby="onboarding-tour-title">
+      <div className="absolute inset-0 z-[100] bg-black/55" />
+      <div className="pointer-events-auto absolute inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-[102] mx-auto max-w-md rounded-lg border border-primary/50 bg-base-100 p-4 shadow-2xl">
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <div className="mb-1 text-[11px] font-semibold text-primary">快速導覽 {stepIndex + 1}/{ONBOARDING_TOUR_STEPS.length}</div>
