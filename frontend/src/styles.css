@@ -40,13 +40,6 @@ body {
   font-family: SFMono-Regular, Consolas, Menlo, monospace;
 }
 
-.onboarding-tour-target {
-  position: relative;
-  z-index: 101 !important;
-  border-radius: 0.375rem;
-  box-shadow: 0 0 0 3px rgb(56 189 248 / 0.95), 0 0 0 9999px rgb(0 0 0 / 0.08);
-}
-
 /*
  * Mobile layout is intentionally independent from the desktop 45/55 viewport grid.
  * The signal table keeps a bounded viewport, while each chart gets its own full-height
