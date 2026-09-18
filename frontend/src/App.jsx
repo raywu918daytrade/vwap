@@ -818,7 +818,7 @@ export default function App() {
   const [health, setHealth] = useState(null);
   const [clock, setClock] = useState(formatTaipeiClock());
 
-  const [patternTypes, setPatternTypes] = useState([]);
+  const [patternTypes, setPatternTypes] = useState(() => Object.keys(PATTERN_TYPE_LABELS).map(normalizePatternType));
   const [selectedPatternTypes, setSelectedPatternTypes] = useState(initialPatternFilters);
   const [patternLimit, setPatternLimit] = useState(120);
   const [patternRows, setPatternRows] = useState([]);
@@ -1165,7 +1165,7 @@ export default function App() {
     async function loadPatternTypes() {
       try {
         const data = await fetchJson("/api/pattern/types");
-        if (!stopped) setPatternTypes(data.patterns || []);
+        if (!stopped && data.patterns?.length) setPatternTypes(data.patterns);
       } catch (error) {
         if (!stopped) setPatternError(error.message || "型態清單載入失敗");
       }
@@ -1438,7 +1438,6 @@ export default function App() {
   ]);
 
   const signalColumnCount = 6 + patternColumns.length;
-  const showSignalTable = vwapRows.length > 0 || selectedPatternTypes.length > 0;
   const signalEmptyText = selectedPatternTypes.length
     ? "目前沒有符合型態過濾的盤中 / SR 訊號，可取消上方型態勾選。"
     : "該日尚無盤中 / SR 訊號";
@@ -1730,7 +1729,7 @@ export default function App() {
               </div>
             </div>
             {patternError ? <div className="border-b border-base-300 px-3 py-1 text-xs text-warning">型態：{patternError}</div> : null}
-            {vwapError ? <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-error">{vwapError}</div> : showSignalTable ? (
+            {vwapError ? <div className="border-b border-base-300 px-3 py-1 text-xs text-error">{vwapError}</div> : null}
               <div className="min-h-0 flex-1 overflow-auto">
                 <table className="table table-xs table-pin-rows min-w-max">
                   <thead data-tour="patterns"><tr>
@@ -1740,7 +1739,6 @@ export default function App() {
                   <tbody className={vwapLoading ? "invisible pointer-events-none" : ""}>{vwapRows.length ? vwapRows.map((row, idx) => { const key = eventKey(row); const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id); return <tr key={`${key}-${idx}`} data-panel="vwap" data-row-index={idx} className={selected ? "bg-primary/15" : ""} onClick={() => selectMarketRow(row, key, "vwap")} onDoubleClick={() => toggleObsStock(row.stock_id)}><StockCell row={row}>{row.direction ? <div className={`mt-1 text-[10px] ${row.direction === "up" ? "text-error" : "text-success"}`}>{row.direction === "up" ? "突破" : "跌破"} @ {Number(row.price).toFixed(2)} ({BASELINE_LABEL} {Number(row.vwap).toFixed(2)})</div> : null}</StockCell><td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>{row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}</td><td className="text-right text-base-content/50">{hm(row.time)}</td><td className="text-center"><Lamp on={row.sr_on} kind="both" title="SR" /></td><td className="text-center"><Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" /></td><td className="text-center"><Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" /></td>{patternColumns.map((type) => <PatternSignalCell key={type.id} type={type} hit={row.pattern_hits?.get(type.id)} label={type.name} onSelect={() => selectMarketRow(row, key, "vwap", type.id)} />)}</tr>; }) : <tr><td colSpan={signalColumnCount} className="py-8 text-center text-xs text-base-content/50">{signalEmptyText}</td></tr>}</tbody>
                 </table>
               </div>
-            ) : <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/50">{signalEmptyText}</div>}
           </Panel>
         </div>
 
