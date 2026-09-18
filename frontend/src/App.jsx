@@ -98,7 +98,7 @@ const VWAP_FILTER_DEFAULT_VERSION = "4";
 const VWAP_FILTER_DEFAULT_VERSION_KEY = "vwapFilterDefaultVersion";
 const CHART_INDICATOR_DEFAULT_VERSION = "2";
 const CHART_INDICATOR_DEFAULT_VERSION_KEY = "chartIndicatorDefaultVersion";
-const ONBOARDING_TOUR_VERSION = "1";
+const ONBOARDING_TOUR_VERSION = "2";
 const ONBOARDING_TOUR_KEY = `vwapOnboardingTour:${ONBOARDING_TOUR_VERSION}`;
 const ONBOARDING_TOUR_STEPS = [
   {
@@ -552,11 +552,44 @@ function ChartIndicatorControls({ value, onChange }) {
 function OnboardingTour({ open, onClose }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [targetRect, setTargetRect] = useState(null);
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const cardRef = useRef(null);
+  const closingRef = useRef(false);
   const step = ONBOARDING_TOUR_STEPS[stepIndex];
+
+  const dismiss = useCallback(async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    const card = cardRef.current;
+    const help = document.querySelector('[data-tour="help"]');
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (card && help && !reducedMotion) {
+      const from = card.getBoundingClientRect();
+      const to = help.getBoundingClientRect();
+      const x = to.left + to.width / 2 - from.left - from.width / 2;
+      const y = to.top + to.height / 2 - from.top - from.height / 2;
+      const animation = card.animate([
+        { transform: "translate(0, 0) scale(1)", opacity: 1 },
+        { transform: `translate(${x}px, ${y}px) scale(0.04)`, opacity: 0 },
+      ], { duration: 550, easing: "cubic-bezier(0.4, 0, 0.2, 1)", fill: "forwards" });
+      try { await animation.finished; } catch { /* The page may unmount during navigation. */ }
+      help.animate([
+        { transform: "scale(1)", boxShadow: "0 0 0 0 rgba(56,189,248,0.8)" },
+        { transform: "scale(1.25)", boxShadow: "0 0 0 8px rgba(56,189,248,0)" },
+        { transform: "scale(1)", boxShadow: "0 0 0 0 rgba(56,189,248,0)" },
+      ], { duration: 450 });
+    }
+    onClose(dontShowAgain);
+  }, [dontShowAgain, onClose]);
 
   useEffect(() => {
     if (!open) return undefined;
     setStepIndex(0);
+    setDontShowAgain(localStorage.getItem(ONBOARDING_TOUR_KEY) === "hidden");
+    setClosing(false);
+    closingRef.current = false;
     return undefined;
   }, [open]);
 
@@ -596,46 +629,48 @@ function OnboardingTour({ open, onClose }) {
   useEffect(() => {
     if (!open) return undefined;
     function onKeyDown(event) {
-      if (event.key === "Escape") onClose();
+      if (closingRef.current) return;
+      if (event.key === "Escape") dismiss();
       if (event.key === "ArrowRight" && stepIndex < ONBOARDING_TOUR_STEPS.length - 1) setStepIndex((value) => value + 1);
       if (event.key === "ArrowLeft" && stepIndex > 0) setStepIndex((value) => value - 1);
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open, stepIndex]);
+  }, [dismiss, open, stepIndex]);
 
   if (!open || !step) return null;
   const isLast = stepIndex === ONBOARDING_TOUR_STEPS.length - 1;
 
   return createPortal(
-    <>
+    <div className={closing ? "pointer-events-none" : ""}>
       {targetRect ? (
         <div
           className="pointer-events-none fixed z-[100] rounded-lg border-[3px] border-sky-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.64),0_0_18px_rgba(56,189,248,0.75)] transition-[top,left,width,height] duration-200"
-          style={targetRect}
+          style={{ ...targetRect, opacity: closing ? 0 : 1, transition: closing ? "opacity 300ms" : undefined }}
           aria-hidden="true"
         />
       ) : (
-        <div className="pointer-events-none fixed inset-0 z-[100] bg-black/65" aria-hidden="true" />
+        <div className="pointer-events-none fixed inset-0 z-[100] bg-black/65 transition-opacity duration-300" style={{ opacity: closing ? 0 : 1 }} aria-hidden="true" />
       )}
-      <div className="pointer-events-auto fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-[110] mx-auto max-w-md rounded-lg border border-primary/50 bg-base-100 p-4 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="onboarding-tour-title">
+      <div ref={cardRef} className="pointer-events-auto fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-[110] mx-auto max-w-md rounded-lg border border-primary/50 bg-base-100 p-4 shadow-2xl" style={{ pointerEvents: closing ? "none" : undefined }} role="dialog" aria-modal="true" aria-labelledby="onboarding-tour-title">
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <div className="mb-1 text-[11px] font-semibold text-primary">快速導覽 {stepIndex + 1}/{ONBOARDING_TOUR_STEPS.length}</div>
             <h2 id="onboarding-tour-title" className="text-base font-bold text-base-content">{step.title}</h2>
           </div>
-          <button type="button" className="btn btn-ghost btn-square btn-xs rounded" aria-label="略過導覽" title="略過導覽" onClick={onClose}>×</button>
+          <button type="button" className="btn btn-ghost btn-square btn-xs rounded" aria-label="略過導覽" title="略過導覽" onClick={dismiss}>×</button>
         </div>
         <p className="mb-4 text-sm leading-6 text-base-content/75">{step.body}</p>
+        <label className="mb-3 flex cursor-pointer items-center gap-2 text-sm text-base-content/75"><input type="checkbox" className="checkbox checkbox-primary checkbox-xs" checked={dontShowAgain} onChange={(event) => setDontShowAgain(event.target.checked)} />別再顯示</label>
         <div className="flex items-center justify-between gap-2">
-          <button type="button" className="btn btn-ghost btn-sm rounded" onClick={onClose}>略過</button>
+          <button type="button" className="btn btn-ghost btn-sm rounded" onClick={dismiss}>略過</button>
           <div className="flex gap-2">
             <button type="button" className="btn btn-sm rounded" disabled={stepIndex === 0} onClick={() => setStepIndex((value) => value - 1)}>上一步</button>
-            <button type="button" className="btn btn-primary btn-sm rounded" onClick={() => isLast ? onClose() : setStepIndex((value) => value + 1)}>{isLast ? "開始使用" : "下一步"}</button>
+            <button type="button" className="btn btn-primary btn-sm rounded" onClick={() => isLast ? dismiss() : setStepIndex((value) => value + 1)}>{isLast ? "開始使用" : "下一步"}</button>
           </div>
         </div>
       </div>
-    </>,
+    </div>,
     document.body,
   );
 }
@@ -852,7 +887,7 @@ export default function App() {
   const [focusedPanel, setFocusedPanel] = useState("vwap");
   const [signalLoadedKey, setSignalLoadedKey] = useState("");
   const [selectedChartDate, setSelectedChartDate] = useState(null);
-  const [tourOpen, setTourOpen] = useState(() => localStorage.getItem(ONBOARDING_TOUR_KEY) !== "done");
+  const [tourOpen, setTourOpen] = useState(() => localStorage.getItem(ONBOARDING_TOUR_KEY) !== "hidden");
 
   const stockIdRef = useRef(stockId);
   const activeChartDateRef = useRef("");
@@ -1537,8 +1572,9 @@ export default function App() {
     setFocusedPanel("vwap");
   }
 
-  const closeOnboardingTour = useCallback(() => {
-    localStorage.setItem(ONBOARDING_TOUR_KEY, "done");
+  const closeOnboardingTour = useCallback((dontShowAgain) => {
+    if (dontShowAgain) localStorage.setItem(ONBOARDING_TOUR_KEY, "hidden");
+    else localStorage.removeItem(ONBOARDING_TOUR_KEY);
     setTourOpen(false);
   }, []);
 
@@ -1639,7 +1675,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <HealthLine health={health} clock={clock} version={APP_VERSION} />
-            <button type="button" className="btn btn-ghost btn-square btn-xs rounded" title="重新觀看快速導覽" aria-label="重新觀看快速導覽" onClick={() => setTourOpen(true)}>?</button>
+            <button type="button" data-tour="help" className="btn btn-ghost btn-square btn-xs rounded" title="重新觀看快速導覽" aria-label="重新觀看快速導覽" onClick={() => setTourOpen(true)}>?</button>
             <button
               type="button"
               className={`btn btn-xs rounded ${watchDrawerOpen ? "btn-primary" : ""}`}
