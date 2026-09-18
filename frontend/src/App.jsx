@@ -551,6 +551,7 @@ function ChartIndicatorControls({ value, onChange }) {
 
 function OnboardingTour({ open, onClose }) {
   const [stepIndex, setStepIndex] = useState(0);
+  const [targetRect, setTargetRect] = useState(null);
   const step = ONBOARDING_TOUR_STEPS[stepIndex];
 
   useEffect(() => {
@@ -562,9 +563,34 @@ function OnboardingTour({ open, onClose }) {
   useEffect(() => {
     if (!open || !step) return undefined;
     const target = document.querySelector(`[data-tour="${step.target}"]`);
-    target?.classList.add("onboarding-tour-target");
-    target?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-    return () => target?.classList.remove("onboarding-tour-target");
+    if (!target) {
+      setTargetRect(null);
+      return undefined;
+    }
+
+    const measure = () => {
+      const rect = target.getBoundingClientRect();
+      const padding = 5;
+      setTargetRect({
+        top: Math.max(4, rect.top - padding),
+        left: Math.max(4, rect.left - padding),
+        width: Math.min(window.innerWidth - 8, rect.width + padding * 2),
+        height: Math.min(window.innerHeight - 8, rect.height + padding * 2),
+      });
+    };
+
+    const rect = target.getBoundingClientRect();
+    if (rect.top < 0 || rect.bottom > window.innerHeight) {
+      target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    }
+    const frame = window.requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
   }, [open, step]);
 
   useEffect(() => {
@@ -582,9 +608,17 @@ function OnboardingTour({ open, onClose }) {
   const isLast = stepIndex === ONBOARDING_TOUR_STEPS.length - 1;
 
   return createPortal(
-    <div className="pointer-events-none fixed inset-0" role="dialog" aria-modal="true" aria-labelledby="onboarding-tour-title">
-      <div className="absolute inset-0 z-[100] bg-black/55" />
-      <div className="pointer-events-auto absolute inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-[102] mx-auto max-w-md rounded-lg border border-primary/50 bg-base-100 p-4 shadow-2xl">
+    <>
+      {targetRect ? (
+        <div
+          className="pointer-events-none fixed z-[100] rounded-lg border-[3px] border-sky-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.64),0_0_18px_rgba(56,189,248,0.75)] transition-[top,left,width,height] duration-200"
+          style={targetRect}
+          aria-hidden="true"
+        />
+      ) : (
+        <div className="pointer-events-none fixed inset-0 z-[100] bg-black/65" aria-hidden="true" />
+      )}
+      <div className="pointer-events-auto fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-[110] mx-auto max-w-md rounded-lg border border-primary/50 bg-base-100 p-4 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="onboarding-tour-title">
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <div className="mb-1 text-[11px] font-semibold text-primary">快速導覽 {stepIndex + 1}/{ONBOARDING_TOUR_STEPS.length}</div>
@@ -601,7 +635,7 @@ function OnboardingTour({ open, onClose }) {
           </div>
         </div>
       </div>
-    </div>,
+    </>,
     document.body,
   );
 }
