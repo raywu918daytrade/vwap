@@ -236,13 +236,17 @@ def sr_levels_for_date(
     if not missing:
         return {sid: cached[sid] for sid in stocks if sid in cached}
 
-    from data.adjustment_query import load_pattern_day
+    from data.adjustment_query import load_pattern_day, load_pattern_day_by_stock
 
     if not stocks:
         _sr_levels_cache[date_str] = cached
         return {}
     hist_start = (pd.Timestamp(date_str) - pd.Timedelta(days=180)).strftime("%Y-%m-%d")
-    day = load_pattern_day(start_date=hist_start, end_date=date_str)
+    if len(missing) <= 8:
+        day = pd.concat([load_pattern_day_by_stock(sid, start_date=hist_start, end_date=date_str)
+                         for sid in missing], ignore_index=True)
+    else:
+        day = load_pattern_day(start_date=hist_start, end_date=date_str)
     if day.empty:
         _sr_levels_cache[date_str] = cached
         return {sid: cached[sid] for sid in stocks if sid in cached}
@@ -256,8 +260,7 @@ def sr_levels_for_date(
             continue
         hist = g.loc[g["date"] < cutoff]
         res, sup = horizontal_sr_prices(hist)
-        if res is not None or sup is not None:
-            levels[sid] = (res, sup)
+        levels[sid] = (res, sup)
     _sr_levels_cache[date_str] = levels
     return {sid: levels[sid] for sid in stocks if sid in levels}
 

@@ -75,6 +75,8 @@ _COVERAGE_POLL_SEC = 1.0
 # 多執行緒下大家共用同一個節流時鐘，各自的網路等待時間可以互相重疊。
 _BACKFILL_INTERVAL = float(os.environ.get("FUBON_REST_INTERVAL", "0.25"))
 _BACKFILL_WORKERS = int(os.environ.get("FUBON_BACKFILL_WORKERS", "10"))
+# An old collector can still have an in-flight REST call after stopping.
+_BACKFILL_LOCK = threading.Lock()
 _MARKET_OPEN_HOUR = int(os.environ.get("MARKET_OPEN_HOUR", "9"))
 _MARKET_OPEN_MIN = int(os.environ.get("MARKET_OPEN_MIN", "0"))
 _MARKET_CLOSE_HOUR = int(os.environ.get("MARKET_CLOSE_HOUR", "13"))
@@ -98,16 +100,16 @@ def _parse_candle(raw: bytes | str) -> dict | None:
     date 欄位跟 Fugle REST 一樣是帶時區字串（例：'2026-07-02T09:00:00.000+08:00'），
     轉成台北 naive 字串存檔，不能直接用 UTC 解讀（見 CLAUDE.md）。
     """
-    msg = orjson.loads(raw)
+    msg = raw if isinstance(raw, dict) else orjson.loads(raw)
     if not isinstance(msg, dict):
         return None
     data = msg.get("data")
     if not isinstance(data, dict) or "open" not in data or "symbol" not in data:
         return None
 
-    dt = pd.to_datetime(data["date"])
+    dt = datetime.fromisoformat(data["date"].replace("Z", "+00:00"))
     if dt.tzinfo is not None:
-        dt = dt.tz_convert("Asia/Taipei").tz_localize(None)
+        dt = dt.astimezone(_TW).replace(tzinfo=None)
     return {
         "stock_id": str(data["symbol"]),
         "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
@@ -132,6 +134,8 @@ class FubonM1Collector:
         self._clients: list = []
         self._buffer: dict[tuple[str, str], dict] = {}  # (stock_id, minute_str) -> row
         self._buffer_lock = threading.Lock()
+        self._backfill_tracking = False
+        self._backfill_live_keys: set[tuple[str, str]] = set()
         # 保護 _atomic_save()：_flush_loop 跟 _minute_tick_loop 都會呼叫 _flush()，
         # 兩邊同時寫檔會搶同一個 .tmp 檔名，os.replace() 會噴 FileNotFoundError
         # （2026-07-13 實際發生過，導致 collector 整個掛掉、不會自動重連）。
@@ -139,6 +143,7 @@ class FubonM1Collector:
         self._stop = False
         self._connection_failed = threading.Event()
         self._connection_failure_reason = ""
+        self._connection_stats: dict[int, dict] = {}
         # 涵蓋率追蹤：只記股票代號，不存報價內容（報價內容仍在 self._buffer）。
         # _target_minute 是目前這一輪在等的那根已收盤分鐘，只有訊息剛好屬於這
         # 一分鐘才會被算進涵蓋率，避免跨分鐘的訊息把下一輪的涵蓋率灌水。
@@ -241,7 +246,14 @@ class FubonM1Collector:
     def _mark_connection_failed(self, conn_id: int, reason: str) -> None:
         if self._stop:
             return
-        message = f"[連線{conn_id}] {reason}"
+        stats = self._connection_stats.get(conn_id, {})
+        now = time.monotonic()
+        ages = {key + "_age_s": round(now - stats[key], 1)
+                for key in ("message", "pong", "heartbeat") if key in stats}
+        client = self._clients[conn_id - 1] if conn_id <= len(self._clients) else None
+        missed = getattr(client, "missed_pongs", None)
+        message = (f"[連線{conn_id}] {reason}; missed_pongs={missed}; "
+                   f"received={stats.get('count', 0)}; ages={ages}")
         print(message, flush=True)
         if not self._connection_failed.is_set():
             self._connection_failure_reason = message
@@ -262,14 +274,29 @@ class FubonM1Collector:
     def _make_handler(self, conn_id: int):
         def handler(raw):
             try:
-                row = _parse_candle(raw)
+                message = orjson.loads(raw)
+                event = message.get("event")
+                stats = self._connection_stats.setdefault(conn_id, {})
+                stats["message"] = time.monotonic()
+                stats["count"] = stats.get("count", 0) + 1
+                if event in {"pong", "heartbeat"}:
+                    stats[event] = stats["message"]
+                if event == "error":
+                    # Never log an authentication payload or arbitrary server text.
+                    data = message.get("data") or {}
+                    code = str(data.get("code", "unknown"))[:24]
+                    _log_sys(f"富邦行情 [連線{conn_id}] server_error code={code}", "error")
+                row = _parse_candle(message)
             except Exception as e:
-                print(f"[連線{conn_id}] 訊息解析失敗: {e}｜{raw!r:.200}", flush=True)
+                print(f"[連線{conn_id}] 訊息解析失敗: {type(e).__name__}", flush=True)
                 return
             if row is None:
                 return
             with self._buffer_lock:
-                self._buffer[(row["stock_id"], row["date"])] = row
+                key = (row["stock_id"], row["date"])
+                self._buffer[key] = row
+                if self._backfill_tracking:
+                    self._backfill_live_keys.add(key)
                 if row["date"] == self._target_minute:
                     self._arrived_this_minute.add(row["stock_id"])
         return handler
@@ -277,52 +304,86 @@ class FubonM1Collector:
     # ── 背景補歷史缺口（寫進共用 buffer，不直接存檔）─────────────────────
 
     def _backfill_m1_live(self, symbols: list[str], date_str: str):
-        """用 REST 補「WebSocket 連線前」缺的分K，寫進跟即時資料共用的
-        self._buffer（由 _flush_loop 統一存檔），不直接呼叫存檔函式——避免
-        這個背景執行緒跟 _flush_loop 同時讀寫同一個檔案造成 race condition。
-        多執行緒併發抓取，全域節流頻率控制在 ~1/_BACKFILL_INTERVAL 次/秒，
-        避免逐支序列等待網路延遲拖慢整體時間。
-        """
-        print(f"[backfill] 開始補 {len(symbols)} 支 {date_str} 的分K（背景執行，"
-              f"{_BACKFILL_WORKERS} 併發）...", flush=True)
-        t0 = time.time()
+        # Stop-aware acquisition: old REST calls finish before a new generation
+        # can start, even though the SDK has no cancellation API.
+        while not self._stop:
+            if _BACKFILL_LOCK.acquire(timeout=0.25):
+                break
+        else:
+            return
+        try:
+            if self._stop:
+                return
+            with self._buffer_lock:
+                self._backfill_tracking = True
+            self._flush()
+            self._backfill_missing(symbols, date_str)
+        except Exception as exc:
+            _log_sys(f"富邦缺口補資料失敗: {type(exc).__name__}", "error")
+        finally:
+            with self._buffer_lock:
+                self._backfill_tracking = False
+                self._backfill_live_keys.clear()
+            _BACKFILL_LOCK.release()
+
+    def _backfill_missing(self, symbols: list[str], date_str: str):
+        t0 = time.monotonic()
+        cutoff = datetime.now(_TW).replace(second=0, microsecond=0) - timedelta(minutes=1)
+        opened = datetime.strptime(date_str + " 09:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo=_TW)
+        cutoff = min(cutoff, opened.replace(hour=13, minute=30))
+        expected = {t.strftime("%Y-%m-%d %H:%M:%S") for t in pd.date_range(opened, cutoff, freq="min")
+                    if not (t.hour == 13 and 25 <= t.minute <= 29)}
+        existing = load_m1_live(date_str)
+        present = {}
+        if not existing.empty:
+            present = {str(sid): set(g["date"].astype(str).str[:19])
+                       for sid, g in existing.groupby("stock_id")}
+        missing = {sid: expected - present.get(sid, set()) for sid in symbols}
+        targets = [sid for sid in symbols if missing[sid]]
+        _log_sys(f"富邦缺口檢查 {date_str}：需補 {len(targets)}/{len(symbols)} 支")
         rate_lock = threading.Lock()
         last_req = [0.0]
-        done = [0]
         got = [0]
+        failed = [0]
 
-        def fetch_one(sid: str):
+        def fetch_one(sid):
+            if self._stop:
+                return
             with rate_lock:
-                wait = _BACKFILL_INTERVAL - (time.time() - last_req[0])
+                wait = _BACKFILL_INTERVAL - (time.monotonic() - last_req[0])
                 if wait > 0:
                     time.sleep(wait)
-                last_req[0] = time.time()
+                if self._stop:
+                    return
+                last_req[0] = time.monotonic()
             try:
                 bars = trade_api.intraday_candles(self._sdk, sid)
+                if self._stop:
+                    return
                 df = _parse_rest_bars(sid, bars, date_str)
                 if not df.empty:
+                    df = df[df["date"].isin(missing[sid])]
                     with self._buffer_lock:
+                        if self._stop:
+                            return
                         for row in df.to_dict("records"):
                             key = (row["stock_id"], row["date"])
-                            # WebSocket 即時資料優先：這個 key 已經被即時訊息
-                            # 寫過就不覆蓋，backfill 只補真正缺的部分
-                            if key not in self._buffer:
-                                self._buffer[key] = row
+                            # A newer WebSocket bar may already have been flushed.
+                            if key not in self._backfill_live_keys:
+                                self._buffer.setdefault(key, row)
                     got[0] += 1
-            except Exception as e:
-                print(f"[backfill] {sid} 失敗: {e}", flush=True)
-            done[0] += 1
-            if done[0] % 100 == 0 or done[0] == len(symbols):
-                print(f"[backfill] 進度 {done[0]}/{len(symbols)}", flush=True)
+            except Exception as exc:
+                failed[0] += 1
+                print(f"[backfill] {sid} {type(exc).__name__}", flush=True)
 
-        with ThreadPoolExecutor(max_workers=_BACKFILL_WORKERS) as ex:
-            list(ex.map(fetch_one, symbols))
-
-        elapsed = time.time() - t0
-        msg = f"[backfill] 完成，{got[0]}/{len(symbols)} 支有資料（{elapsed:.1f}s）"
-        print(msg, flush=True)
-        _log_sys(f"富邦 backfill 完成 {date_str}：{got[0]}/{len(symbols)} 支（{elapsed:.1f}s）")
-        if self._backfill_done:
+        with ThreadPoolExecutor(max_workers=_BACKFILL_WORKERS) as pool:
+            list(pool.map(fetch_one, targets))
+        if self._stop:
+            return
+        # Persist before declaring this generation ready for signal catch-up.
+        self._flush()
+        _log_sys(f"富邦缺口補資料完成 {date_str}：{got[0]}/{len(targets)} 支，失敗 {failed[0]}（{time.monotonic() - t0:.1f}s）")
+        if self._backfill_done and not self._stop:
             self._backfill_done.set()
 
     # ── 定期存檔（只負責把 buffer 寫進 db/m1_live/，不觸發 on_minute）──────

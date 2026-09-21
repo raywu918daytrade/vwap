@@ -243,7 +243,7 @@ _SCAN_DISK_CACHE_DIR = Path(os.environ.get(
 _DETAIL_DISK_CACHE_ENABLED = os.environ.get("PATTERN_DETAIL_DISK_CACHE", "1").lower() not in {"0", "false", "no"}
 _SCAN_DISK_CACHE_ENABLED = os.environ.get("PATTERN_SCAN_DISK_CACHE", "1").lower() not in {"0", "false", "no"}
 _SCAN_MEMORY_CACHE_LIMIT = 1 if uses_on_demand_hf() else None
-_DETAIL_MEMORY_CACHE_LIMIT = 6 if uses_on_demand_hf() else None
+_DETAIL_MEMORY_CACHE_LIMIT = 64 if uses_on_demand_hf() else None
 
 
 def _remember_memory_cache(cache, order, key, value, limit) -> None:

@@ -49,7 +49,7 @@ def start_collector(on_minute, backfill_done=None) -> None:
         collector = FubonM1Collector(on_minute=on_minute, backfill_done=backfill_done)
         collector_finished = threading.Event()
 
-        def stop_after_session() -> None:
+        def stop_after_session(collector=collector, collector_finished=collector_finished) -> None:
             while not collector_finished.is_set() and _within_collection_window(datetime.now(_TW)):
                 time.sleep(15)
             if not collector_finished.is_set():

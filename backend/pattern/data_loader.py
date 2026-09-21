@@ -25,6 +25,7 @@ import pyarrow.dataset as ds
 from data import raw_query
 from data.adjustment_query import load_pattern_day, load_pattern_day_by_stock, _load_adjustment_factor
 from data.resample import compute_m3_std, compute_m5_std
+from data.chart_cache import cached_frame, current_session, file_version
 
 _ROOT = Path(__file__).parent.parent
 
@@ -119,11 +120,11 @@ def get_stock_candles(
                 print(f"[TiDB] day chart read failed; falling back to parquet/HF: {exc}", flush=True)
 
         _ensure_chart_data_once()
-        df = load_pattern_day_by_stock(
-            stock_id,
-            start_date=start_date,
-            end_date=str(ref_date)[:10],
-        )
+        history_version = tuple(file_version(path) for folder in ("adjustment_day", "tick_adjust_factor")
+                                for path in sorted((_ROOT / "db" / folder).glob("*.parquet")))
+        df = cached_frame(("day", stock_id, start_date, str(ref_date)[:10], history_version),
+                          lambda: load_pattern_day_by_stock(stock_id, start_date=start_date,
+                                                            end_date=str(ref_date)[:10]))
         if date:
             df = df[df["date"] <= f"{date} 23:59:59"]
         else:
@@ -169,6 +170,10 @@ def get_stock_candles(
         # 不到當天資料、圖表空白。
         today_str = pd.Timestamp.now(tz="Asia/Taipei").strftime("%Y-%m-%d")
         effective_date = date or today_str
+        if full_day and effective_date == today_str:
+            session = current_session(_ROOT, stock_id, effective_date)
+            if session is not None:
+                return session
         if date:
             try:
                 from data.tidb_offline_store import tidb_read_chart_m1

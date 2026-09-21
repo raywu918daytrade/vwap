@@ -43,7 +43,29 @@ except OSError:
 _REQUIRE_DATA_READY = os.environ.get("REQUIRE_DATA_READY", "0").lower() in {"1", "true", "yes"}
 _LOW_MEMORY_RUNTIME = uses_on_demand_hf()
 _data_ready = not _REQUIRE_DATA_READY
-_heavy_request_lock = asyncio.Lock()
+_heavy_request_lock = asyncio.Semaphore(max(1, int(os.environ.get("HEAVY_REQUEST_CONCURRENCY", "2"))))
+_memory_trim_lock = threading.Lock()
+_last_memory_trim = _time_mod.monotonic()
+
+
+def _trim_memory_if_due():
+    """Keep low-memory cleanup off the event loop and out of every chart load."""
+    global _last_memory_trim
+    if not _memory_trim_lock.acquire(blocking=False):
+        return
+    try:
+        if _time_mod.monotonic() - _last_memory_trim < 30:
+            return
+        _last_memory_trim = _time_mod.monotonic()
+        gc.collect()
+        try:
+            import pyarrow as pa
+            pa.default_memory_pool().release_unused()
+            ctypes.CDLL(None).malloc_trim(0)
+        except (AttributeError, OSError):
+            pass
+    finally:
+        _memory_trim_lock.release()
 
 
 def set_data_ready(ready: bool) -> None:
@@ -85,24 +107,17 @@ async def _log_http(request: Request, call_next):
     if request.url.path in _SKIP_LOG_PATHS:
         return await call_next(request)
     t0 = _time_mod.time()
+    queue_ms = 0
     is_heavy = request.url.path.startswith(("/api/pattern/", "/vwap_"))
     if _LOW_MEMORY_RUNTIME and is_heavy:
         async with _heavy_request_lock:
+            queue_ms = int((_time_mod.time() - t0) * 1000)
             response = await call_next(request)
-            try:
-                import pyarrow as pa
-
-                pa.default_memory_pool().release_unused()
-            except Exception:
-                pass
-            gc.collect()
-            try:
-                ctypes.CDLL(None).malloc_trim(0)
-            except (AttributeError, OSError):
-                pass
+            await asyncio.to_thread(_trim_memory_if_due)
     else:
         response = await call_next(request)
     elapsed_ms = int((_time_mod.time() - t0) * 1000)
+    response.headers["Server-Timing"] = f"queue;dur={queue_ms}, app;dur={elapsed_ms - queue_ms}"
     qs = f"?{request.url.query}" if request.url.query else ""
     append_system_log(
         f"{request.method} {request.url.path}{qs} -> {response.status_code} ({elapsed_ms}ms)",
