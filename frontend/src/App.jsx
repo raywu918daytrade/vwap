@@ -1847,12 +1847,12 @@ export default function App() {
       </main>
 
       <div
-        className="join fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] right-[4.75rem] z-[60] lg:hidden"
+        className="join fixed bottom-3 right-[4.75rem] z-[60] lg:hidden"
         aria-label="切換股票"
       >
         <button
           type="button"
-          className="btn btn-sm join-item min-h-10 rounded-l px-3 text-lg shadow-lg"
+          className="btn btn-sm join-item rounded-l px-3 text-lg shadow-lg"
           title="上一股"
           aria-label="上一股"
           disabled={!hasPreviousStock}
@@ -1862,7 +1862,7 @@ export default function App() {
         </button>
         <button
           type="button"
-          className="btn btn-sm join-item min-h-10 rounded-r px-3 text-lg shadow-lg"
+          className="btn btn-sm join-item rounded-r px-3 text-lg shadow-lg"
           title="下一股"
           aria-label="下一股"
           disabled={!hasNextStock}
