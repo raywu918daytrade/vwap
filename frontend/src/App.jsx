@@ -1578,6 +1578,30 @@ export default function App() {
     [patternLimit, selectStock],
   );
 
+  const mobileStockRows = useMemo(() => {
+    const seen = new Set();
+    return vwapRows.filter((row) => {
+      const sid = String(row.stock_id);
+      if (seen.has(sid)) return false;
+      seen.add(sid);
+      return true;
+    });
+  }, [vwapRows]);
+  const mobileStockIndex = mobileStockRows.findIndex((row) => String(row.stock_id) === String(stockId));
+  const hasPreviousStock = mobileStockRows.length > 0 && mobileStockIndex !== 0;
+  const hasNextStock = mobileStockRows.length > 0 && mobileStockIndex !== mobileStockRows.length - 1;
+
+  function navigateMobileStock(direction) {
+    if (!mobileStockRows.length) return;
+    const nextIndex =
+      mobileStockIndex === -1
+        ? direction > 0 ? 0 : mobileStockRows.length - 1
+        : mobileStockIndex + direction;
+    const next = mobileStockRows[nextIndex];
+    if (!next) return;
+    selectMarketRow(next, eventKey(next), "vwap");
+  }
+
   function togglePatternType(id) {
     setSelectedPatternTypes((prev) => {
       return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
@@ -1821,6 +1845,32 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      <div
+        className="join fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] right-[4.75rem] z-[60] lg:hidden"
+        aria-label="切換股票"
+      >
+        <button
+          type="button"
+          className="btn btn-sm join-item min-h-10 rounded-l px-3 text-lg shadow-lg"
+          title="上一股"
+          aria-label="上一股"
+          disabled={!hasPreviousStock}
+          onClick={() => navigateMobileStock(-1)}
+        >
+          ◀
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm join-item min-h-10 rounded-r px-3 text-lg shadow-lg"
+          title="下一股"
+          aria-label="下一股"
+          disabled={!hasNextStock}
+          onClick={() => navigateMobileStock(1)}
+        >
+          ▶
+        </button>
+      </div>
 
       {watchDrawerOpen ? <><button type="button" className="fixed inset-0 z-40 cursor-default bg-black/35" aria-label="關閉觀察清單" onClick={closeWatchDrawer} /><aside ref={watchDrawerRef} tabIndex={-1} className="fixed right-0 top-0 z-50 flex h-dvh w-[min(420px,calc(100vw-1rem))] flex-col border-l border-base-300 bg-base-100 shadow-2xl" aria-label="觀察清單" onFocusCapture={() => setFocusedPanel("obs")} onMouseDown={() => setFocusedPanel("obs")}><div className="flex min-h-12 items-center justify-between border-b border-base-300 bg-base-200 px-3"><div className="min-w-0 truncate text-sm font-semibold text-primary">觀察 <span className="font-normal text-base-content/45">({obsRows.length})</span></div><button type="button" className="btn btn-ghost btn-square btn-xs rounded" title="關閉" aria-label="關閉" onClick={closeWatchDrawer}>×</button></div><div className="min-h-0 flex-1 overflow-auto">{obsRows.length ? <table className="table table-xs table-pin-rows min-w-max"><thead><tr><th>股票</th><th>漲幅</th><th className="text-right">時間</th><th className="text-center">SR</th><th className="text-center">MACD</th><th className="text-center">OBV</th></tr></thead><tbody>{obsRows.map((row, idx) => { const key = eventKey(row); const selected = selectedEventKey ? key === selectedEventKey : String(stockId) === String(row.stock_id); return <tr key={row.stock_id} data-panel="obs" data-row-index={idx} className={selected ? "bg-primary/15" : ""} onClick={() => selectMarketRow(row, key, "obs", "", false)} onDoubleClick={() => toggleObsStock(row.stock_id)}><StockCell row={row} /><td className={row.chg_pct == null ? "text-base-content/35" : row.chg_pct >= 0 ? "text-error" : "text-success"}>{row.chg_pct == null ? "" : `${row.chg_pct >= 0 ? "+" : ""}${Number(row.chg_pct).toFixed(2)}%`}</td><td className="text-right text-base-content/50">{hm(row.time)}</td><td className="text-center"><Lamp on={row.sr_on} kind="both" title="SR" /></td><td className="text-center"><Lamp on={row.macd_on} kind={row.macd_kind} title="MACD" /></td><td className="text-center"><Lamp on={row.obv_on} kind={row.obv_kind} title="OBV" /></td></tr>; })}</tbody></table> : <div className="flex h-full items-center justify-center p-6 text-center text-sm text-base-content/50">在盤中訊號框雙擊股票加入觀察</div>}</div></aside></> : null}
       <OnboardingTour open={tourOpen} onClose={closeOnboardingTour} />
