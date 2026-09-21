@@ -1457,7 +1457,7 @@ export default function App() {
       rows = rows.filter((row) => String(row.stock_id).includes(search) || String(row.name || "").toLowerCase().includes(search));
     }
     const hasActivityFilter = Object.values(activityFilters).some(Boolean);
-    if (hasActivityFilter && Object.keys(activityMap).length) {
+    if (hasActivityFilter) {
       for (const [key, value] of Object.entries(activityFilters)) {
         if (!value) continue;
         const threshold = Number(value);
@@ -1468,8 +1468,8 @@ export default function App() {
       }
     }
     if (srOnly) rows = rows.filter((row) => row.sr_on);
-    if (macdOnly && Object.keys(macdMap).length) rows = rows.filter((row) => row.macd_on);
-    if (obvOnly && Object.keys(obvMap).length) rows = rows.filter((row) => row.obv_on);
+    if (macdOnly) rows = rows.filter((row) => row.macd_on);
+    if (obvOnly) rows = rows.filter((row) => row.obv_on);
     if (selectedPatternTypes.length) rows = rows.filter((row) => selectedPatternTypes.some((type) => row.pattern_hits?.has(type)));
     return sortRows(rows, vwapSort.key, vwapSort.dir);
   }, [
@@ -1496,9 +1496,13 @@ export default function App() {
   ]);
 
   const signalColumnCount = 6 + patternColumns.length;
-  const signalEmptyText = selectedPatternTypes.length
-    ? "目前沒有符合型態過濾的盤中 / SR 訊號，可取消上方型態勾選。"
-    : "該日尚無盤中 / SR 訊號";
+  const activityDataMissing = Object.values(activityFilters).some(Boolean) && !Object.keys(activityMap).length;
+  const hasSignalFilter = Object.values(activityFilters).some(Boolean) || srOnly || macdOnly || obvOnly || selectedPatternTypes.length || vwapSearch.trim();
+  const signalEmptyText = activityDataMissing
+    ? "該日尚無活動度資料，無法判定 ATR／5分／量PR 條件；可稍後重試或將條件設為不限。"
+    : hasSignalFilter
+      ? "目前沒有符合篩選條件的股票，可調整上方或選單內的過濾器。"
+      : "該日尚無盤中 / SR 訊號";
 
   const obsRows = useMemo(() => {
     const latest = new Map(latestByStock(vwapRowsRaw).map((row) => [String(row.stock_id), row]));
