@@ -1068,6 +1068,7 @@ export default function App() {
     const next = String(sid);
     if (next !== stockId) {
       chartLoadSeqRef.current += 1;
+      chartRequestRef.current = "";
       setDayData(null);
       setIntradayData(null);
       setDayError("");
@@ -1164,6 +1165,7 @@ export default function App() {
 
   useEffect(() => {
     chartLoadSeqRef.current += 1;
+    chartRequestRef.current = "";
     setSelectedEventKey("");
     setDayData(null);
     setIntradayData(null);
