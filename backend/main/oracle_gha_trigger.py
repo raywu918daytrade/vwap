@@ -11,7 +11,10 @@ from urllib.request import Request, urlopen
 
 
 TW = timezone(timedelta(hours=8))
-TOKEN = os.environ.get("GITHUB_ACTIONS_TRIGGER_TOKEN", "").strip()
+TOKEN = (
+    os.environ.get("GITHUB_ACTIONS_TRIGGER_TOKEN", "").strip()
+    or os.environ.get("GITHUB_DAY_TRADE", "").strip()
+)
 REPOSITORY = os.environ.get("GITHUB_ACTIONS_REPOSITORY", "raywu918daytrade/vwap").strip()
 WORKFLOW = os.environ.get("GITHUB_ACTIONS_WORKFLOW", "build-pattern-scan.yml").strip()
 REF = os.environ.get("GITHUB_ACTIONS_REF", "main").strip()
@@ -42,7 +45,10 @@ def dispatch(date: str) -> None:
 
 def main() -> None:
     if not TOKEN:
-        print("Oracle GHA trigger disabled: GITHUB_ACTIONS_TRIGGER_TOKEN is not configured", flush=True)
+        print(
+            "Oracle GHA trigger disabled: configure GITHUB_ACTIONS_TRIGGER_TOKEN or GITHUB_DAY_TRADE",
+            flush=True,
+        )
         while True:
             time.sleep(3600)
 
