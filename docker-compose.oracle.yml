@@ -57,6 +57,18 @@ services:
       retries: 5
       start_period: 60s
 
+  gha-trigger:
+    image: vwap-app:local
+    platform: linux/amd64
+    mem_limit: 48m
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      TZ: Asia/Taipei
+      PYTHONUNBUFFERED: "1"
+    command: ["python", "-m", "main.oracle_gha_trigger"]
+
 volumes:
   caddy_data:
   caddy_config:

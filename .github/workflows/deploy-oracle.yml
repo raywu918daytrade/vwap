@@ -47,12 +47,10 @@ jobs:
             echo "::error::Missing required repository secret: ORACLE_SSH_PRIVATE_KEY"
             exit 1
           fi
-
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "${ORACLE_SSH_PRIVATE_KEY}" > ~/.ssh/oracle_vwap
           chmod 600 ~/.ssh/oracle_vwap
-
           if [ -n "${ORACLE_KNOWN_HOSTS}" ]; then
             printf '%s\n' "${ORACLE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
           else
@@ -62,35 +60,54 @@ jobs:
 
       - name: Test SSH
         run: |
-          ssh -i ~/.ssh/oracle_vwap \
-            -p "${ORACLE_PORT}" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
+          ssh -i ~/.ssh/oracle_vwap -p "${ORACLE_PORT}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "${ORACLE_USER}@${ORACLE_HOST}" 'echo "connected to $(hostname)"'
+
+      - name: Configure Oracle workflow token
+        env:
+          TRIGGER_TOKEN: ${{ secrets.ORACLE_GITHUB_ACTIONS_TRIGGER_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TRIGGER_TOKEN}" ]; then
+            echo "::warning::ORACLE_GITHUB_ACTIONS_TRIGGER_TOKEN is missing; Oracle dispatch will remain disabled."
+            exit 0
+          fi
+          token_file="/tmp/vwap-trigger-token-${GITHUB_SHA}"
+          printf '%s' "${TRIGGER_TOKEN}" > /tmp/vwap-trigger-token
+          chmod 600 /tmp/vwap-trigger-token
+          scp -i ~/.ssh/oracle_vwap -P "${ORACLE_PORT}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            /tmp/vwap-trigger-token "${ORACLE_USER}@${ORACLE_HOST}:${token_file}"
+          ssh -i ~/.ssh/oracle_vwap -p "${ORACLE_PORT}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "${ORACLE_USER}@${ORACLE_HOST}" \
-            'echo "connected to $(hostname)"'
+            "DEPLOY_PATH='${ORACLE_DEPLOY_PATH}' TOKEN_FILE='${token_file}' python3 -" <<'PY'
+          import os
+          from pathlib import Path
+
+          env_path = Path(os.environ["DEPLOY_PATH"]) / "backend/.env"
+          token_path = Path(os.environ["TOKEN_FILE"])
+          token = token_path.read_text().strip()
+          lines = env_path.read_text().splitlines() if env_path.exists() else []
+          key = "GITHUB_ACTIONS_TRIGGER_TOKEN="
+          lines = [line for line in lines if not line.startswith(key)]
+          lines.append(key + token)
+          env_path.parent.mkdir(parents=True, exist_ok=True)
+          env_path.write_text("\n".join(lines) + "\n")
+          env_path.chmod(0o600)
+          token_path.unlink(missing_ok=True)
+          PY
 
       - name: Upload release archive
         run: |
           set -euo pipefail
           remote_archive="/tmp/vwap-release-${GITHUB_SHA}.tgz"
-          scp -i ~/.ssh/oracle_vwap \
-            -P "${ORACLE_PORT}" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            /tmp/vwap-release.tgz \
-            "${ORACLE_USER}@${ORACLE_HOST}:${remote_archive}"
+          scp -i ~/.ssh/oracle_vwap -P "${ORACLE_PORT}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            /tmp/vwap-release.tgz "${ORACLE_USER}@${ORACLE_HOST}:${remote_archive}"
 
       - name: Deploy on Oracle
         run: |
           set -euo pipefail
           remote_archive="/tmp/vwap-release-${GITHUB_SHA}.tgz"
           remote_env="$(printf 'DEPLOY_ARCHIVE=%q DEPLOY_PATH=%q DEPLOY_COMMIT=%q' \
-            "${remote_archive}" \
-            "${ORACLE_DEPLOY_PATH}" \
-            "${GITHUB_SHA}")"
-          ssh -i ~/.ssh/oracle_vwap \
-            -p "${ORACLE_PORT}" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            "${ORACLE_USER}@${ORACLE_HOST}" \
-            "${remote_env} bash -s" < scripts/deploy_oracle.sh
+            "${remote_archive}" "${ORACLE_DEPLOY_PATH}" "${GITHUB_SHA}")"
+          ssh -i ~/.ssh/oracle_vwap -p "${ORACLE_PORT}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "${ORACLE_USER}@${ORACLE_HOST}" "${remote_env} bash -s" < scripts/deploy_oracle.sh

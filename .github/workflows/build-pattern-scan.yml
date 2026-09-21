@@ -2,8 +2,8 @@ name: Build Offline Signals
 
 on:
   schedule:
-    # 18:00 Asia/Taipei = 10:00 UTC
-    - cron: "0 10 * * *"
+    # Backup trigger: 14:00 Asia/Taipei = 06:00 UTC, weekdays.
+    - cron: "0 6 * * 1-5"
   workflow_dispatch:
     inputs:
       date:
@@ -14,6 +14,11 @@ on:
         description: "Optional one-time init window in months, for example 3."
         required: false
         type: string
+      force:
+        description: "Rebuild even when the target date is already complete in TiDB."
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: offline-signals
@@ -54,7 +59,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
+      - name: Resolve target date
+        id: target
+        shell: bash
+        run: |
+          if [ -n "${TARGET_DATE:-}" ]; then
+            echo "date=${TARGET_DATE}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "date=$(TZ=Asia/Taipei date +%F)" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Check whether target is already complete
+        id: guard
+        if: ${{ inputs.init_months == '' && inputs.force != true }}
+        working-directory: backend
+        shell: bash
+        run: |
+          if python -m scripts.check_offline_signals_complete --date "${{ steps.target.outputs.date }}"; then
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+            echo "Target is already complete; this duplicate trigger will exit."
+          else
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Download market DB inputs
+        if: ${{ steps.guard.outputs.skip != 'true' }}
         working-directory: backend
         shell: bash
         run: |
@@ -73,6 +102,7 @@ jobs:
             --no-prune
 
       - name: Build and upload offline parquet
+        if: ${{ steps.guard.outputs.skip != 'true' }}
         working-directory: backend
         shell: bash
         run: |
@@ -107,10 +137,8 @@ jobs:
               python -m scripts.sync_chart_to_tidb --date "${TARGET_DATE}" --timeframe all
             fi
           else
-            TARGET="$(TZ=Asia/Taipei date +%F)"
+            TARGET="${{ steps.target.outputs.date }}"
             FROM_DATE="$(date -u -d "${TARGET} - 7 days" +%F)"
-            # Rebuild a short rolling window so a raw M1 shard that reaches HF
-            # after the prior evening's run cannot leave a permanent date gap.
             python -m scripts.build_pattern_scan --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload "${TIDB_ARGS[@]}"
             python -m scripts.build_vwap_activity --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload "${TIDB_ARGS[@]}"
             python -m scripts.build_vwap_signals --from-date "${FROM_DATE}" --to-date "${TARGET}" --upload "${TIDB_ARGS[@]}"
