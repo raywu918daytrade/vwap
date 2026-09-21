@@ -47,6 +47,18 @@ class ChartCacheTest(unittest.TestCase):
             self.assertEqual(chart_cache.current_session(root, '2330', '2026-09-21').close.tolist(), [1, 4, 5])
             self.assertIsNone(chart_cache.current_session(root, '9999', '2026-09-21'))
 
+    def test_timestamp_parquet_filters_to_one_trading_day(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            live = root / 'db/m1_live/2026-09-21.parquet'
+            live.parent.mkdir(parents=True)
+            data = pd.DataFrame([row('2330', '2026-09-20 09:00:00', 1),
+                                 row('2330', '2026-09-21 09:00:00', 2),
+                                 row('2330', '2026-09-22 00:00:00', 3)])
+            data['date'] = pd.to_datetime(data['date'])
+            data.to_parquet(live)
+            self.assertEqual(chart_cache.current_session(root, '2330', '2026-09-21').close.tolist(), [2])
+
     def test_concurrent_read_fills_once(self):
         from concurrent.futures import ThreadPoolExecutor
         calls = []

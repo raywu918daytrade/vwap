@@ -1,9 +1,11 @@
 """Small, file-versioned chart snapshots shared by D1 and M1 requests."""
 from collections import OrderedDict
 from pathlib import Path
+from datetime import datetime, timedelta
 import threading
 
 import pandas as pd
+import pyarrow as pa
 import pyarrow.dataset as ds
 
 _cache = OrderedDict()
@@ -51,7 +53,16 @@ def current_session(root: Path, stock_id: str, date: str):
 
     def read(path):
         dataset = ds.dataset(str(path), format="parquet")
-        table = dataset.to_table(filter=ds.field("stock_id") == str(stock_id))
+        start = datetime.fromisoformat(date)
+        end = start + timedelta(days=1)
+        date_type = dataset.schema.field("date").type
+        if pa.types.is_date(date_type):
+            start, end = start.date(), end.date()
+        elif not pa.types.is_timestamp(date_type):
+            start, end = start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S")
+        filt = ((ds.field("stock_id") == str(stock_id))
+                & (ds.field("date") >= start) & (ds.field("date") < end))
+        table = dataset.to_table(filter=filt)
         frame = table.to_pandas()
         frame["date"] = pd.to_datetime(frame["date"], format="mixed")
         return frame[frame["date"].dt.strftime("%Y-%m-%d") == date].reset_index(drop=True)
