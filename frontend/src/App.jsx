@@ -895,6 +895,7 @@ export default function App() {
   const vwapDateRef = useRef(vwapDate);
   const signalLoadSeqRef = useRef(0);
   const chartLoadSeqRef = useRef(0);
+  const chartRequestRef = useRef("");
   const idxCacheRef = useRef(new Map());
   const today = useMemo(() => taipeiTodayIso(), [clock]);
   const marketHours = useMemo(() => isTaipeiMarketHours(), [clock]);
@@ -1175,9 +1176,18 @@ export default function App() {
   useEffect(() => {
     if (isVwapChart && signalLoadedKey !== signalLoadKey) return undefined;
     if (selectedChartDate !== activeChartDate) return undefined;
+    const key = JSON.stringify([stockId, activeChartDate, activeChartTimeframe,
+      dayChartPatternType, dayChartLimit, activeChartPatternType, activeChartLimit,
+      rightChartVariant, reloadSeq]);
+    // Signal-table SSE updates toggle signalLoadedKey. They do not change the
+    // selected chart; only selection/date/options or a candle event reload it.
+    if (chartRequestRef.current === key) return undefined;
+    chartRequestRef.current = key;
     loadCharts();
     return undefined;
-  }, [activeChartDate, isVwapChart, loadCharts, reloadSeq, selectedChartDate, signalLoadedKey, signalLoadKey]);
+  }, [stockId, activeChartDate, activeChartTimeframe, dayChartPatternType, dayChartLimit,
+    activeChartPatternType, activeChartLimit, rightChartVariant, isVwapChart,
+    loadCharts, reloadSeq, selectedChartDate, signalLoadedKey, signalLoadKey]);
 
   useEffect(() => {
     let stopped = false;

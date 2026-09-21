@@ -101,6 +101,16 @@ PY
     fi
 
     docker compose -f "${compose_file}" ps
+    # Read-only resource evidence for post-deploy checks; never print env/args.
+    echo "Runtime resource snapshot:"
+    free -m || true
+    vmstat 1 3 || true
+    container_id="$(docker compose -f "${compose_file}" ps -q backend)"
+    if [ -n "${container_id}" ]; then
+      docker stats --no-stream --format 'cpu={{.CPUPerc}} memory={{.MemUsage}} pids={{.PIDs}}' "${container_id}" || true
+      docker inspect --format 'started={{.State.StartedAt}} restarts={{.RestartCount}} oom={{.State.OOMKilled}}' "${container_id}" || true
+      docker exec "${container_id}" sh -c 'for f in memory.events memory.swap.current cpu.stat; do echo "$f"; cat "/sys/fs/cgroup/$f" 2>/dev/null || true; done' || true
+    fi
     docker image prune -f >/dev/null || true
     exit 0
   fi
