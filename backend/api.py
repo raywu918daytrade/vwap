@@ -687,7 +687,7 @@ def vwap_sr_replay(date: str, universe: str = "daytrade"):
 def vwap_activity(date: Optional[str] = None, universe: str = "daytrade"):
     date_str = date or datetime.now(_TW).strftime("%Y-%m-%d")
     if date_str == _today_str():
-        return {"date": date_str, "stocks": _stored_activity_for_date(date_str, universe)}
+        return {"date": date_str, "stocks": _activity_metrics_for_date(date_str, universe)}
     from pattern.vwap_activity import metrics_for_date
 
     return {"date": date_str, "stocks": metrics_for_date(date_str, universe=universe)}
@@ -768,7 +768,7 @@ def vwap_signal_bundle(date: Optional[str] = None, universe: str = "daytrade", r
         "sr": sr_rows,
         "m1_bars": 0,
         "chg": chg_live,
-        "activity": _stored_activity_for_date(date_str, universe),
+        "activity": _activity_metrics_for_date(date_str, universe),
         "macd": macd_live,
         "obv": obv_live,
     }
