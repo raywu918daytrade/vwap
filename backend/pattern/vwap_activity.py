@@ -322,6 +322,8 @@ def metrics_for_date(date_str: str, universe: str = "daytrade") -> dict[str, dic
     key = (date_str, universe)
     today = datetime.now(_TW).strftime("%Y-%m-%d")
     with _lock:
+        if date_str == today and key in _cache:
+            return _cache[key]
         if not uses_on_demand_hf() and date_str != today and key in _cache:
             return _cache[key]
 
@@ -343,6 +345,9 @@ def metrics_for_date(date_str: str, universe: str = "daytrade") -> dict[str, dic
         return {}
 
     result = compute_activity_metrics(date_str, universe, low_memory_live=True)
+    if date_str == today and datetime.now(_TW).time() >= _ENTRY:
+        with _lock:
+            _cache[key] = result
     if not uses_on_demand_hf() and date_str != today:
         with _lock:
             _cache[key] = result

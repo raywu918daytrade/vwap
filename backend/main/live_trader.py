@@ -65,6 +65,7 @@ _builtins.print = _ts_print
 state = AppState()
 _startup_done = threading.Event()
 _last_vwap_catchup_date = ""
+_last_activity_warm_date = ""
 _prev_close_cache: dict[str, tuple[str, float]] = {}
 _prewarm_lock = threading.Lock()
 _prewarm_active = False
@@ -118,11 +119,12 @@ def _startup() -> None:
 
 def _clear_after_hf_sync() -> None:
     """Refresh in-process caches after HF updates local historical data."""
-    global _last_vwap_catchup_date
+    global _last_vwap_catchup_date, _last_activity_warm_date
     _startup_data.clear_market_query_caches()
     _clear_vwap_bundle_cache()
     _prev_close_cache.clear()
     _last_vwap_catchup_date = ""
+    _last_activity_warm_date = ""
 
 
 def _start_cache_prewarm(reason: str) -> None:
@@ -330,9 +332,31 @@ def _ensure_vwap_catchup_after_collector_backfill(date_str: str) -> None:
     try:
         _vwap_sr_catchup()
         _last_vwap_catchup_date = date_str
+        _start_live_activity_warmup(date_str)
     except Exception as exc:
         print(f"[VWAP catchup] 補齊失敗: {exc}", flush=True)
         _log_sys(f"VWAP catchup 補齊失敗: {exc}", "error")
+
+
+def _start_live_activity_warmup(date_str: str) -> None:
+    """Populate today's low-memory activity cache after M1 backfill persists."""
+    global _last_activity_warm_date
+    if _last_activity_warm_date == date_str:
+        return
+    _last_activity_warm_date = date_str
+
+    def run() -> None:
+        global _last_activity_warm_date
+        try:
+            from pattern.vwap_activity import metrics_for_date
+
+            rows = metrics_for_date(date_str, universe="daytrade")
+            _log_sys(f"盤中 activity 快取完成：{len(rows)} 支")
+        except Exception as exc:
+            _last_activity_warm_date = ""
+            _log_sys(f"盤中 activity 快取失敗: {type(exc).__name__}", "error")
+
+    threading.Thread(target=run, daemon=True, name="live-activity-warmup").start()
 
 
 def on_minute(minute_str: str, df: pd.DataFrame) -> None:
