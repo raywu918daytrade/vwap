@@ -105,7 +105,7 @@ def _open5_from_m1(date_str: str, stock_ids: set[str]) -> pd.DataFrame:
     return out
 
 
-def _load_m5_905(date_str: str, hist_start: str) -> pd.DataFrame:
+def _load_m5_905(date_str: str, hist_start: str, *, adjust_prices: bool = True) -> pd.DataFrame:
     """Read only each trading day's 09:05 M5 bar for activity PR.
 
     `load_m5_std(start_date=...)` materializes every 5-minute bar in the
@@ -116,8 +116,6 @@ def _load_m5_905(date_str: str, hist_start: str) -> pd.DataFrame:
     empty = pd.DataFrame(columns=[*columns, "day"])
     try:
         from data import raw_query
-        from data.query import _adjust_ohlc
-
         paths = raw_query._dataset_paths(_ROOT / "db/m5_std", hist_start, date_str)
         if not paths:
             return empty
@@ -132,7 +130,10 @@ def _load_m5_905(date_str: str, hist_start: str) -> pd.DataFrame:
         if table.num_rows == 0:
             return empty
         m5 = table.to_pandas()
-        m5 = _adjust_ohlc(m5, hist_start)
+        if adjust_prices:
+            from data.query import _adjust_ohlc
+
+            m5 = _adjust_ohlc(m5, hist_start)
     except Exception:
         from data.query import load_m5_std
 
@@ -154,6 +155,32 @@ def _load_m5_905(date_str: str, hist_start: str) -> pd.DataFrame:
         return empty
     m5["day"] = m5["date"].dt.strftime("%Y-%m-%d")
     return m5.drop_duplicates(["stock_id", "day"], keep="last").reset_index(drop=True)
+
+
+def _load_live_day_window(hist_start: str, date_str: str, stock_ids: set[str]) -> pd.DataFrame:
+    """Read only activity OHLC rows without the all-market adjustment join.
+
+    ``adjustment_day`` already stores adjusted OHLC.  Activity does not use its
+    volume column, so loading the separate volume adjustment table here only
+    creates a large memory spike on the 448 MB Oracle runtime.
+    """
+    from data import raw_query
+
+    paths = raw_query._dataset_paths(_ROOT / "db/adjustment_day", hist_start, date_str)
+    if not paths or not stock_ids:
+        return pd.DataFrame(columns=["stock_id", "date", "open", "high", "low", "close"])
+    filt = (
+        ds.field("stock_id").isin(sorted(stock_ids))
+        & (ds.field("date") >= hist_start)
+        & (ds.field("date") <= date_str)
+    )
+    table = ds.dataset(paths, format="parquet").to_table(
+        filter=filt,
+        columns=["stock_id", "date", "open", "high", "low", "close"],
+    )
+    if table.num_rows == 0:
+        return pd.DataFrame(columns=["stock_id", "date", "open", "high", "low", "close"])
+    return table.to_pandas()
 
 
 def _vol5_pr_map(
@@ -196,7 +223,9 @@ def _as_open_map(df: pd.DataFrame) -> pd.Series:
     return d.set_index("stock_id")["open"].astype(float)
 
 
-def compute_activity_metrics(date_str: str, universe: str = "full") -> dict[str, dict]:
+def compute_activity_metrics(
+    date_str: str, universe: str = "full", *, low_memory_live: bool = False
+) -> dict[str, dict]:
     """Compute activity metrics from historical inputs for offline jobs."""
     from data.adjustment_query import load_pattern_day
 
@@ -207,7 +236,11 @@ def compute_activity_metrics(date_str: str, universe: str = "full") -> dict[str,
 
     atr_asof = pd.Series(dtype=float)
     open_d = pd.Series(dtype=float)
-    day = load_pattern_day(start_date=hist_start, end_date=date_str)
+    day = (
+        _load_live_day_window(hist_start, date_str, stock_ids)
+        if low_memory_live
+        else load_pattern_day(start_date=hist_start, end_date=date_str)
+    )
     if not day.empty:
         day = day.copy()
         day["stock_id"] = day["stock_id"].astype(str)
@@ -225,7 +258,9 @@ def compute_activity_metrics(date_str: str, universe: str = "full") -> dict[str,
             if not today_day.empty:
                 open_d = _as_open_map(today_day)
 
-    m5_905 = _filter_stock_ids(_load_m5_905(date_str, hist_start), stock_ids)
+    m5_905 = _filter_stock_ids(
+        _load_m5_905(date_str, hist_start, adjust_prices=not low_memory_live), stock_ids
+    )
 
     extra = _open5_from_m1(date_str, stock_ids)
     today_m5 = m5_905[m5_905["day"] == date_str] if not m5_905.empty else m5_905
@@ -307,7 +342,7 @@ def metrics_for_date(date_str: str, universe: str = "daytrade") -> dict[str, dic
     if date_str == today and _is_weekend(date_str):
         return {}
 
-    result = compute_activity_metrics(date_str, universe)
+    result = compute_activity_metrics(date_str, universe, low_memory_live=True)
     if not uses_on_demand_hf() and date_str != today:
         with _lock:
             _cache[key] = result
