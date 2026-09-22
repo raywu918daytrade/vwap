@@ -538,14 +538,12 @@ def _activity_metrics_for_date(date_str: str, universe: str) -> dict:
     return metrics_for_date(date_str, universe=universe)
 
 
-def _live_activity_for_date(date_str: str, universe: str) -> dict:
-    """Use stored activity when available and calculate today's missing shard.
+def _stored_activity_for_date(date_str: str, universe: str) -> dict:
+    """Read GHA-produced activity data without runtime calculation."""
+    from pattern.activity_store import read_vwap_activity
+    from pattern.vwap_sr_scan import stock_ids_for_universe
 
-    The nightly workflow cannot produce today's activity until after the market
-    closes.  ``metrics_for_date`` is offline-first and only falls back to the
-    live M1/M5 inputs when today's stored rows are still missing.
-    """
-    return _activity_metrics_for_date(date_str, universe)
+    return read_vwap_activity(date_str, stock_ids=stock_ids_for_universe(universe)) or {}
 
 
 def _catchup_today_into_memory() -> tuple[list, list]:
@@ -689,7 +687,7 @@ def vwap_sr_replay(date: str, universe: str = "daytrade"):
 def vwap_activity(date: Optional[str] = None, universe: str = "daytrade"):
     date_str = date or datetime.now(_TW).strftime("%Y-%m-%d")
     if date_str == _today_str():
-        return {"date": date_str, "stocks": _live_activity_for_date(date_str, universe)}
+        return {"date": date_str, "stocks": _stored_activity_for_date(date_str, universe)}
     from pattern.vwap_activity import metrics_for_date
 
     return {"date": date_str, "stocks": metrics_for_date(date_str, universe=universe)}
@@ -770,7 +768,7 @@ def vwap_signal_bundle(date: Optional[str] = None, universe: str = "daytrade", r
         "sr": sr_rows,
         "m1_bars": 0,
         "chg": chg_live,
-        "activity": _live_activity_for_date(date_str, universe),
+        "activity": _stored_activity_for_date(date_str, universe),
         "macd": macd_live,
         "obv": obv_live,
     }
