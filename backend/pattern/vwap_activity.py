@@ -2,7 +2,7 @@
 
 三個數都是相對量，高低價股同一套門檻。日 ATR = 過去 14 個交易日 TR 平均
 （算到昨天）/ 今天開盤。
-量 PR = 今日 09:00–09:05 volume vs 自己過去 20 個交易日同一段。
+量 PR = 今日標準 09:05 M5（09:00–09:04）volume vs 自己過去 20 個交易日同一段。
 """
 
 from __future__ import annotations
@@ -75,7 +75,12 @@ def _filter_stock_ids(df: pd.DataFrame, stock_ids: set[str]) -> pd.DataFrame:
 
 
 def _open5_from_m1(date_str: str, stock_ids: set[str]) -> pd.DataFrame:
-    """盤中 m5_std 還沒今天 09:05 時，用 m1_live 09:01–09:05 合成一根。"""
+    """盤中 m5_std 還沒今天 09:05 時，用 m1_live 合成同口徑第一根 M5。
+
+    ``compute_m5_std`` 使用左閉右開的標準窗口；標記為 09:05 的 K 棒實際
+    覆蓋 09:00:00～09:04:59。這裡必須使用相同邊界，否則盤中會少算 09:00、
+    多算 09:05，造成量 PR 與盤後離線重算不同。
+    """
     from data.query import load_m1_live
 
     m1 = load_m1_live(date_str)
@@ -89,7 +94,7 @@ def _open5_from_m1(date_str: str, stock_ids: set[str]) -> pd.DataFrame:
         return empty
     m1["date"] = pd.to_datetime(m1["date"], format="mixed")
     t = m1["date"].dt.time
-    m1 = m1[(t >= dtime(9, 1)) & (t <= _ENTRY)]
+    m1 = m1[(t >= dtime(9, 0)) & (t < _ENTRY)]
     if m1.empty:
         return empty
     g = m1.sort_values("date").groupby("stock_id", sort=False)
