@@ -51,6 +51,7 @@ from data.m1_utils import _atomic_save, _parse_rest_bars
 from data.query import load_m1_live
 from fubon import fubon_api as trade_api
 from fubon.subscribe_list import load_subscribe_batches
+from main.hf_live_m1 import enqueue_live_m1_upload
 
 try:
     from api import append_system_log as _log_sys, set_collector_coverage
@@ -229,6 +230,8 @@ class FubonM1Collector:
         # later succeeds for the rest of the session.
         try:
             self._flush()
+            now_tw = datetime.now(_TW)
+            enqueue_live_m1_upload(_live_path(now_tw.strftime("%Y-%m-%d")), now_tw.strftime("%Y-%m-%d %H:%M"))
         except Exception as exc:
             print(f"[flush] 斷線收尾存檔失敗: {exc}", flush=True)
             _log_sys(f"富邦斷線收尾存檔失敗: {exc}", "error")
@@ -480,6 +483,7 @@ class FubonM1Collector:
                 pass
 
             self._flush()  # 先把 buffer 存檔，確保等一下讀到的是最新資料
+            enqueue_live_m1_upload(_live_path(target_minute_str[:10]), target_minute_str[:16])
             self._tick_once()
 
     def _tick_once(self):

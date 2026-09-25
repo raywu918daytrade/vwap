@@ -212,8 +212,14 @@ nano backend/.env
 - `FUBON_CERT_PASS`
 - `HF_REPO_ID`
 - `HF_TOKEN`
+- `HF_LIVE_M1_UPLOAD`：盤中每分鐘將當日完整 `db/m1_live/YYYY-MM-DD.parquet`
+  上傳到 HF；預設啟用。
+- `HF_LIVE_M1_RETRY_SECONDS`：盤中 M1 上傳失敗後的重試秒數，預設 30 秒。
 - `TIDB_DAY_TRADE_DATABASE_URL`：可選；設定後 Oracle runtime 會優先讀 TiDB，
   讀離線結果與歷史圖表 K 線，未命中或連線失敗時退回 HF/local parquet。
+
+即時檔只寫入 HF 的 `db/m1_live/`。GHA 維護的歷史月檔位於 `db/m1/`，
+盤中上傳不會修改或覆蓋歷史 M1。
 
 `FUBON_CERT_B64` 在本機可這樣產生，再貼到雲端 `.env`：
 
