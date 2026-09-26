@@ -527,7 +527,7 @@ function nextShowAllSort(showAll, currentSort) {
   return currentSort;
 }
 
-function ChartIndicatorControls({ value, onChange }) {
+function ChartIndicatorControls({ value, onChange, loading = false }) {
   return (
     <div className="join" data-tour="chart-indicators">
       {[
@@ -539,10 +539,11 @@ function ChartIndicatorControls({ value, onChange }) {
           key={mode}
           type="button"
           title={title}
+          aria-label={label}
           className={`btn btn-xs join-item rounded-none ${value === mode ? "btn-primary" : ""}`}
           onClick={() => onChange(mode)}
         >
-          {label}
+          {loading && value === mode && mode !== "idx" ? <span className="loading loading-spinner loading-xs" /> : label}
         </button>
       ))}
     </div>
@@ -896,7 +897,10 @@ export default function App() {
   const signalLoadSeqRef = useRef(0);
   const chartLoadSeqRef = useRef(0);
   const chartRequestRef = useRef("");
+  const indicatorLoadSeqRef = useRef(0);
   const idxCacheRef = useRef(new Map());
+  const indicatorCacheRef = useRef(new Map());
+  const [loadingIndicator, setLoadingIndicator] = useState(false);
   const today = useMemo(() => taipeiTodayIso(), [clock]);
   const marketHours = useMemo(() => isTaipeiMarketHours(), [clock]);
   const stockName = dayData?.stock_name || intradayData?.stock_name || "";
@@ -984,16 +988,6 @@ export default function App() {
     const hasPatternOverlay = dayChartPatternType !== "none";
     const chartForceLive = hasPatternOverlay && activeChartDate ? false : forceLive;
 
-    const indicatorParams = new URLSearchParams({ stock_id: sid, universe });
-    if (activeChartDate) indicatorParams.set("date", activeChartDate);
-    const indicatorPromise = fetchJson(`/vwap_signal/indicators?${indicatorParams.toString()}`)
-      .then((result) => {
-        if (!isCurrent()) return;
-        if (result.macd) setMacdMap((current) => ({ ...current, [sid]: result.macd }));
-        if (result.obv) setObvMap((current) => ({ ...current, [sid]: result.obv }));
-      })
-      .catch(() => undefined);
-
     const dayPromise = fetchJson(
       patternDetailPath(sid, {
         patternType: dayChartPatternType,
@@ -1033,7 +1027,7 @@ export default function App() {
       })
       .finally(() => { if (isCurrent()) setLoadingIntraday(false); });
 
-    await Promise.allSettled([indicatorPromise, dayPromise, intradayPromise]);
+    await Promise.allSettled([dayPromise, intradayPromise]);
   }, [
     activeChartLabel,
     activeChartLimit,
@@ -1048,6 +1042,51 @@ export default function App() {
     today,
     universe,
   ]);
+
+  useEffect(() => {
+    if (!chartSelectionReady || rightChartVariant !== "intraday" || chartIndicatorMode === "idx") {
+      indicatorLoadSeqRef.current += 1;
+      setLoadingIndicator(false);
+      return undefined;
+    }
+
+    const sid = stockId.trim();
+    if (!sid) return undefined;
+    const cacheKey = `${activeChartDate || "today"}:${universe}:${sid}`;
+    const cachedEntry = indicatorCacheRef.current.get(cacheKey);
+    if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
+      const cached = cachedEntry.value;
+      if (cached.macd) setMacdMap((current) => ({ ...current, [sid]: cached.macd }));
+      if (cached.obv) setObvMap((current) => ({ ...current, [sid]: cached.obv }));
+      setLoadingIndicator(false);
+      return undefined;
+    }
+    indicatorCacheRef.current.delete(cacheKey);
+
+    const requestId = indicatorLoadSeqRef.current + 1;
+    indicatorLoadSeqRef.current = requestId;
+    setLoadingIndicator(true);
+    const params = new URLSearchParams({ stock_id: sid, universe });
+    if (activeChartDate) params.set("date", activeChartDate);
+    fetchJson(`/vwap_signal/indicators?${params.toString()}`)
+      .then((result) => {
+        if (requestId !== indicatorLoadSeqRef.current) return;
+        const isHistorical = activeChartDate && activeChartDate !== today;
+        indicatorCacheRef.current.set(cacheKey, {
+          value: result,
+          expiresAt: isHistorical ? Number.POSITIVE_INFINITY : Date.now() + 3000,
+        });
+        if (result.macd) setMacdMap((current) => ({ ...current, [sid]: result.macd }));
+        if (result.obv) setObvMap((current) => ({ ...current, [sid]: result.obv }));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (requestId === indicatorLoadSeqRef.current) setLoadingIndicator(false);
+      });
+    return () => {
+      if (requestId === indicatorLoadSeqRef.current) indicatorLoadSeqRef.current += 1;
+    };
+  }, [activeChartDate, chartIndicatorMode, chartSelectionReady, rightChartVariant, stockId, today, universe]);
 
   const loadDateIndex = useCallback(async () => {
     if (rightChartVariant !== "intraday" || chartIndicatorMode !== "idx") {
@@ -1858,7 +1897,7 @@ export default function App() {
 
           <div className="min-h-[360px] sm:min-h-[440px] lg:min-h-0">
             <div className="h-full" data-tour="intraday-chart">
-            <ChartPanel title={rightChartTitle} loading={loadingIntraday} error={intradayError} actions={<><ChartIndicatorControls value={chartIndicatorMode} onChange={setChartIndicatorMode} /><PriceChange summary={rightSummary} /></>}>
+            <ChartPanel title={rightChartTitle} loading={loadingIntraday} error={intradayError} actions={<><ChartIndicatorControls value={chartIndicatorMode} onChange={setChartIndicatorMode} loading={loadingIndicator} /><PriceChange summary={rightSummary} /></>}>
               <div className="h-full min-h-0"><TradingViewChart data={intradayData} dayLevels={dayData} extraSr={extraSr} idxData={idxData} variant={rightChartVariant} timeframe={activeChartTimeframe} emptyMessage={chartSelectionReady ? `尚無${activeChartLabel}資料` : "請從上方清單選擇股票"} showIndicatorPane={showIndicatorPane} daySrMode="horizontal" indicatorMode={chartIndicatorMode} indicatorStockId={stockId} indicatorEventTime={indicatorEventTime} macdMap={macdMap} obvMap={obvMap} /></div>
             </ChartPanel>
             </div>

@@ -24,7 +24,9 @@ export function apiUrl(path) {
 function cacheableRequest(path, options) {
   const method = String(options?.method || "GET").toUpperCase();
   if (method !== "GET" || options?.body) return false;
-  return path.startsWith("/api/pattern/") || path.startsWith("/vwap_signal/bundle");
+  return path.startsWith("/api/pattern/")
+    || path.startsWith("/vwap_signal/bundle")
+    || path.startsWith("/vwap_signal/indicators");
 }
 
 function requestTtl(path) {
