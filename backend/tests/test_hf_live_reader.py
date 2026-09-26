@@ -123,6 +123,33 @@ class HfLiveReaderTest(unittest.TestCase):
         self.assertEqual(result["date"].tolist(), ["2026-09-26 09:01:00", "2026-09-26 09:02:00"])
         self.assertEqual(download.call_count, 4)
 
+    def test_downloads_matching_signal_snapshot(self):
+        manifest = self.root / "live.json"
+        manifest.write_text(json.dumps({
+            "trading_date": "2026-09-26",
+            "latest_minute": "2026-09-26 09:01:00",
+            "files": {
+                "m1_live": "db/m1_live/2026-09-26.parquet",
+                "signal_live": "db/signal_live/2026-09-26.json",
+            },
+        }))
+        m1 = self.root / "source.parquet"
+        m1.write_bytes(b"parquet-data")
+        signal = self.root / "signal.json"
+        signal.write_text(json.dumps({
+            "trading_date": "2026-09-26",
+            "latest_minute": "2026-09-26 09:01:00",
+            "vwap": [],
+        }))
+        with (
+            patch.object(hf_live_reader, "_ROOT", self.root),
+            patch.dict(os.environ, {"HF_REPO_ID": "owner/data", "HF_TOKEN": "token"}),
+            patch("huggingface_hub.hf_hub_download", side_effect=[str(manifest), str(m1), str(signal)]),
+        ):
+            self.assertEqual(hf_live_reader.refresh_live_m1("2026-09-26"), (True, True))
+            payload = hf_live_reader.read_live_signals("2026-09-26")
+        self.assertEqual(payload["latest_minute"], "2026-09-26 09:01:00")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,6 +46,27 @@ def _replace_snapshot(source: str, target: Path) -> None:
     os.replace(temporary, target)
 
 
+def _replace_json(source: str, target: Path) -> None:
+    payload = json.loads(Path(source).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("live signal snapshot must be an object")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    os.replace(temporary, target)
+
+
+def read_live_signals(date_str: str) -> dict | None:
+    path = _ROOT / f"db/signal_live/{str(date_str)[:10]}.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if payload.get("trading_date") != str(date_str)[:10]:
+        return None
+    return payload
+
+
 def _merge_delta(source: str, target: Path) -> None:
     current = pd.read_parquet(target)
     delta = pd.read_parquet(source)
@@ -134,6 +155,17 @@ def refresh_live_m1(date_str: str) -> tuple[bool, bool]:
                 downloaded = hf_hub_download(filename=relative_path, **download_args)
                 _replace_snapshot(downloaded, target)
                 apply_mode = "snapshot"
+            signal_path = manifest.get("files", {}).get("signal_live")
+            if isinstance(signal_path, str) and signal_path == f"db/signal_live/{date_str}.json":
+                try:
+                    signal_source = hf_hub_download(filename=signal_path, **download_args)
+                    signal_target = _ROOT / signal_path
+                    _replace_json(signal_source, signal_target)
+                    signal_payload = read_live_signals(date_str)
+                    if not signal_payload or signal_payload.get("latest_minute") != manifest_key:
+                        raise ValueError("live signal minute does not match manifest")
+                except Exception as exc:
+                    print(f"[HF live] signal snapshot failed; keeping prior snapshot: {type(exc).__name__}: {exc}", flush=True)
             _LAST_MANIFEST_KEY[relative_path] = manifest_key
             _STATUS.update(
                 applied_at=datetime.now().astimezone().isoformat(timespec="seconds"),

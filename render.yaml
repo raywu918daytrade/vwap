@@ -31,6 +31,10 @@ services:
         value: "4"
       - key: HF_LIVE_REFRESH_SECONDS
         value: "60"
+      - key: HF_LIVE_SIGNALS_SOURCE
+        value: oracle
+      - key: RENDER_RSS_GUARD_MB
+        value: "430"
       - key: OMP_NUM_THREADS
         value: "1"
       - key: OPENBLAS_NUM_THREADS

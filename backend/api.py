@@ -32,7 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from main.runtime_profile import uses_on_demand_hf
+from main.runtime_profile import is_render_reader, uses_on_demand_hf
 
 _TW = timezone(timedelta(hours=8))
 _BUILD_VERSION_PATH = Path(__file__).parent / "BUILD_VERSION"
@@ -158,6 +158,7 @@ _sr_vwap_cross_signals: list[dict] = []
 _vwap_macd_live: dict | None = None
 _vwap_obv_live: dict | None = None
 _vwap_chg: dict[str, float] = {}
+_vwap_activity_live: dict[str, dict] = {}
 
 _system_logs: deque = deque(maxlen=500)
 _LOG_DIR = Path(__file__).parent / "logs"
@@ -290,7 +291,7 @@ def clear_vwap_bundle_cache() -> None:
 
 
 def _reset_if_new_day() -> None:
-    global _today_date, _vwap_macd_live, _vwap_obv_live, _vwap_chg
+    global _today_date, _vwap_macd_live, _vwap_obv_live, _vwap_chg, _vwap_activity_live
     today = datetime.now(_TW).date()
     if _today_date == today:
         return
@@ -301,6 +302,26 @@ def _reset_if_new_day() -> None:
     _vwap_macd_live = None
     _vwap_obv_live = None
     _vwap_chg = {}
+    _vwap_activity_live = {}
+
+
+def replace_live_signals(payload: dict) -> bool:
+    """Atomically replace today's live state with Oracle's HF snapshot."""
+    global _vwap_macd_live, _vwap_obv_live, _vwap_chg, _vwap_activity_live
+    if not isinstance(payload, dict) or payload.get("trading_date") != _today_str():
+        return False
+    with _lock:
+        _reset_if_new_day()
+        _vwap_breakout_signals.clear()
+        _vwap_breakout_signals.extend(payload.get("vwap") or [])
+        _sr_vwap_cross_signals.clear()
+        _sr_vwap_cross_signals.extend(payload.get("sr") or [])
+        _vwap_macd_live = dict(payload.get("macd") or {})
+        _vwap_obv_live = dict(payload.get("obv") or {})
+        _vwap_chg = {str(key): float(value) for key, value in (payload.get("chg") or {}).items()}
+        _vwap_activity_live = dict(payload.get("activity") or {})
+    _sync_live_vwap_sr_sets(_vwap_breakout_signals, _sr_vwap_cross_signals)
+    return True
 
 
 def _log_ts() -> str:
@@ -569,6 +590,14 @@ def _stored_activity_for_date(date_str: str, universe: str) -> dict:
 def _catchup_today_into_memory() -> tuple[list, list]:
     global _vwap_macd_live, _vwap_obv_live, _vwap_chg
     today = datetime.now(_TW).strftime("%Y-%m-%d")
+    if is_render_reader():
+        from main.hf_live_reader import read_live_signals
+
+        payload = read_live_signals(today)
+        if payload:
+            replace_live_signals(payload)
+        with _lock:
+            return list(reversed(_vwap_breakout_signals)), list(reversed(_sr_vwap_cross_signals))
     from pattern.vwap_macd_div import metrics_for_date as macd_metrics
     from pattern.vwap_obv_div import metrics_for_date as obv_metrics
     from pattern.vwap_sr_scan import last_chg_map, scan_date
@@ -658,8 +687,9 @@ def vwap_breakout_today(date: Optional[str] = None, universe: str = "daytrade"):
     if date:
         if str(date)[:10] != _today_str():
             return _historical_vwap_bundle(str(date)[:10], universe=universe)["vwap"]
-        vwap, _ = _scan_vwap_sr(date, universe=universe)
-        return vwap
+        if not is_render_reader():
+            vwap, _ = _scan_vwap_sr(date, universe=universe)
+            return vwap
     with _lock:
         return list(reversed(_vwap_breakout_signals))
 
@@ -669,8 +699,9 @@ def sr_vwap_cross_today(date: Optional[str] = None, universe: str = "daytrade"):
     if date:
         if str(date)[:10] != _today_str():
             return _historical_vwap_bundle(str(date)[:10], universe=universe)["sr"]
-        _, sr = _scan_vwap_sr(date, universe=universe)
-        return sr
+        if not is_render_reader():
+            _, sr = _scan_vwap_sr(date, universe=universe)
+            return sr
     with _lock:
         return list(reversed(_sr_vwap_cross_signals))
 
@@ -695,19 +726,27 @@ def vwap_sr_replay(date: str, universe: str = "daytrade"):
             "chg": bundle["chg"],
         }
 
+    if is_render_reader():
+        with _lock:
+            return {
+                "vwap": list(reversed(_vwap_breakout_signals)),
+                "sr": list(reversed(_sr_vwap_cross_signals)),
+                "m1_bars": 0,
+                "chg": dict(_vwap_chg),
+            }
     vwap, sr = _scan_vwap_sr(date, universe=universe)
-    return {
-        "vwap": vwap,
-        "sr": sr,
-        "m1_bars": last_m1_bars(date_str, universe),
-        "chg": last_chg_map(date_str, universe=universe),
-    }
+    return {"vwap": vwap, "sr": sr, "m1_bars": last_m1_bars(date_str, universe), "chg": last_chg_map(date_str, universe=universe)}
 
 
 @app.get("/vwap_activity", tags=["VWAP"], summary="VWAP 篩選用活動度資料")
 def vwap_activity(date: Optional[str] = None, universe: str = "daytrade"):
     date_str = date or datetime.now(_TW).strftime("%Y-%m-%d")
     if date_str == _today_str():
+        with _lock:
+            if _vwap_activity_live:
+                return {"date": date_str, "stocks": dict(_vwap_activity_live)}
+        if is_render_reader():
+            return {"date": date_str, "stocks": {}}
         return {"date": date_str, "stocks": _activity_metrics_for_date(date_str, universe)}
     from pattern.vwap_activity import metrics_for_date
 
@@ -785,6 +824,7 @@ def vwap_signal_bundle(
         macd_live = dict(_vwap_macd_live or {})
         obv_live = dict(_vwap_obv_live or {})
         chg_live = dict(_vwap_chg)
+        activity_live = dict(_vwap_activity_live)
 
     if not repeat:
         vwap_rows = _latest_signal_by_stock(vwap_rows)
@@ -794,7 +834,7 @@ def vwap_signal_bundle(
         "sr": sr_rows,
         "m1_bars": 0,
         "chg": chg_live,
-        "activity": _activity_metrics_for_date(date_str, universe),
+        "activity": activity_live or ({} if is_render_reader() else _activity_metrics_for_date(date_str, universe)),
         "macd": _compact_indicator_map(macd_live) if compact else macd_live,
         "obv": _compact_indicator_map(obv_live) if compact else obv_live,
     }
