@@ -17,10 +17,10 @@ function coverageText(coverage) {
   return `${arrived}/${total} (${((arrived / total) * 100).toFixed(1)}%)`;
 }
 
-function directionText(event) {
-  if (event.direction === "up") return "突破";
-  if (event.direction === "down") return "跌破";
-  return event.direction || event.sr_kind || "-";
+function statusClass(status) {
+  if (/異常|延遲|等待資料/.test(status || "")) return "text-error";
+  if (/尚無/.test(status || "")) return "text-warning";
+  return "text-success";
 }
 
 export default function DiagnosticsPanel() {
@@ -35,7 +35,7 @@ export default function DiagnosticsPanel() {
       setData(await fetchJson("/api/diagnostics/live"));
       setError("");
     } catch (requestError) {
-      setError(requestError.message || "診斷資料載入失敗");
+      setError(requestError.message || "報價監控資料載入失敗");
     } finally {
       setLoading(false);
     }
@@ -48,10 +48,10 @@ export default function DiagnosticsPanel() {
     return () => window.clearInterval(timer);
   }, [open, refresh]);
 
-  const health = data?.health || {};
-  const m1 = data?.m1 || {};
-  const signals = data?.signals || {};
-  const quote = m1.quote_0050 || {};
+  const pipeline = data?.pipeline || {};
+  const quote = data?.quote || {};
+  const consumer = data?.consumer || {};
+  const render = data?.render || {};
 
   return (
     <>
@@ -60,91 +60,58 @@ export default function DiagnosticsPanel() {
         className={`btn btn-sm fixed bottom-3 right-3 z-[60] rounded shadow-lg ${data?.ok ? "btn-success" : "btn-primary"}`}
         onClick={() => setOpen(true)}
       >
-        診斷
+        報價監控
       </button>
       {open ? (
         <>
-          <button type="button" className="fixed inset-0 z-[70] bg-black/45" aria-label="關閉診斷" onClick={() => setOpen(false)} />
-          <aside className="fixed right-0 top-0 z-[80] flex h-dvh w-[min(520px,100vw)] flex-col border-l border-base-300 bg-base-100 shadow-2xl">
+          <button type="button" className="fixed inset-0 z-[70] bg-black/45" aria-label="關閉報價監控" onClick={() => setOpen(false)} />
+          <aside className="fixed right-0 top-0 z-[80] flex h-dvh w-[min(480px,100vw)] flex-col border-l border-base-300 bg-base-100 shadow-2xl">
             <header className="flex min-h-12 items-center justify-between border-b border-base-300 bg-base-200 px-3">
               <div>
-                <span className="font-semibold text-primary">Oracle 盤中診斷</span>
+                <span className="font-semibold text-primary">報價資料流監控</span>
                 <span className={`ml-2 badge badge-sm ${data?.ok ? "badge-success" : "badge-error"}`}>
-                  {data?.ok ? "正常" : "異常／檢查中"}
+                  {data?.ok ? value(data?.phase) : "需要檢查"}
                 </span>
               </div>
               <div className="flex gap-2">
                 <button type="button" className="btn btn-xs rounded" onClick={refresh} disabled={loading}>更新</button>
-                <button type="button" className="btn btn-ghost btn-square btn-xs rounded" onClick={() => setOpen(false)}>×</button>
+                <button type="button" className="btn btn-ghost btn-square btn-xs rounded" aria-label="關閉" onClick={() => setOpen(false)}>×</button>
               </div>
             </header>
             <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3 text-xs">
               {error ? <div className="alert alert-error py-2">{error}</div> : null}
-              <div className="text-base-content/55">報告時間：{clock(data?.generated_at)}　版本：{value(health.version)}</div>
+              <div className="text-base-content/55">報告時間：{clock(data?.generated_at)}　版本：{value(render.version)}</div>
 
               <section className="rounded border border-base-300">
-                <h2 className="border-b border-base-300 bg-base-200 px-3 py-2 font-semibold">服務與資料流</h2>
+                <h2 className="border-b border-base-300 bg-base-200 px-3 py-2 font-semibold">Oracle → HF → Render</h2>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-2 p-3">
-                  <span>API</span><span>{value(health.status)}</span>
-                  <span>Collector</span><span>{value(health.collector)}／{value(health.message)}</span>
-                  <span>SSE clients</span><span>{value(health.sse_clients)}</span>
-                  <span>分鐘涵蓋率</span><span>{coverageText(health.coverage)}</span>
-                  <span>錯誤累計</span><span>{value(data?.operations?.error_count)}</span>
+                  <span>Oracle 收報價</span><span className={statusClass(pipeline.oracle)}>{value(pipeline.oracle)}</span>
+                  <span>HF 發布資料</span><span className={statusClass(pipeline.hf)}>{value(pipeline.hf)}</span>
+                  <span>Render 看盤</span><span className={statusClass(pipeline.render)}>{value(pipeline.render)}</span>
                 </div>
               </section>
 
               <section className="rounded border border-base-300">
-                <h2 className="border-b border-base-300 bg-base-200 px-3 py-2 font-semibold">當日 M1 報價</h2>
+                <h2 className="border-b border-base-300 bg-base-200 px-3 py-2 font-semibold">最新 M1 發布</h2>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-2 p-3">
-                  <span>第一分鐘</span><span>{clock(m1.first_minute)}</span>
-                  <span>最新分鐘</span><span>{clock(m1.latest_minute)}</span>
-                  <span>延遲</span><span className={m1.freshness_ok ? "text-success" : "text-error"}>{value(m1.latest_delay_seconds)} 秒</span>
-                  <span>資料筆數／股票數</span><span>{value(m1.rows)}／{value(m1.stocks)}</span>
-                  <span>分鐘數</span><span>{value(m1.minutes)}</span>
-                  <span>最新分鐘股票數</span><span>{value(m1.latest_minute_stocks)}</span>
-                  <span>完全缺少分鐘數</span><span className={m1.missing_market_minutes_count ? "text-warning" : "text-success"}>{value(m1.missing_market_minutes_count)}</span>
+                  <span>交易日</span><span>{value(quote.trading_date)}</span>
+                  <span>最新分鐘</span><span>{clock(quote.latest_minute)}</span>
+                  <span>發布時間</span><span>{clock(quote.published_at)}</span>
+                  <span>盤中延遲</span><span className={quote.fresh ? "text-success" : data?.phase === "盤中" ? "text-error" : ""}>{data?.phase === "盤中" ? `${value(quote.delay_seconds)} 秒` : "不適用"}</span>
+                  <span>分鐘涵蓋率</span><span>{coverageText(quote.coverage)}</span>
+                  <span>本次差異筆數</span><span>{value(quote.delta?.rows)}</span>
                 </div>
               </section>
 
               <section className="rounded border border-base-300">
-                <h2 className="border-b border-base-300 bg-base-200 px-3 py-2 font-semibold">0050 最新報價</h2>
-                <div className="grid grid-cols-3 gap-2 p-3 text-center">
-                  <div><div className="text-base-content/45">時間</div>{clock(quote._minute)}</div>
-                  <div><div className="text-base-content/45">收</div>{value(quote.close)}</div>
-                  <div><div className="text-base-content/45">量</div>{value(quote.volume)}</div>
-                  <div><div className="text-base-content/45">開</div>{value(quote.open)}</div>
-                  <div><div className="text-base-content/45">高</div>{value(quote.high)}</div>
-                  <div><div className="text-base-content/45">低</div>{value(quote.low)}</div>
-                </div>
-              </section>
-
-              <section className="rounded border border-base-300">
-                <h2 className="border-b border-base-300 bg-base-200 px-3 py-2 font-semibold">
-                  VWAP／SR 訊號（{value(signals.vwap_count)}／{value(signals.sr_count)}）
-                </h2>
-                <div className="overflow-auto">
-                  <table className="table table-xs min-w-max">
-                    <thead><tr><th>時間</th><th>類型</th><th>股票</th><th>判斷</th><th>價／VWAP</th></tr></thead>
-                    <tbody>
-                      {(signals.latest_events || []).slice().reverse().map((event, index) => (
-                        <tr key={`${event.kind}-${event.stock_id}-${event.time}-${index}`}>
-                          <td>{value(event.time)}</td><td>{value(event.kind)}</td>
-                          <td>{event.stock_id} {event.name}</td><td>{directionText(event)}</td>
-                          <td>{value(event.price)}／{value(event.vwap)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              <section className="rounded border border-base-300">
-                <h2 className="border-b border-base-300 bg-base-200 px-3 py-2 font-semibold">安全運作紀錄</h2>
-                <div className="space-y-1 p-3 font-mono">
-                  {(data?.operations?.safe_logs || []).map((row, index) => (
-                    <div key={`${row.time}-${index}`}>{clock(row.time)}　{row.msg}</div>
-                  ))}
-                  {!(data?.operations?.safe_logs || []).length ? <div className="text-base-content/45">目前沒有可公開的運作紀錄</div> : null}
+                <h2 className="border-b border-base-300 bg-base-200 px-3 py-2 font-semibold">Render 消費狀態</h2>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2 p-3">
+                  <span>最後檢查 HF</span><span>{clock(consumer.checked_at)}</span>
+                  <span>最後套用</span><span>{clock(consumer.applied_at)}</span>
+                  <span>套用方式</span><span>{consumer.apply_mode === "delta" ? "分鐘差異" : consumer.apply_mode === "snapshot" ? "完整快照" : value(consumer.apply_mode)}</span>
+                  <span>同步錯誤</span><span className={consumer.error && data?.phase === "盤中" ? "text-error" : "text-success"}>{consumer.error ? (data?.phase === "盤中" ? consumer.error : "非交易時段不影響") : "無"}</span>
+                  <span>API</span><span>{value(render.status)}</span>
+                  <span>SSE clients</span><span>{value(render.sse_clients)}</span>
                 </div>
               </section>
             </div>

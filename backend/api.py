@@ -208,8 +208,23 @@ def _vwap_bundle_source_version(date_str: str) -> str:
     return "|".join(f"{p.name}:{_mtime_token(p)}" for p in paths)
 
 
-def _vwap_bundle_cache_key(date_str: str, universe: str, repeat: bool) -> tuple:
-    return (date_str, universe or "daytrade", bool(repeat), _vwap_bundle_source_version(date_str))
+def _vwap_bundle_cache_key(date_str: str, universe: str, repeat: bool, compact: bool = False) -> tuple:
+    return (date_str, universe or "daytrade", bool(repeat), bool(compact), _vwap_bundle_source_version(date_str))
+
+
+def _compact_indicator_map(values: dict) -> dict:
+    """Keep list-view fields; chart overlays fetch one stock on demand."""
+    compacted = {}
+    for stock_id, record in (values or {}).items():
+        events = record.get("events", []) if isinstance(record, dict) else []
+        rows = [
+            {key: event[key] for key in ("kind", "time", "until") if event.get(key) is not None}
+            for event in events
+            if isinstance(event, dict)
+        ]
+        if rows:
+            compacted[str(stock_id)] = {"events": rows}
+    return compacted
 
 
 def _vwap_bundle_disk_cache_path(cache_key: tuple) -> Path:
@@ -728,7 +743,12 @@ def vwap_obv_div(date: Optional[str] = None, universe: str = "daytrade"):
 
 
 @app.get("/vwap_signal/bundle", tags=["VWAP"], summary="盤中訊號整包讀取")
-def vwap_signal_bundle(date: Optional[str] = None, universe: str = "daytrade", repeat: bool = False):
+def vwap_signal_bundle(
+    date: Optional[str] = None,
+    universe: str = "daytrade",
+    repeat: bool = False,
+    compact: bool = False,
+):
     """Return the dashboard's historical signal inputs with one parquet read.
 
     The refresh path used to fire VWAP/SR, activity, MACD, and OBV as separate
@@ -739,7 +759,7 @@ def vwap_signal_bundle(date: Optional[str] = None, universe: str = "daytrade", r
     date_str = (date or _today_str())[:10]
     today = _today_str()
     if date_str != today:
-        cache_key = _vwap_bundle_cache_key(date_str, universe, repeat)
+        cache_key = _vwap_bundle_cache_key(date_str, universe, repeat, compact)
         cached = _read_vwap_bundle_cache(cache_key)
         if cached is not None:
             return cached
@@ -752,8 +772,8 @@ def vwap_signal_bundle(date: Optional[str] = None, universe: str = "daytrade", r
             "m1_bars": bundle["m1_bars"],
             "chg": bundle["chg"],
             "activity": _activity_metrics_for_date(date_str, universe),
-            "macd": bundle["macd"],
-            "obv": bundle["obv"],
+            "macd": _compact_indicator_map(bundle["macd"]) if compact else bundle["macd"],
+            "obv": _compact_indicator_map(bundle["obv"]) if compact else bundle["obv"],
         }
         _remember_vwap_bundle_cache(cache_key, result)
         _write_vwap_bundle_disk_cache(cache_key, result)
@@ -775,8 +795,29 @@ def vwap_signal_bundle(date: Optional[str] = None, universe: str = "daytrade", r
         "m1_bars": 0,
         "chg": chg_live,
         "activity": _activity_metrics_for_date(date_str, universe),
-        "macd": macd_live,
-        "obv": obv_live,
+        "macd": _compact_indicator_map(macd_live) if compact else macd_live,
+        "obv": _compact_indicator_map(obv_live) if compact else obv_live,
+    }
+
+
+@app.get("/vwap_signal/indicators", tags=["VWAP"], summary="取得單一股票完整盤中指標")
+def vwap_signal_indicators(stock_id: str, date: Optional[str] = None, universe: str = "daytrade"):
+    date_str = (date or _today_str())[:10]
+    sid = str(stock_id)
+    if date_str == _today_str():
+        with _lock:
+            return {
+                "date": date_str,
+                "stock_id": sid,
+                "macd": dict(_vwap_macd_live or {}).get(sid),
+                "obv": dict(_vwap_obv_live or {}).get(sid),
+            }
+    bundle = _historical_vwap_bundle(date_str, universe=universe)
+    return {
+        "date": date_str,
+        "stock_id": sid,
+        "macd": bundle["macd"].get(sid),
+        "obv": bundle["obv"].get(sid),
     }
 
 

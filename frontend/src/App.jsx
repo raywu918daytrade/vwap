@@ -910,6 +910,7 @@ export default function App() {
   const activeChartPatternType = "none";
   const activeChartLimit = 120;
   const activeChartDate = vwapDate;
+  const chartSelectionReady = selectedChartDate === activeChartDate;
   const activeChartLabel = TIMEFRAME_LABEL[activeChartTimeframe] || activeChartTimeframe;
   const rightChartVariant = activeChartTimeframe === "day" ? "day" : "intraday";
   const showIndicatorPane = rightChartVariant === "intraday";
@@ -983,6 +984,16 @@ export default function App() {
     const hasPatternOverlay = dayChartPatternType !== "none";
     const chartForceLive = hasPatternOverlay && activeChartDate ? false : forceLive;
 
+    const indicatorParams = new URLSearchParams({ stock_id: sid, universe });
+    if (activeChartDate) indicatorParams.set("date", activeChartDate);
+    const indicatorPromise = fetchJson(`/vwap_signal/indicators?${indicatorParams.toString()}`)
+      .then((result) => {
+        if (!isCurrent()) return;
+        if (result.macd) setMacdMap((current) => ({ ...current, [sid]: result.macd }));
+        if (result.obv) setObvMap((current) => ({ ...current, [sid]: result.obv }));
+      })
+      .catch(() => undefined);
+
     const dayPromise = fetchJson(
       patternDetailPath(sid, {
         patternType: dayChartPatternType,
@@ -1022,7 +1033,7 @@ export default function App() {
       })
       .finally(() => { if (isCurrent()) setLoadingIntraday(false); });
 
-    await Promise.allSettled([dayPromise, intradayPromise]);
+    await Promise.allSettled([indicatorPromise, dayPromise, intradayPromise]);
   }, [
     activeChartLabel,
     activeChartLimit,
@@ -1035,6 +1046,7 @@ export default function App() {
     selectedChartDate,
     stockId,
     today,
+    universe,
   ]);
 
   const loadDateIndex = useCallback(async () => {
@@ -1089,7 +1101,7 @@ export default function App() {
     setVwapError("");
     setSignalLoadedKey("");
     try {
-      const qs = new URLSearchParams({ universe, repeat: repeatEvents ? "1" : "0" });
+      const qs = new URLSearchParams({ universe, repeat: repeatEvents ? "1" : "0", compact: "1" });
       if (vwapDate) qs.set("date", vwapDate);
       const bundle = await fetchJson(`/vwap_signal/bundle?${qs.toString()}`);
       if (!isCurrent()) return;
@@ -1117,7 +1129,8 @@ export default function App() {
     setVwapError("");
     setPatternError("");
     setVwapLoading(true);
-    setSelectedChartDate(nextDate);
+    setSelectedChartDate(null);
+    setChartContext({ kind: "manual" });
     setVwapDate(nextDate);
   }, [vwapDate]);
 
@@ -1571,7 +1584,10 @@ export default function App() {
   const dayPatternTitle = dayChartPatternType !== "none" && dayData?.pattern_name ? `・${dayData.pattern_name}` : "";
   const srTitle = showIndicatorPane && extraSr ? "・壓力支撐" : "";
   const indicatorTitle = showIndicatorPane && chartIndicatorLabel ? `・${chartIndicatorLabel}` : "";
-  const rightChartTitle = `${titleStock} ${activeChartLabel}${srTitle}${indicatorTitle}`;
+  const chartTitleStock = chartSelectionReady ? titleStock : "請從清單選擇股票";
+  const rightChartTitle = chartSelectionReady
+    ? `${chartTitleStock} ${activeChartLabel}${srTitle}${indicatorTitle}`
+    : chartTitleStock;
 
   const selectMarketRow = useCallback(
     (row, key = "", kind = "vwap", patternType = "", usePrimaryPattern = true) => {
@@ -1835,15 +1851,15 @@ export default function App() {
 
         <div className="grid min-h-0 gap-2 lg:grid-cols-[minmax(360px,42%)_minmax(0,1fr)]">
           <div className="min-h-[320px] sm:min-h-[380px] lg:min-h-0">
-            <ChartPanel title={`${titleStock} 日K${dayPatternTitle}${activeChartDate ? `・${activeChartDate.slice(5).replace("-", "/")}` : ""}`} loading={loadingDay} error={dayError} actions={<PriceChange summary={daySummary} />}>
-              <TradingViewChart data={dayData} variant="day" emptyMessage="尚無日K資料" showVolume={false} />
+            <ChartPanel title={chartSelectionReady ? `${chartTitleStock} 日K${dayPatternTitle}${activeChartDate ? `・${activeChartDate.slice(5).replace("-", "/")}` : ""}` : chartTitleStock} loading={loadingDay} error={dayError} actions={<PriceChange summary={daySummary} />}>
+              <TradingViewChart data={dayData} variant="day" emptyMessage={chartSelectionReady ? "尚無日K資料" : "請從上方清單選擇股票"} showVolume={false} />
             </ChartPanel>
           </div>
 
           <div className="min-h-[360px] sm:min-h-[440px] lg:min-h-0">
             <div className="h-full" data-tour="intraday-chart">
             <ChartPanel title={rightChartTitle} loading={loadingIntraday} error={intradayError} actions={<><ChartIndicatorControls value={chartIndicatorMode} onChange={setChartIndicatorMode} /><PriceChange summary={rightSummary} /></>}>
-              <div className="h-full min-h-0"><TradingViewChart data={intradayData} dayLevels={dayData} extraSr={extraSr} idxData={idxData} variant={rightChartVariant} timeframe={activeChartTimeframe} emptyMessage={`尚無${activeChartLabel}資料`} showIndicatorPane={showIndicatorPane} daySrMode="horizontal" indicatorMode={chartIndicatorMode} indicatorStockId={stockId} indicatorEventTime={indicatorEventTime} macdMap={macdMap} obvMap={obvMap} /></div>
+              <div className="h-full min-h-0"><TradingViewChart data={intradayData} dayLevels={dayData} extraSr={extraSr} idxData={idxData} variant={rightChartVariant} timeframe={activeChartTimeframe} emptyMessage={chartSelectionReady ? `尚無${activeChartLabel}資料` : "請從上方清單選擇股票"} showIndicatorPane={showIndicatorPane} daySrMode="horizontal" indicatorMode={chartIndicatorMode} indicatorStockId={stockId} indicatorEventTime={indicatorEventTime} macdMap={macdMap} obvMap={obvMap} /></div>
             </ChartPanel>
             </div>
           </div>

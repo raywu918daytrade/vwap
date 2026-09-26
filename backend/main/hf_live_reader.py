@@ -16,6 +16,18 @@ _ROOT = Path(__file__).resolve().parents[1]
 _LOCK = threading.Lock()
 _LAST_CHECK: dict[str, float] = {}
 _LAST_MANIFEST_KEY: dict[str, str] = {}
+_STATUS: dict[str, object] = {
+    "checked_at": None,
+    "applied_at": None,
+    "apply_mode": None,
+    "manifest": None,
+    "error": None,
+}
+
+
+def live_reader_status() -> dict:
+    with _LOCK:
+        return dict(_STATUS)
 
 
 def _is_next_minute(previous: str | None, current: str) -> bool:
@@ -83,6 +95,11 @@ def refresh_live_m1(date_str: str) -> tuple[bool, bool]:
             }
             manifest_path = hf_hub_download(filename="manifest/live.json", **download_args)
             manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+            _STATUS.update(
+                checked_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+                manifest=manifest,
+                error=None,
+            )
             if manifest.get("trading_date") != date_str:
                 return target.exists(), False
             if manifest.get("files", {}).get("m1_live") != relative_path:
@@ -92,6 +109,7 @@ def refresh_live_m1(date_str: str) -> tuple[bool, bool]:
             if not manifest_key:
                 raise ValueError("live manifest has no version key")
             if _LAST_MANIFEST_KEY.get(relative_path) == manifest_key and target.exists():
+                _STATUS["apply_mode"] = "current"
                 return True, False
 
             previous_key = _LAST_MANIFEST_KEY.get(relative_path)
@@ -106,16 +124,28 @@ def refresh_live_m1(date_str: str) -> tuple[bool, bool]:
                 try:
                     downloaded = hf_hub_download(filename=delta_path, **download_args)
                     _merge_delta(downloaded, target)
+                    apply_mode = "delta"
                 except Exception as exc:
                     print(f"[HF live] delta failed, using full snapshot: {type(exc).__name__}: {exc}", flush=True)
                     downloaded = hf_hub_download(filename=relative_path, **download_args)
                     _replace_snapshot(downloaded, target)
+                    apply_mode = "snapshot"
             else:
                 downloaded = hf_hub_download(filename=relative_path, **download_args)
                 _replace_snapshot(downloaded, target)
+                apply_mode = "snapshot"
             _LAST_MANIFEST_KEY[relative_path] = manifest_key
+            _STATUS.update(
+                applied_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+                apply_mode=apply_mode,
+                error=None,
+            )
             return True, True
         except Exception as exc:
+            _STATUS.update(
+                checked_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+                error=f"{type(exc).__name__}: {exc}",
+            )
             print(f"[HF live] {relative_path} refresh failed: {exc}", flush=True)
             return target.exists(), False
 

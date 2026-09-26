@@ -1,188 +1,74 @@
-"""Sanitized live diagnostics for the public dashboard."""
+"""Sanitized Oracle -> HF -> Render market-data monitoring."""
 
 from __future__ import annotations
 
-import threading
 from datetime import datetime, timedelta, timezone
 
-import pandas as pd
 from fastapi import APIRouter
 
 router = APIRouter()
-
 _TW = timezone(timedelta(hours=8))
-_snapshot_lock = threading.Lock()
-_minute_snapshot: dict = {}
-_signal_snapshot_lock = threading.Lock()
-_signal_snapshot_date = ""
-_signal_snapshot_vwap: list[dict] = []
-_signal_snapshot_sr: list[dict] = []
 
 
-def _scalar(value):
-    if value is None or pd.isna(value):
-        return None
-    if hasattr(value, "item"):
-        return value.item()
-    return value
-
-
-def update_minute_snapshot(minute_str: str, frame: pd.DataFrame) -> None:
-    """Capture non-sensitive M1 health metrics without rereading parquet."""
-    snapshot = {
-        "updated_at": datetime.now(_TW).isoformat(timespec="seconds"),
-        "latest_minute": minute_str,
-        "rows": 0,
-        "stocks": 0,
-        "minutes": 0,
-        "first_minute": None,
-        "latest_minute_stocks": 0,
-        "latest_delay_seconds": None,
-        "missing_market_minutes_count": 0,
-        "missing_market_minutes": [],
-        "quote_0050": None,
-    }
-    if frame is not None and not frame.empty and {"date", "stock_id"}.issubset(frame.columns):
-        dates = frame["date"].astype(str).str[:19]
-        valid = dates.str.startswith(minute_str[:10])
-        current = frame.loc[valid].copy()
-        dates = dates.loc[valid]
-        if not current.empty:
-            current["_minute"] = dates.str[:16] + ":00"
-            observed = set(current["_minute"].dropna().astype(str))
-            latest = max(observed, default=minute_str)
-            latest_rows = current[current["_minute"] == latest]
-            snapshot.update(
-                {
-                    "latest_minute": latest,
-                    "rows": int(len(current)),
-                    "stocks": int(current["stock_id"].astype(str).nunique()),
-                    "minutes": len(observed),
-                    "first_minute": min(observed, default=None),
-                    "latest_minute_stocks": int(latest_rows["stock_id"].astype(str).nunique()),
-                }
-            )
-            try:
-                latest_dt = datetime.strptime(latest, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_TW)
-                snapshot["latest_delay_seconds"] = max(0, int((datetime.now(_TW) - latest_dt).total_seconds()))
-            except ValueError:
-                pass
-
-            start = datetime.strptime(f"{minute_str[:10]} 09:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo=_TW)
-            # 13:25-13:30 is the closing call auction, so candle feeds normally
-            # have no 13:25-13:29 trades and then publish the 13:30 close.
-            close = start.replace(hour=13, minute=24)
-            target = datetime.strptime(minute_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_TW)
-            end = min(target, close)
-            if end >= start:
-                expected = {
-                    item.strftime("%Y-%m-%d %H:%M:00")
-                    for item in pd.date_range(start, end, freq="min")
-                }
-                missing = sorted(expected - observed)
-                snapshot["missing_market_minutes_count"] = len(missing)
-                snapshot["missing_market_minutes"] = missing[-10:]
-
-            quote_rows = current[current["stock_id"].astype(str) == "0050"]
-            if not quote_rows.empty:
-                row = quote_rows.sort_values("_minute").iloc[-1]
-                snapshot["quote_0050"] = {
-                    key: _scalar(row.get(key))
-                    for key in ("_minute", "open", "high", "low", "close", "volume")
-                }
-
-    with _snapshot_lock:
-        _minute_snapshot.clear()
-        _minute_snapshot.update(snapshot)
-
-
-def _safe_event(kind: str, row: dict) -> dict:
-    return {
-        "kind": kind,
-        "time": str(row.get("time") or ""),
-        "stock_id": str(row.get("stock_id") or ""),
-        "name": str(row.get("name") or "")[:40],
-        "direction": str(row.get("direction") or row.get("vwap_dir") or ""),
-        "sr_kind": str(row.get("sr_kind") or ""),
-        "price": _scalar(row.get("price")),
-        "vwap": _scalar(row.get("vwap")),
-    }
-
-
-@router.get("/api/diagnostics/live", tags=["系統"], summary="安全的盤中診斷摘要")
+@router.get("/api/diagnostics/live", tags=["系統"], summary="報價資料流監控")
 def live_diagnostics() -> dict:
-    global _signal_snapshot_date, _signal_snapshot_vwap, _signal_snapshot_sr
     # Import lazily because api.py installs this router while it is initializing.
     import api
+    from main.hf_live_reader import live_reader_status, refresh_live_m1
 
     now = datetime.now(_TW)
-    with _snapshot_lock:
-        m1 = dict(_minute_snapshot)
-    if not m1:
-        # After a deploy/restart there may be no new minute callback yet. Load the
-        # current day's parquet once so the panel remains useful after hours.
+    reader = live_reader_status()
+    if not reader.get("manifest"):
+        refresh_live_m1(now.strftime("%Y-%m-%d"))
+        reader = live_reader_status()
+
+    manifest = reader.get("manifest") or {}
+    coverage = manifest.get("coverage") or {}
+    latest_minute = manifest.get("latest_minute")
+    delay = None
+    if latest_minute:
         try:
-            from data.query import load_m1_live
-
-            frame = load_m1_live(now.strftime("%Y-%m-%d"))
-            if frame is not None and not frame.empty and "date" in frame.columns:
-                latest = pd.to_datetime(frame["date"], errors="coerce").max()
-                if not pd.isna(latest):
-                    update_minute_snapshot(latest.strftime("%Y-%m-%d %H:%M:00"), frame)
-                    with _snapshot_lock:
-                        m1 = dict(_minute_snapshot)
-        except Exception:
-            # Diagnostics must never make the trading API unavailable.
+            latest_dt = datetime.fromisoformat(str(latest_minute)).replace(tzinfo=_TW)
+            delay = max(0, int((now - latest_dt).total_seconds()))
+        except ValueError:
             pass
-    with api._lock:
-        vwap_rows = list(api._vwap_breakout_signals)
-        sr_rows = list(api._sr_vwap_cross_signals)
-        coverage = dict(api._collector_coverage)
-        safe_logs = []
-        error_count = sum(1 for row in api._system_logs if row.get("level") == "error")
 
-    if not vwap_rows and not sr_rows and m1.get("latest_minute"):
-        # A restart after the collector has stopped leaves the live lists empty.
-        # Reconstruct today's events once from M1 for the read-only diagnostics UI.
-        date_str = now.strftime("%Y-%m-%d")
-        with _signal_snapshot_lock:
-            if _signal_snapshot_date != date_str:
-                try:
-                    scanned_vwap, scanned_sr = api._scan_vwap_sr(date_str)
-                except Exception:
-                    scanned_vwap, scanned_sr = [], []
-                _signal_snapshot_date = date_str
-                _signal_snapshot_vwap = scanned_vwap
-                _signal_snapshot_sr = scanned_sr
-            vwap_rows = list(_signal_snapshot_vwap)
-            sr_rows = list(_signal_snapshot_sr)
-
-    events = [_safe_event("VWAP", row) for row in vwap_rows]
-    events.extend(_safe_event("SR", row) for row in sr_rows)
-    events.sort(key=lambda row: (row["time"], row["stock_id"], row["kind"]))
-
-    delay = m1.get("latest_delay_seconds")
-    market_minutes = now.weekday() < 5 and (9, 0) <= (now.hour, now.minute) <= (13, 32)
-    freshness_ok = bool(m1.get("latest_minute")) and (not market_minutes or (delay is not None and delay <= 180))
-    ok = api._data_ready and freshness_ok
+    market_open = now.weekday() < 5 and (9, 0) <= (now.hour, now.minute) <= (13, 35)
+    same_day = manifest.get("trading_date") == now.strftime("%Y-%m-%d")
+    fresh = bool(latest_minute) and delay is not None and delay <= 180
+    coverage_ok = int(coverage.get("arrived") or 0) > 0
+    quote_ok = same_day and fresh and coverage_ok if market_open else True
+    render_ok = api._data_ready and (not reader.get("error") or not market_open)
+    phase = "盤中" if market_open else "非交易時段"
+    reader_error = str(reader.get("error") or "").split(":", 1)[0] or None
 
     return {
-        "ok": ok,
+        "ok": render_ok and quote_ok,
         "generated_at": now.isoformat(timespec="seconds"),
-        "health": {
-            "status": "ok" if api._data_ready else "starting",
-            "collector": api._collector_status,
-            "message": api._COLLECTOR_MSG.get(api._collector_status, api._collector_status),
-            "sse_clients": len(api._sse_clients),
+        "phase": phase,
+        "pipeline": {
+            "oracle": "正常發布" if quote_ok and market_open else ("等待下一交易時段" if not market_open else "發布延遲"),
+            "hf": "最新" if fresh and same_day else ("盤後保存" if not market_open and latest_minute else ("尚無發布紀錄" if not market_open else "等待資料")),
+            "render": "已套用" if render_ok and reader.get("apply_mode") else ("服務正常" if render_ok else "同步異常"),
+        },
+        "quote": {
+            "trading_date": manifest.get("trading_date"),
+            "latest_minute": latest_minute,
+            "delay_seconds": delay,
+            "fresh": fresh,
             "coverage": coverage,
+            "delta": manifest.get("delta") or {},
+            "published_at": manifest.get("generated_at"),
+        },
+        "consumer": {
+            "checked_at": reader.get("checked_at"),
+            "applied_at": reader.get("applied_at"),
+            "apply_mode": reader.get("apply_mode"),
+            "error": reader_error,
+        },
+        "render": {
+            "status": "ok" if api._data_ready else "starting",
+            "sse_clients": len(api._sse_clients),
             "version": api._APP_VERSION,
         },
-        "m1": {**m1, "freshness_ok": freshness_ok},
-        "signals": {
-            "vwap_count": len(vwap_rows),
-            "sr_count": len(sr_rows),
-            "latest_time": max((row["time"] for row in events), default=None),
-            "latest_events": events[-20:],
-        },
-        "operations": {"safe_logs": safe_logs, "error_count": error_count},
     }
