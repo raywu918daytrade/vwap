@@ -340,12 +340,32 @@ def _clear_version_cache() -> None:
 
 
 def warm_tidb_read_pool() -> bool:
-    """Open one reusable read connection before the first user request."""
+    """Fill the read pool before concurrent chart requests reach it."""
     if not tidb_reads_enabled() and not tidb_chart_reads_enabled():
         return False
-    with _read_connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT 1")
-        cur.fetchone()
+    pool = _read_pool()
+    connections: list[Any] = []
+    missing = max(0, pool.maxsize - pool.qsize())
+    try:
+        for _ in range(missing):
+            conn = connect_tidb(autocommit=True)
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            connections.append(conn)
+    except Exception:
+        for conn in connections:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        raise
+    warmed_at = time.monotonic()
+    for conn in connections:
+        try:
+            pool.put_nowait((conn, warmed_at))
+        except queue.Full:
+            conn.close()
     return True
 
 

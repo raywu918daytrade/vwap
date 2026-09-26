@@ -900,6 +900,7 @@ export default function App() {
   const indicatorLoadSeqRef = useRef(0);
   const idxCacheRef = useRef(new Map());
   const indicatorCacheRef = useRef(new Map());
+  const dayPrefetchRef = useRef(new Set());
   const [loadingIndicator, setLoadingIndicator] = useState(false);
   const today = useMemo(() => taipeiTodayIso(), [clock]);
   const marketHours = useMemo(() => isTaipeiMarketHours(), [clock]);
@@ -1550,6 +1551,46 @@ export default function App() {
     vwapSearch,
     vwapSort,
   ]);
+
+  useEffect(() => {
+    if (!vwapDate || !vwapRows.length) return undefined;
+    const targets = [];
+    const seen = new Set();
+    for (const row of vwapRows) {
+      const sid = String(row.stock_id);
+      if (seen.has(sid)) continue;
+      seen.add(sid);
+      const pattern = row.pattern_primary;
+      const path = patternDetailPath(sid, {
+        patternType: pattern?.pattern_type || "none",
+        timeframe: "day",
+        date: vwapDate,
+        limit: patternLimit || 120,
+      });
+      if (!dayPrefetchRef.current.has(path)) targets.push(path);
+      if (targets.length >= 8) break;
+    }
+    if (!targets.length) return undefined;
+
+    let cancelled = false;
+    const prefetch = async () => {
+      for (const path of targets) {
+        if (cancelled) return;
+        dayPrefetchRef.current.add(path);
+        try {
+          await fetchJson(path);
+        } catch {
+          dayPrefetchRef.current.delete(path);
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 80));
+      }
+    };
+    const timer = window.setTimeout(prefetch, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [patternLimit, vwapDate, vwapRows]);
 
   const signalColumnCount = 6 + patternColumns.length;
   const activityDataMissing = Object.values(activityFilters).some(Boolean) && !Object.keys(activityMap).length;
