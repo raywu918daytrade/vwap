@@ -1342,6 +1342,10 @@ export default function App() {
         if (message.type === "candles" && !activeChartDateRef.current && String(message.stock_id) === String(stockIdRef.current)) {
           setReloadSeq((n) => n + 1);
         }
+        if (message.type === "hf_refresh") {
+          loadVwapTables();
+          if (!activeChartDateRef.current) setReloadSeq((n) => n + 1);
+        }
       }
     };
     return () => es.close();

@@ -150,7 +150,7 @@ def get_setting(key: str, default=None):
 # In-memory realtime state.
 _lock = threading.Lock()
 _today_date: date | None = None
-_collector_status = "stopped"
+_collector_status = "hf"
 _collector_coverage: dict = {"arrived": 0, "total": 0}
 _quotes: dict[str, dict] = {}
 _vwap_breakout_signals: list[dict] = []
@@ -397,6 +397,11 @@ def push_candles(stock_id: str, candles: list[dict]) -> None:
     _broadcast({"type": "candles", "stock_id": str(stock_id)})
 
 
+def push_hf_refresh() -> None:
+    """Tell connected dashboards that the shared HF live snapshot changed."""
+    _broadcast({"type": "hf_refresh"})
+
+
 def push_quote(stock_id: str, price: float, prev_close: float | None, minute_str: str = "") -> None:
     change_pct = (price - prev_close) / prev_close * 100 if prev_close else None
     row = {
@@ -598,6 +603,7 @@ def _legacy_candle_shape(candles: list[dict]) -> list[dict]:
 
 
 _COLLECTOR_MSG = {
+    "hf": "HF 報價讀取正常",
     "running": "資料流正常",
     "stopped": "盤後或尚未啟動",
     "error": "資料流中斷",
@@ -844,11 +850,24 @@ def chart_candles_history(
 
 @app.get("/quote/{stock_id}", tags=["圖表"], summary="固定追蹤股票即時報價")
 def get_quote(stock_id: str):
-    with _lock:
-        row = _quotes.get(str(stock_id))
-    if row is None:
+    from data.query import load_m1_live
+
+    date_str = _today_str()
+    frame = load_m1_live(date_str)
+    if frame.empty:
         raise HTTPException(status_code=404, detail=f"尚無 {stock_id} 的報價資料（可能還沒開盤或非追蹤清單）")
-    return row
+    rows = frame[frame["stock_id"].astype(str) == str(stock_id)].copy()
+    if rows.empty:
+        raise HTTPException(status_code=404, detail=f"尚無 {stock_id} 的報價資料（可能還沒開盤或非追蹤清單）")
+    rows["date"] = pd.to_datetime(rows["date"], format="mixed")
+    latest = rows.sort_values("date").iloc[-1]
+    return {
+        "stock_id": str(stock_id),
+        "price": float(latest["close"]),
+        "prev_close": None,
+        "change_pct": None,
+        "minute": latest["date"].strftime("%Y-%m-%d %H:%M:00"),
+    }
 
 
 @app.get("/api/logs", tags=["系統"], summary="今日程式日誌")

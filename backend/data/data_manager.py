@@ -3,7 +3,7 @@ DataManager：統一三個交易時段的資料載入介面。
 
 Phase（時段）：
     PRE_MARKET  盤前  — 載入 D1 日K + 均量過濾（本機 db/d1/）
-    IN_MARKET   盤中  — M1 由 fubon/marketdata_ws.py 的富邦 WebSocket 推送，D1 已在盤前載好
+    IN_MARKET   盤中  — M1 由 HF Dataset 同步，D1 已在盤前載好
     POST_MARKET 盤後  — 持續收 WebSocket 資料到收盤，D1 不變
 
 上層規則：

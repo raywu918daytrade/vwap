@@ -3,7 +3,7 @@
 
 從 data/m1_rest.py（Fugle REST 輪詢收集器，2026-07-13 已移除——富邦
 WebSocket 穩定後不再需要 Fugle 當備援，理由見 memory）搬出來，因為
-fubon/marketdata_ws.py 也需要同一套解析/存檔邏輯，不想為了兩個函式
+歷史建置工具需要共用同一套解析/存檔邏輯，不想為了兩個函式
 留著整支已經沒在用的 REST 輪詢器。
 """
 import os
@@ -42,7 +42,7 @@ def _atomic_save(df: pd.DataFrame, file_path: Path):
     """讀舊檔 merge 新資料、dedup（stock_id, date）keep last，再原子性寫回去。
     呼叫端如果會有多執行緒同時對同一個 file_path 呼叫，要自己加鎖——這裡
     不處理併發（2026-07-13 曾經因為兩條執行緒同時呼叫沒加鎖，撞到
-    os.replace() 的 .tmp 檔名衝突，見 fubon/marketdata_ws.py 的 _save_lock）。
+    os.replace() 的 .tmp 檔名衝突。
     """
     os.makedirs(file_path.parent, exist_ok=True)
     if file_path.exists():

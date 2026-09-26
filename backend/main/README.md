@@ -1,54 +1,16 @@
-# main 模組
+# Dashboard Runtime
 
-精簡版後端入口只負責即時資料與 VWAP/型態監控，不再載入任何模型，也不做下單。
+`render_reader.py` is the only production entry point in this repository. It
+serves the FastAPI/React dashboard, reads precomputed query data from TiDB, and
+downloads stock lists plus M1/D1 Parquet snapshots from the configured Hugging
+Face Dataset.
 
-| 檔案 | 職責 |
-| --- | --- |
-| `live_trader.py` | FastAPI + 富邦 M1 collector 的啟動點；每分鐘推 K 線、quote、VWAP/SR/MACD/OBV 事件 |
-| `collector.py` | 富邦 WebSocket collector 的重試包裝 |
-| `config.py` | `.env` 讀取，保留 watchlist quote、收盤時間、每日 HF 同步時間 |
-| `state.py` | 執行期共用狀態：訂閱股票、SR 水位、collector backfill 狀態 |
-| `startup_data.py` | 開機資料準備：HF DB 新鮮度檢查/同步與富邦訂閱清單重建 |
+The runtime does not contain broker credentials, broker SDKs, subscriptions,
+or market-data collection code. Realtime collection runs in the independent
+`market-data-collector` project on Oracle.
 
-## 開機 HF 同步
-
-`live_trader.py` 啟動時會先呼叫
-`startup_data.sync_local_market_db_from_hf_if_stale()`。這支會檢查預期最新交易日
-的 D1 completion flag；如果本機資料落後，就呼叫
-`scripts.sync_market_db_from_hf.sync_market_db_from_hf()` 從 Hugging Face dataset
-同步 `db/`。
-
-## 每日 HF 同步
-
-雲端 24 小時常駐時，不需要靠重啟服務來更新歷史資料。`live_trader.py` 會啟動
-每日背景同步 thread，預設台北時間 18:00 呼叫同一支
-`startup_data.sync_local_market_db_from_hf_if_stale()`。若 HF 下載成功，會同步清掉
-型態、VWAP、MACD、OBV 的歷史查詢快取，讓前端之後讀到更新後的 parquet。
-
-時間可用 `.env` 或部署環境變數調整：
+Run locally with:
 
 ```bash
-HF_DAILY_SYNC_HOUR=18
-HF_DAILY_SYNC_MIN=0
-```
-
-這段只負責把外部維護的 HF dataset 歷史資料拉回本機，不負責每日歷史資料
-更新、上傳 HF，也不負責盤中 WebSocket 補 M1 缺口。
-
-## 盤中補資料
-
-`main/backfill.py` 已移除，因為它原本只是在開機後用既有 `db/m1_live` 再跑一次
-舊推論流程，補的是前端模型監控畫面，不是原始行情資料。
-
-真正補盤中開服務之前缺掉的 M1 資料，是
-`fubon/marketdata_ws.py::_backfill_m1_live()`。`live_trader.py` 仍然把
-`state.backfill_done` 傳進 `collector.start_collector()`，collector 補完缺口後
-會 set 這個 event；後端接著自動跑一次 `/vwap_sr_catchup` 同步今日 VWAP/SR
-記憶體。
-
-## 啟動
-
-```bash
-cd backend
-python -m main.live_trader
+python -m main.render_reader
 ```

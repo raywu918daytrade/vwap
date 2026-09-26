@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import uvicorn
 
-from api import clear_vwap_bundle_cache, get_uvicorn_config, set_data_ready
+from api import clear_vwap_bundle_cache, get_uvicorn_config, push_hf_refresh, set_data_ready
 from main import startup_data
 from main.config import HF_DAILY_SYNC_HOUR, HF_DAILY_SYNC_MIN
 
@@ -67,6 +67,18 @@ def _daily_sync() -> None:
         time.sleep(60)
 
 
+def _live_m1_sync() -> None:
+    """Mirror Oracle's current M1 snapshot from HF while the market is active."""
+    from main.hf_live_reader import sync_live_m1
+
+    while True:
+        now = datetime.now(_TW)
+        active = now.weekday() < 5 and (8, 0) <= (now.hour, now.minute) <= (14, 10)
+        if active and sync_live_m1(now.strftime("%Y-%m-%d")):
+            push_hf_refresh()
+        time.sleep(10 if active else 60)
+
+
 def _server_port() -> int:
     try:
         return int(os.environ.get("PORT", "8000"))
@@ -78,6 +90,7 @@ if __name__ == "__main__":
     set_data_ready(False)
     threading.Thread(target=_startup, daemon=True).start()
     threading.Thread(target=_daily_sync, daemon=True).start()
+    threading.Thread(target=_live_m1_sync, daemon=True).start()
     port = _server_port()
     print(f"Render reader listening on 0.0.0.0:{port}", flush=True)
     uvicorn.Server(get_uvicorn_config(host="0.0.0.0", port=port)).run()

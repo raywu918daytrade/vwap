@@ -138,11 +138,7 @@ def live_diagnostics() -> dict:
         vwap_rows = list(api._vwap_breakout_signals)
         sr_rows = list(api._sr_vwap_cross_signals)
         coverage = dict(api._collector_coverage)
-        safe_logs = [
-            {"time": row.get("time"), "level": row.get("level"), "msg": row.get("msg")}
-            for row in api._system_logs
-            if str(row.get("msg") or "").startswith(("富邦 WebSocket 訂閱完成", "富邦 backfill 完成"))
-        ][-10:]
+        safe_logs = []
         error_count = sum(1 for row in api._system_logs if row.get("level") == "error")
 
     if not vwap_rows and not sr_rows and m1.get("latest_minute"):
@@ -168,7 +164,7 @@ def live_diagnostics() -> dict:
     delay = m1.get("latest_delay_seconds")
     market_minutes = now.weekday() < 5 and (9, 0) <= (now.hour, now.minute) <= (13, 32)
     freshness_ok = bool(m1.get("latest_minute")) and (not market_minutes or (delay is not None and delay <= 180))
-    ok = api._data_ready and api._collector_status != "error" and freshness_ok
+    ok = api._data_ready and freshness_ok
 
     return {
         "ok": ok,

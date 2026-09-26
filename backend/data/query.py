@@ -14,7 +14,7 @@ data/adjustment_query.py，不要用這支——理由見那支檔頭說明。
 三種資料對應：
     load_m1()      → db/m1/        歷史分K（按月分檔，已還原拆股/合股）
     load_day()     → db/d1/        日K（按月分檔，已還原拆股/合股）
-    load_m1_live() → db/m1_live/   今日即時分K（M1 collector 寫入）
+    load_m1_live() → db/m1_live/   今日分K（由 HF Dataset 同步）
 
 單支股票查詢（用 pyarrow filter pushdown，不用像 load_day() 整個資料集讀進記憶體）：
     load_day_by_stock(stock_id)  → db/d1/       單一股票的全部日K
@@ -177,10 +177,12 @@ def load_day_by_stock(stock_id: str, date: str = None) -> pd.DataFrame:
 
 
 def load_m1_live(date: str = None) -> pd.DataFrame:
-    """載入今日即時分K（db/m1_live/YYYY-MM-DD.parquet），盤後自動 backfill
-    補齊。「今天」相對於自己必然是同一個基準，raw==adjusted，不用換算。"""
+    """載入由 HF Dataset 同步的當日分K。"""
     if date is None:
         date = pd.Timestamp.now().strftime("%Y-%m-%d")
+    from main.hf_live_reader import sync_live_m1
+
+    sync_live_m1(date)
     path = _ROOT / f"db/m1_live/{date}.parquet"
     if not path.exists():
         return pd.DataFrame()

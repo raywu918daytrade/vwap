@@ -1,7 +1,7 @@
 """Synchronize the local market DB from Hugging Face.
 
-`main.live_trader` calls this at startup through
-`main.startup_data.sync_local_market_db_from_hf_if_stale()` when the local D1
+`main.render_reader` calls this at startup through
+`main.startup_data.sync_runtime_query_data_from_hf()` when the local query
 completion flag is behind the latest expected trading day. It can also be run
 manually when local historical data needs to catch up with the externally
 maintained HF dataset.

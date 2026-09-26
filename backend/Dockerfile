@@ -26,10 +26,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./
-COPY backend/wheels ./wheels
 
 RUN python -m pip install --upgrade pip \
-    && pip install ./wheels/*.whl \
     && pip install -r requirements.txt
 
 COPY backend/ .
@@ -38,4 +36,4 @@ RUN TZ=Asia/Taipei date +'%Y%m%d-%H%M' > ./BUILD_VERSION
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "if [ \"$RUNTIME_PROFILE\" = \"render-reader\" ]; then exec python -m main.render_reader; else exec python -m main.live_trader; fi"]
+CMD ["python", "-m", "main.render_reader"]

@@ -43,8 +43,6 @@ services:
         value: "1"
       - key: MALLOC_ARENA_MAX
         value: "2"
-      - key: FUBON_BACKFILL_WORKERS
-        value: "2"
       - key: CACHE_PREWARM_MONTHS
         value: "1"
       - key: CACHE_PREWARM_STARTUP_MONTHS

@@ -80,13 +80,14 @@ def _name_map() -> dict[str, str]:
     if _names_cache is not None:
         return _names_cache
     try:
-        from fubon.intraday_tickers import load_tickers
-
-        df = load_tickers()
+        df = pd.read_parquet(
+            _ROOT / "db/tickers/tick_universe.parquet",
+            columns=["stock_id", "name"],
+        )
         _names_cache = dict(
             zip(df["stock_id"].astype(str), df["name"].astype(str))
         )
-    except FileNotFoundError:
+    except (FileNotFoundError, KeyError):
         _names_cache = {}
     return _names_cache
 
