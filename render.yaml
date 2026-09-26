@@ -29,6 +29,8 @@ services:
         value: "1"
       - key: HF_DOWNLOAD_WORKERS
         value: "4"
+      - key: HF_LIVE_REFRESH_SECONDS
+        value: "60"
       - key: OMP_NUM_THREADS
         value: "1"
       - key: OPENBLAS_NUM_THREADS

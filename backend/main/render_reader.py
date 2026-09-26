@@ -69,14 +69,21 @@ def _daily_sync() -> None:
 
 def _live_m1_sync() -> None:
     """Mirror Oracle's current M1 snapshot from HF while the market is active."""
-    from main.hf_live_reader import sync_live_m1
+    from main.hf_live_reader import refresh_live_m1
 
     while True:
         now = datetime.now(_TW)
         active = now.weekday() < 5 and (8, 0) <= (now.hour, now.minute) <= (14, 10)
-        if active and sync_live_m1(now.strftime("%Y-%m-%d")):
-            push_hf_refresh()
-        time.sleep(10 if active else 60)
+        if active:
+            _available, changed = refresh_live_m1(now.strftime("%Y-%m-%d"))
+            if changed:
+                push_hf_refresh()
+            next_refresh = now.replace(second=22, microsecond=0)
+            if next_refresh <= now:
+                next_refresh += timedelta(minutes=1)
+            time.sleep((next_refresh - now).total_seconds())
+        else:
+            time.sleep(60)
 
 
 def _server_port() -> int:

@@ -215,9 +215,6 @@ def get_stock_candles(
         # 股票，就該拿來補，不用管是不是「今天」——檔案存不存在自己就是
         # 最準的判斷依據，不用另外用日期比對去限制。
         live_path = _ROOT / f"db/m1_live/{effective_date}.parquet"
-        from main.hf_live_reader import sync_live_m1
-
-        sync_live_m1(effective_date)
         if live_path.exists():
             try:
                 live_table = ds.dataset(str(live_path), format="parquet").to_table(

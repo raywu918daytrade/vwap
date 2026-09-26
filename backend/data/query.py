@@ -177,12 +177,9 @@ def load_day_by_stock(stock_id: str, date: str = None) -> pd.DataFrame:
 
 
 def load_m1_live(date: str = None) -> pd.DataFrame:
-    """載入由 HF Dataset 同步的當日分K。"""
+    """載入背景執行緒從 HF 同步到本機快取的當日分K。"""
     if date is None:
         date = pd.Timestamp.now().strftime("%Y-%m-%d")
-    from main.hf_live_reader import sync_live_m1
-
-    sync_live_m1(date)
     path = _ROOT / f"db/m1_live/{date}.parquet"
     if not path.exists():
         return pd.DataFrame()
