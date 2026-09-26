@@ -116,11 +116,8 @@ def stock_ids_for_universe(universe: str | None) -> set[str]:
     """daytrade＝tick_universe.parquet 裡 daytrade_ok=True 的列；讀不到（或
     這欄還沒驗證過）才退整份 tick_universe。full＝2000 ∪ daytrade。
 
-    2026-08-19改：原本 daytrade 讀的是另外存的
-    db/fubon_subscribe/subscribe_list.parquet，跟 tick_universe.parquet
-    內容高度重疊，使用者要求合併成一份，daytrade_ok 現在是
-    tick_universe.parquet 自己的欄位（見 fubon/subscribe_list.py::
-    build_and_save_subscribe_list() 的說明），不用再讀第二個檔案。"""
+    daytrade_ok 由報價專案產生並隨 tick_universe.parquet 發佈到 HF，
+    dashboard backend 不連接券商 API，也不自行維護第二份股票清單。"""
     universe = normalize_universe(universe)
     tick_path = _ROOT / "db/tickers/tick_universe.parquet"
     daytrade = _parquet_stock_ids(tick_path, only_col="daytrade_ok")

@@ -187,23 +187,8 @@ def _load_daytrade_list() -> List[Dict[str, str]]:
     daytrade_ok。這種格式就直接回傳檔案內容；若遇到舊格式含 daytrade_ok，
     則沿用 daytrade_ok=True 的列。
 
-    舊版語意：main/premarket.py::refresh_tickers() 每天早上6點實際呼叫
-    fubon/subscribe_list.py::build_and_save_subscribe_list() 驗證過的結果，是
-    「今天實際會被富邦WebSocket即時收集」的股票池，db/m1_live 有哪些股票
-    就是看這份決定的。
-
-    2026-08-19改版：股票清單欄的「當沖候選」選項原本讀
-    db/tickers/tick_universe.parquet 整份（不分今天能不能當沖）——這會
-    出現「這支股票明明在清單裡選得到，但今天完全沒有m1資料」的困惑
-    （母體有它，但今天當沖資格驗證沒過，例如臨時被列入注意股/處置股），
-    改成只取 daytrade_ok=True 的子集才會跟 db/m1_live 的真實內容一致。
-
-    2026-08-19再改：原本這裡讀的是另外存的 db/fubon_subscribe/
-    subscribe_list.parquet，跟 tick_universe.parquet 內容高度重疊（同一批
-    股票代號，只差 connection_id/驗證日期），使用者要求合併成一份，daytrade_ok/
-    connection_id/verify_date 現在都是 tick_universe.parquet 自己的欄位
-    （見 fubon/subscribe_list.py::build_and_save_subscribe_list() 的說明），
-    不用再讀第二個檔案。
+    股票池與 daytrade_ok 由報價專案維護並發佈到 HF。這個服務只讀 HF
+    同步下來的檔案，不連接券商 API，也不自行驗證當沖資格。
 
     欄位名用 stock_id（不是 id）：跟 FULL_UNIVERSE_LIST/dashboard.html
     navMonitoring() 的既有慣例一致（見那邊的說明）。每次呼叫都重新讀檔
