@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
+
 from main import hf_live_reader
 
 
@@ -77,6 +79,49 @@ class HfLiveReaderTest(unittest.TestCase):
 
         self.assertEqual(download.call_count, 3)
         self.assertEqual((self.root / "db/m1_live/2026-09-26.parquet").read_bytes(), b"first")
+
+    def test_merges_next_minute_delta(self):
+        first_manifest = self.root / "first.json"
+        first_manifest.write_text(json.dumps({
+            "trading_date": "2026-09-26",
+            "latest_minute": "2026-09-26 09:01:00",
+            "files": {
+                "m1_live": "db/m1_live/2026-09-26.parquet",
+                "m1_delta": "db/m1_delta/2026-09-26/0901.parquet",
+            },
+        }))
+        second_manifest = self.root / "second.json"
+        second_manifest.write_text(json.dumps({
+            "trading_date": "2026-09-26",
+            "latest_minute": "2026-09-26 09:02:00",
+            "files": {
+                "m1_live": "db/m1_live/2026-09-26.parquet",
+                "m1_delta": "db/m1_delta/2026-09-26/0902.parquet",
+            },
+        }))
+        columns = ["stock_id", "date", "open", "high", "low", "close", "volume"]
+        full = self.root / "full.parquet"
+        delta = self.root / "delta.parquet"
+        pd.DataFrame([["2330", "2026-09-26 09:01:00", 1, 2, 1, 2, 3]], columns=columns).to_parquet(full)
+        pd.DataFrame([["2330", "2026-09-26 09:02:00", 2, 3, 2, 3, 4]], columns=columns).to_parquet(delta)
+        with (
+            patch.object(hf_live_reader, "_ROOT", self.root),
+            patch.dict(os.environ, {
+                "HF_REPO_ID": "owner/data",
+                "HF_TOKEN": "token",
+                "HF_LIVE_REFRESH_SECONDS": "1",
+            }),
+            patch("huggingface_hub.hf_hub_download", side_effect=[
+                str(first_manifest), str(full), str(second_manifest), str(delta),
+            ]) as download,
+            patch("main.hf_live_reader.time.monotonic", side_effect=[100, 100, 102, 102]),
+        ):
+            self.assertEqual(hf_live_reader.refresh_live_m1("2026-09-26"), (True, True))
+            self.assertEqual(hf_live_reader.refresh_live_m1("2026-09-26"), (True, True))
+
+        result = pd.read_parquet(self.root / "db/m1_live/2026-09-26.parquet")
+        self.assertEqual(result["date"].tolist(), ["2026-09-26 09:01:00", "2026-09-26 09:02:00"])
+        self.assertEqual(download.call_count, 4)
 
 
 if __name__ == "__main__":
