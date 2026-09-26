@@ -57,7 +57,7 @@ export default function DiagnosticsPanel() {
     <>
       <button
         type="button"
-        className={`btn btn-sm fixed bottom-3 right-3 z-[60] rounded shadow-lg ${data?.ok ? "btn-success" : "btn-primary"}`}
+        className={`btn btn-sm fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] right-3 z-[60] rounded shadow-lg ${data?.ok ? "btn-success" : "btn-primary"}`}
         onClick={() => setOpen(true)}
       >
         報價監控

@@ -70,7 +70,7 @@ body {
     display: block !important;
     min-height: 0 !important;
     overflow: visible !important;
-    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
   }
 
   /* Signal list: usable on mobile without consuming the whole page. */

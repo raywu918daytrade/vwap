@@ -1947,7 +1947,7 @@ export default function App() {
       </main>
 
       <div
-        className="join fixed bottom-3 right-[4.75rem] z-[60] lg:hidden"
+        className="join fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-3 z-[60] lg:hidden"
         aria-label="切換股票"
       >
         <button
