@@ -42,3 +42,9 @@ npm run dev
 - 離線訊號產生：`backend/scripts/build_pattern_scan.py`、`backend/scripts/build_vwap_activity.py`、`backend/scripts/build_vwap_signals.py` 可在本機初始化最近 N 個月結果並上傳 HF；加 `--sync-tidb` 會把同一批日期 upsert 到 TiDB；`backend/scripts/sync_chart_to_tidb.py` 會把同日期的 D1/M1 圖表 K 線同步到 TiDB；`.github/workflows/build-pattern-scan.yml` 會每天台北 18:00 掃最近 7 天 D1 型態、09:05 activity、VWAP/SR/MACD/OBV/chg，並上傳 HF，若有 TiDB direct connection secrets 也會同步 TiDB
 - HF 同步：Render 與 Oracle 統一使用 `HF_DATA_MODE=on-demand`。未開 TiDB 時，啟動只同步 GHA 產出的 `pattern_scan` / `vwap_activity` / `vwap_signals` 與 `tickers`，D1/M1 圖表按日期下載月份檔，本機最多快取 12 個月；開 TiDB 查詢時，啟動只同步 `tickers`，離線結果與歷史圖表 K 線都改先查 TiDB，DB miss 才回退 HF/parquet。服務每天 18:00 檢查新結果，尚未上傳完成時 30 分鐘後重試
 - 盤中報價：Oracle `market-data-collector` 寫入 HF Dataset，Render 以短 TTL 讀取 `db/m1_live/YYYY-MM-DD.parquet`
+
+## Deployment
+
+The Render Blueprint in `render.yaml` deploys the `main` branch automatically
+after each push. Production runs the HF-backed reader profile and does not
+connect to a broker API.
