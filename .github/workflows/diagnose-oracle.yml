@@ -139,6 +139,20 @@ jobs:
               "env_present": {name: bool(os.environ.get(name)) for name in env_names},
           }
           try:
+              import inspect
+              from importlib.metadata import version
+              from fubon_neo.sdk import build_websocket_client
+              result["packages"] = {
+                  name: version(name)
+                  for name in ("fubon-neo", "fugle-marketdata")
+              }
+              result["websocket_builder"] = {
+                  "signature": str(inspect.signature(build_websocket_client)),
+                  "source": inspect.getsource(build_websocket_client),
+              }
+          except Exception as exc:
+              result["websocket_builder_error"] = f"{type(exc).__name__}: {exc}"
+          try:
               with urlopen("http://127.0.0.1:8000/health", timeout=10) as response:
                   result["health"] = json.load(response)
           except Exception as exc:
