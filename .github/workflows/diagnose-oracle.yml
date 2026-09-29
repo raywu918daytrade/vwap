@@ -1,0 +1,129 @@
+name: Diagnose Oracle Collector
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oracle-collector-maintenance
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.number == 12 &&
+       contains(fromJSON('["/diagnose","/restart-collector"]'), github.event.comment.body) &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ORACLE_HOST: ${{ vars.ORACLE_HOST || '129.225.130.75' }}
+      ORACLE_USER: ${{ vars.ORACLE_USER || 'ubuntu' }}
+      ORACLE_PORT: ${{ vars.ORACLE_PORT || '22' }}
+      ORACLE_DEPLOY_PATH: ${{ vars.ORACLE_DEPLOY_PATH || '/home/ubuntu/vwap' }}
+
+    steps:
+      - name: Configure SSH
+        env:
+          ORACLE_SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          ORACLE_KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "${ORACLE_SSH_PRIVATE_KEY}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${ORACLE_SSH_PRIVATE_KEY}" > ~/.ssh/oracle_vwap
+          chmod 600 ~/.ssh/oracle_vwap
+          if [ -n "${ORACLE_KNOWN_HOSTS}" ]; then
+            printf '%s\n' "${ORACLE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${ORACLE_PORT}" -H "${ORACLE_HOST}" > ~/.ssh/known_hosts
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Diagnose or restart collector
+        env:
+          COMMAND: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          remote_env="$(printf 'DEPLOY_PATH=%q COMMAND=%q' "${ORACLE_DEPLOY_PATH}" "${COMMAND:-/diagnose}")"
+          ssh -i ~/.ssh/oracle_vwap \
+            -p "${ORACLE_PORT}" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "${ORACLE_USER}@${ORACLE_HOST}" \
+            "${remote_env} bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "${DEPLOY_PATH}"
+          compose=(docker compose -f docker-compose.oracle.yml)
+
+          if [ "${COMMAND}" = "/restart-collector" ]; then
+            "${compose[@]}" restart backend
+            sleep 20
+          fi
+
+          echo '### Docker compose status'
+          "${compose[@]}" ps
+
+          backend_id="$("${compose[@]}" ps -q backend)"
+          if [ -z "${backend_id}" ]; then
+            echo 'backend container is missing'
+            exit 1
+          fi
+
+          echo '### Container state'
+          docker inspect --format 'status={{.State.Status}} started={{.State.StartedAt}} restarts={{.RestartCount}} oom={{.State.OOMKilled}}' "${backend_id}"
+
+          echo '### Runtime checks'
+          docker exec "${backend_id}" python - <<'PY'
+          import json
+          import os
+          from datetime import datetime
+          from pathlib import Path
+          from urllib.request import urlopen
+          from zoneinfo import ZoneInfo
+
+          now = datetime.now(ZoneInfo("Asia/Taipei"))
+          today = now.strftime("%Y-%m-%d")
+          env_names = [
+              "FUBON_ID", "FUBON_API_KEY", "FUBON_CERT_B64", "FUBON_CERT_PASS",
+              "HF_REPO_ID", "HF_TOKEN", "HF_LIVE_M1_UPLOAD",
+          ]
+          result = {
+              "now": now.isoformat(timespec="seconds"),
+              "env_present": {name: bool(os.environ.get(name)) for name in env_names},
+          }
+          try:
+              with urlopen("http://127.0.0.1:8000/health", timeout=10) as response:
+                  result["health"] = json.load(response)
+          except Exception as exc:
+              result["health_error"] = type(exc).__name__
+
+          path = Path(f"/app/db/m1_live/{today}.parquet")
+          result["m1"] = {"exists": path.exists(), "size": path.stat().st_size if path.exists() else 0}
+          if path.exists():
+              try:
+                  import pandas as pd
+                  frame = pd.read_parquet(path, columns=["stock_id", "date"])
+                  dates = pd.to_datetime(frame["date"], errors="coerce")
+                  result["m1"].update(
+                      rows=len(frame),
+                      stocks=int(frame["stock_id"].astype(str).nunique()),
+                      latest=str(dates.max()),
+                  )
+              except Exception as exc:
+                  result["m1"]["error"] = type(exc).__name__
+          print(json.dumps(result, ensure_ascii=False))
+          PY
+
+          echo '### Relevant backend logs'
+          "${compose[@]}" logs --since=12h --tail=500 backend 2>&1 \
+            | grep -Ei '富邦|Fubon|collector|WebSocket|訂閱|登入|HF M1|upload|上傳|error|exception|fail|timeout|killed|oom' \
+            | tail -n 240 || true
+          REMOTE
