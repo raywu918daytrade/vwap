@@ -70,7 +70,9 @@ jobs:
             | grep -Ei 'vwap|market|collector|fubon' || true
 
           compose_file=""
-          if [ -f "${DEPLOY_PATH}/docker-compose.oracle.yml" ]; then
+          if [ -f /home/ubuntu/market-data-collector/docker-compose.yml ]; then
+            compose_file=/home/ubuntu/market-data-collector/docker-compose.yml
+          elif [ -f "${DEPLOY_PATH}/docker-compose.oracle.yml" ]; then
             compose_file="${DEPLOY_PATH}/docker-compose.oracle.yml"
           else
             compose_file="$(find /home/ubuntu -maxdepth 4 -type f \
@@ -105,6 +107,17 @@ jobs:
 
           echo '### Container state'
           docker inspect --format 'status={{.State.Status}} started={{.State.StartedAt}} restarts={{.RestartCount}} oom={{.State.OOMKilled}}' "${backend_id}"
+          docker inspect --format 'health={{json .State.Health}}' "${backend_id}"
+          docker inspect --format 'workdir={{.Config.WorkingDir}} command={{json .Config.Cmd}} healthcheck={{json .Config.Healthcheck}}' "${backend_id}"
+          docker inspect --format 'mounts={{json .Mounts}}' "${backend_id}"
+
+          if [ -d /home/ubuntu/market-data-collector ]; then
+            echo '### Collector source version'
+            git -C /home/ubuntu/market-data-collector status --short --branch 2>/dev/null || true
+            git -C /home/ubuntu/market-data-collector log -5 --oneline 2>/dev/null || true
+            find /home/ubuntu/market-data-collector -maxdepth 3 -type f \
+              ! -name '.env' ! -path '*/.git/*' -print | sort | head -n 200
+          fi
 
           echo '### Runtime checks'
           docker exec -i "${backend_id}" python - <<'PY'
@@ -152,4 +165,6 @@ jobs:
           docker logs --since=12h --tail=500 "${backend_id}" 2>&1 \
             | grep -Ei '富邦|Fubon|collector|WebSocket|訂閱|登入|HF M1|upload|上傳|error|exception|fail|timeout|killed|oom' \
             | tail -n 240 || true
+          echo '### Raw recent logs'
+          docker logs --since=30m --tail=240 "${backend_id}" 2>&1 || true
           REMOTE
