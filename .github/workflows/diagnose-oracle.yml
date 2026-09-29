@@ -159,6 +159,10 @@ jobs:
                   result["health"] = json.load(response)
           except Exception as exc:
               result["health_error"] = type(exc).__name__
+              try:
+                  result["health"] = json.loads(exc.read().decode("utf-8"))
+              except Exception:
+                  pass
 
           path = Path(f"/app/db/m1_live/{today}.parquet")
           result["m1"] = {"exists": path.exists(), "size": path.stat().st_size if path.exists() else 0}
