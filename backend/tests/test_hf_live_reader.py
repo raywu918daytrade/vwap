@@ -150,6 +150,29 @@ class HfLiveReaderTest(unittest.TestCase):
             payload = hf_live_reader.read_live_signals("2026-09-26")
         self.assertEqual(payload["latest_minute"], "2026-09-26 09:01:00")
 
+    def test_declared_signal_lag_is_validated_before_replacing_cache(self):
+        for signal_minute, valid in [("09:00", True), ("08:55", False), ("09:02", False)]:
+            with self.subTest(signal_minute=signal_minute):
+                hf_live_reader._LAST_CHECK.clear()
+                hf_live_reader._LAST_MANIFEST_KEY.clear()
+                target = self.root / "db/signal_live/2026-09-26.json"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text('{"cached":true}')
+                manifest = self.root / "manifest.json"
+                manifest.write_text(json.dumps({"trading_date": "2026-09-26",
+                    "latest_minute": "2026-09-26 09:01:00",
+                    "signals": {"latest_minute": f"2026-09-26 {signal_minute}:00"},
+                    "files": {"m1_live": "db/m1_live/2026-09-26.parquet", "signal_live": "db/signal_live/2026-09-26.json"}}))
+                source = self.root / "m1.parquet"
+                source.write_bytes(b"m1")
+                signal = self.root / "signal.json"
+                signal.write_text(json.dumps({"trading_date": "2026-09-26", "latest_minute": f"2026-09-26 {signal_minute}:00"}))
+                with patch.object(hf_live_reader, "_ROOT", self.root), \
+                     patch.dict(os.environ, {"HF_REPO_ID": "owner/data", "HF_TOKEN": "token"}), \
+                     patch("huggingface_hub.hf_hub_download", side_effect=[str(manifest), str(source), str(signal)]):
+                    hf_live_reader.refresh_live_m1("2026-09-26")
+                self.assertEqual("cached" not in json.loads(target.read_text()), valid)
+
 
 if __name__ == "__main__":
     unittest.main()

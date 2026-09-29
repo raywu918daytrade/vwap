@@ -160,10 +160,15 @@ def refresh_live_m1(date_str: str) -> tuple[bool, bool]:
                 try:
                     signal_source = hf_hub_download(filename=signal_path, **download_args)
                     signal_target = _ROOT / signal_path
-                    _replace_json(signal_source, signal_target)
-                    signal_payload = read_live_signals(date_str)
-                    if not signal_payload or signal_payload.get("latest_minute") != manifest_key:
+                    signal_payload = json.loads(Path(signal_source).read_text(encoding="utf-8"))
+                    signal_minute = str((manifest.get("signals") or {}).get("latest_minute") or manifest_key)
+                    lag = (datetime.fromisoformat(manifest_key) - datetime.fromisoformat(signal_minute)).total_seconds()
+                    if (not isinstance(signal_payload, dict)
+                            or signal_payload.get("trading_date") != date_str
+                            or signal_payload.get("latest_minute") != signal_minute
+                            or not 0 <= lag <= 300):
                         raise ValueError("live signal minute does not match manifest")
+                    _replace_json(signal_source, signal_target)
                 except Exception as exc:
                     print(f"[HF live] signal snapshot failed; keeping prior snapshot: {type(exc).__name__}: {exc}", flush=True)
             _LAST_MANIFEST_KEY[relative_path] = manifest_key
