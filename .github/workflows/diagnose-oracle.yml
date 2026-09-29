@@ -140,8 +140,8 @@ jobs:
           }
           try:
               import inspect
-              from importlib.metadata import version
-              from fubon_neo.sdk import build_websocket_client
+              from importlib.metadata import distribution, version
+              from fubon_neo.sdk import build_websocket_client, build_websocket_config
               result["packages"] = {
                   name: version(name)
                   for name in ("fubon-neo", "fugle-marketdata")
@@ -149,6 +149,8 @@ jobs:
               result["websocket_builder"] = {
                   "signature": str(inspect.signature(build_websocket_client)),
                   "source": inspect.getsource(build_websocket_client),
+                  "config_source": inspect.getsource(build_websocket_config),
+                  "fubon_requires": distribution("fubon-neo").requires,
               }
           except Exception as exc:
               result["websocket_builder_error"] = f"{type(exc).__name__}: {exc}"
