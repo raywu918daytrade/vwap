@@ -60,28 +60,54 @@ jobs:
             "${ORACLE_USER}@${ORACLE_HOST}" \
             "${remote_env} bash -s" <<'REMOTE'
           set -euo pipefail
-          cd "${DEPLOY_PATH}"
-          compose=(docker compose -f docker-compose.oracle.yml)
+          echo '### Runtime inventory'
+          echo "configured_path=${DEPLOY_PATH} exists=$([ -d "${DEPLOY_PATH}" ] && echo true || echo false)"
+          find /home/ubuntu -maxdepth 4 -type f \
+            \( -name 'docker-compose*.yml' -o -name 'compose.yml' -o -name 'compose.yaml' \) \
+            -print 2>/dev/null | sort
+          docker ps -a --format 'name={{.Names}} status={{.Status}} image={{.Image}}'
+          systemctl --no-pager --type=service --all 2>/dev/null \
+            | grep -Ei 'vwap|market|collector|fubon' || true
 
-          if [ "${COMMAND}" = "/restart-collector" ]; then
-            "${compose[@]}" restart backend
-            sleep 20
+          compose_file=""
+          if [ -f "${DEPLOY_PATH}/docker-compose.oracle.yml" ]; then
+            compose_file="${DEPLOY_PATH}/docker-compose.oracle.yml"
+          else
+            compose_file="$(find /home/ubuntu -maxdepth 4 -type f \
+              \( -name 'docker-compose*.yml' -o -name 'compose.yml' -o -name 'compose.yaml' \) \
+              -print 2>/dev/null | head -n 1)"
           fi
 
-          echo '### Docker compose status'
-          "${compose[@]}" ps
-
-          backend_id="$("${compose[@]}" ps -q backend)"
+          backend_id=""
+          if [ -n "${compose_file}" ]; then
+            echo "### Docker compose status (${compose_file})"
+            docker compose -f "${compose_file}" ps || true
+            backend_id="$(docker compose -f "${compose_file}" ps -q backend 2>/dev/null || true)"
+            if [ -z "${backend_id}" ]; then
+              backend_id="$(docker compose -f "${compose_file}" ps -q collector 2>/dev/null || true)"
+            fi
+          fi
           if [ -z "${backend_id}" ]; then
-            echo 'backend container is missing'
+            backend_id="$(docker ps -aq --filter 'name=collector' | head -n 1)"
+          fi
+          if [ -z "${backend_id}" ]; then
+            backend_id="$(docker ps -aq --filter 'name=vwap' | head -n 1)"
+          fi
+          if [ -z "${backend_id}" ]; then
+            echo 'collector container is missing'
             exit 1
+          fi
+
+          if [ "${COMMAND}" = "/restart-collector" ]; then
+            docker restart "${backend_id}"
+            sleep 20
           fi
 
           echo '### Container state'
           docker inspect --format 'status={{.State.Status}} started={{.State.StartedAt}} restarts={{.RestartCount}} oom={{.State.OOMKilled}}' "${backend_id}"
 
           echo '### Runtime checks'
-          docker exec "${backend_id}" python - <<'PY'
+          docker exec -i "${backend_id}" python - <<'PY'
           import json
           import os
           from datetime import datetime
@@ -123,7 +149,7 @@ jobs:
           PY
 
           echo '### Relevant backend logs'
-          "${compose[@]}" logs --since=12h --tail=500 backend 2>&1 \
+          docker logs --since=12h --tail=500 "${backend_id}" 2>&1 \
             | grep -Ei '富邦|Fubon|collector|WebSocket|訂閱|登入|HF M1|upload|上傳|error|exception|fail|timeout|killed|oom' \
             | tail -n 240 || true
           REMOTE
