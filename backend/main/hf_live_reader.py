@@ -129,7 +129,14 @@ def refresh_live_m1(date_str: str) -> tuple[bool, bool]:
             manifest_key = str(manifest.get("latest_minute") or manifest.get("generated_at") or "")
             if not manifest_key:
                 raise ValueError("live manifest has no version key")
-            if _LAST_MANIFEST_KEY.get(relative_path) == manifest_key and target.exists():
+            signal_path = manifest.get("files", {}).get("signal_live")
+            expected_signal_minute = str((manifest.get("signals") or {}).get("latest_minute") or manifest_key)
+            cached_signal = read_live_signals(date_str)
+            signals_current = (
+                signal_path != f"db/signal_live/{date_str}.json"
+                or (cached_signal or {}).get("latest_minute") == expected_signal_minute
+            )
+            if _LAST_MANIFEST_KEY.get(relative_path) == manifest_key and target.exists() and signals_current:
                 _STATUS["apply_mode"] = "current"
                 return True, False
 

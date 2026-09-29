@@ -150,6 +150,26 @@ class HfLiveReaderTest(unittest.TestCase):
             payload = hf_live_reader.read_live_signals("2026-09-26")
         self.assertEqual(payload["latest_minute"], "2026-09-26 09:01:00")
 
+    def test_signal_arriving_after_same_m1_minute_is_downloaded(self):
+        base = {"trading_date": "2026-09-26", "latest_minute": "2026-09-26 09:01:00",
+                "files": {"m1_live": "db/m1_live/2026-09-26.parquet"}}
+        first = self.root / "first.json"
+        first.write_text(json.dumps(base))
+        base["files"]["signal_live"] = "db/signal_live/2026-09-26.json"
+        second = self.root / "second.json"
+        second.write_text(json.dumps(base))
+        source = self.root / "m1.parquet"
+        source.write_bytes(b"m1")
+        signal = self.root / "signal.json"
+        signal.write_text(json.dumps({"trading_date": "2026-09-26", "latest_minute": base["latest_minute"]}))
+        with patch.object(hf_live_reader, "_ROOT", self.root), \
+             patch.dict(os.environ, {"HF_REPO_ID": "owner/data", "HF_LIVE_REFRESH_SECONDS": "1"}), \
+             patch("main.hf_live_reader.time.monotonic", side_effect=[100, 100, 102, 102]), \
+             patch("huggingface_hub.hf_hub_download", side_effect=[str(first), str(source), str(second), str(source), str(signal)]):
+            self.assertEqual(hf_live_reader.refresh_live_m1("2026-09-26"), (True, True))
+            self.assertEqual(hf_live_reader.refresh_live_m1("2026-09-26"), (True, True))
+            self.assertEqual(hf_live_reader.read_live_signals("2026-09-26")["latest_minute"], base["latest_minute"])
+
     def test_declared_signal_lag_is_validated_before_replacing_cache(self):
         for signal_minute, valid in [("09:00", True), ("08:55", False), ("09:02", False)]:
             with self.subTest(signal_minute=signal_minute):
