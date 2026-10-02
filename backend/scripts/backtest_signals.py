@@ -331,6 +331,7 @@ def _md(df: pd.DataFrame) -> str:
     return head + body
 
 
+WINDOW = ("10:00", "12:15")
 FOCUS_SIGNALS = {
     "觸壓力＋VWAP上（做多）": "站上 VWAP 碰壓力（做多）",
     "觸支撐＋VWAP下（做空）": "跌破 VWAP 碰支撐（做空）",
@@ -344,7 +345,14 @@ def _focus(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_report(
-    trades: pd.DataFrame, cost: float, sym: tuple[float, ...], tp_only: tuple[float, ...], min_n: int, filter_text: str
+    trades: pd.DataFrame,
+    cost: float,
+    sym: tuple[float, ...],
+    tp_only: tuple[float, ...],
+    min_n: int,
+    filter_text: str,
+    tp: float,
+    sl: float,
 ) -> str:
     tradable = trades.dropna(subset=["ret_eod"])
     unfiltered = tradable[tradable["daytrade"]]
@@ -362,7 +370,8 @@ def build_report(
         "- 順序：先穿VWAP再碰SR＝SR 那一下觸發；先碰SR再穿VWAP＝VWAP 那一下觸發；同一分鐘＝兩個同時；開盤跳空＝09:00 第一根直接穿過水位",
         "",
     ]
-    sections = [(f"ret_tp{x:g}", f"停利 {x:g}%，不停損，收盤平倉") for x in tp_only]
+    sections = [("ret_bracket", f"停利 {tp:g}% / 停損 {sl:g}%")]
+    sections += [(f"ret_tp{x:g}", f"停利 {x:g}%，不停損，收盤平倉") for x in tp_only]
     sections += [(f"ret_sym{x:g}", f"停利 {x:g}% / 停損 {x:g}%") for x in sym]
     for col, title in sections:
         lines += [
@@ -371,6 +380,10 @@ def build_report(
             "### 整體（不分順序）",
             "",
             _md(summarize(focus, ["signal"], col, cost, 1)),
+            "",
+            f"### 只看 {WINDOW[0]}-{WINDOW[1]} 進場",
+            "",
+            _md(summarize(focus[(focus["time"] >= WINDOW[0]) & (focus["time"] < WINDOW[1])], ["signal"], col, cost, 1)),
             "",
             "### 依先後順序",
             "",
@@ -390,7 +403,7 @@ def main() -> None:
     parser.add_argument("--to-date", default=None)
     parser.add_argument("--cost", type=float, default=0.435, help="來回成本 %%，預設手續費 0.1425%%x2 + 當沖稅 0.15%%")
     parser.add_argument("--tp", type=float, default=2.0, help="停利 %%")
-    parser.add_argument("--sl", type=float, default=1.0, help="停損 %%")
+    parser.add_argument("--sl", type=float, default=4.0, help="停損 %%")
     parser.add_argument("--last-entry", default="13:10", help="晚於此時間的訊號不進場")
     parser.add_argument("--min-n", type=int, default=30, help="樣本少於此數的分組不列出")
     parser.add_argument("--sym", default="1,2", help="停利＝停損的大小（%%），逗號分隔")
@@ -419,7 +432,7 @@ def main() -> None:
     trades.to_csv(out_dir / "trades.csv.gz", index=False)
     parts = [f"ATR>={args.min_atr:g}" if args.min_atr > 0 else "", f"5分幅>={args.min_open5:g}" if args.min_open5 > 0 else "", f"量PR>={args.min_volpr:g}" if args.min_volpr > 0 else ""]
     filter_text = "、".join(p for p in parts if p) or "無"
-    report = build_report(trades, args.cost, sym, tp_only, args.min_n, filter_text)
+    report = build_report(trades, args.cost, sym, tp_only, args.min_n, filter_text, args.tp, args.sl)
     (out_dir / "report.md").write_text(report, encoding="utf-8")
     print(report, flush=True)
     summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
