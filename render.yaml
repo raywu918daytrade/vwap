@@ -30,7 +30,7 @@ services:
       - key: HF_DOWNLOAD_WORKERS
         value: "4"
       - key: HF_LIVE_REFRESH_SECONDS
-        value: "60"
+        value: "10"
       - key: HF_LIVE_SIGNALS_SOURCE
         value: oracle
       - key: RENDER_RSS_GUARD_MB
