@@ -41,21 +41,15 @@ TICK_UNIVERSE = _ROOT / "db/tickers/tick_universe.parquet"
 
 HOLDS = (5, 15, 30)
 LAST_BAR = "13:24"
-TIME_BUCKETS = [
-    ("09:00", "09:00-09:14"),
-    ("09:15", "09:15-09:59"),
-    ("10:00", "10:00-10:59"),
-    ("11:00", "11:00-11:59"),
-    ("12:00", "12:00-13:10"),
-]
+BUCKET_MINUTES = 15
 
 
 def _time_bucket(hhmm: str) -> str:
-    label = TIME_BUCKETS[0][1]
-    for start, name in TIME_BUCKETS:
-        if hhmm >= start:
-            label = name
-    return label
+    """09:07 -> '09:00-09:15'（每 15 分鐘一段）。"""
+    h, m = int(hhmm[:2]), int(hhmm[3:5])
+    start = h * 60 + m - (m % BUCKET_MINUTES)
+    end = start + BUCKET_MINUTES
+    return f"{start // 60:02d}:{start % 60:02d}-{end // 60:02d}:{end % 60:02d}"
 
 
 def _nth_bucket(n: int) -> str:
@@ -285,7 +279,15 @@ def build_report(trades: pd.DataFrame, cost: float, tp: float, sl: float, min_n:
         for col, label in exits:
             lines += [f"### 出場：{label}", "", _md(summarize(subset, ["signal"], col, cost, min_n)), ""]
     pool = tradable[tradable["daytrade"]]
-    lines += ["## 當沖股池：依訊號時段（停利停損出場）", "", _md(summarize(pool, ["signal", "時段"], "ret_bracket", cost, min_n)), ""]
+    sr = pool[pool["family"] == "SR"]
+    for col, label in exits:
+        lines += [
+            f"## 當沖股池：VWAP＋壓力支撐，每 15 分鐘時段（出場：{label}）",
+            "",
+            _md(summarize(sr, ["signal", "時段"], col, cost, min_n)),
+            "",
+        ]
+    lines += ["## 當沖股池：全部訊號，每 15 分鐘時段（停利停損出場）", "", _md(summarize(pool, ["signal", "時段"], "ret_bracket", cost, min_n)), ""]
     vwap = pool[pool["family"] == "VWAP"]
     lines += ["## 當沖股池：VWAP 當日第幾次穿越（停利停損出場）", "", _md(summarize(vwap, ["signal", "第幾次"], "ret_bracket", cost, min_n)), ""]
     return "\n".join(lines)
