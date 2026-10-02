@@ -52,6 +52,8 @@ export default function DiagnosticsPanel() {
   const quote = data?.quote || {};
   const consumer = data?.consumer || {};
   const render = data?.render || {};
+  const oracle = data?.oracle || {};
+  const signals = data?.signals || {};
 
   return (
     <>
@@ -80,7 +82,17 @@ export default function DiagnosticsPanel() {
             </header>
             <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3 text-xs">
               {error ? <div className="alert alert-error py-2">{error}</div> : null}
-              <div className="text-base-content/55">報告時間：{clock(data?.generated_at)}　版本：{value(render.version)}</div>
+              <div className="text-base-content/55">報告時間：{clock(data?.generated_at)}</div>
+
+              <section className="rounded border border-base-300">
+                <h2 className="border-b border-base-300 bg-base-200 px-3 py-2 font-semibold">版本資訊</h2>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2 p-3">
+                  <span>Render 版本</span><span>{value(render.version)}{render.commit ? ` (${render.commit})` : ""}</span>
+                  <span>Oracle 版本</span><span>{oracle.version ? `${oracle.version} (${value(oracle.commit)})` : "-"}</span>
+                  <span>Oracle 部署時間</span><span>{clock(oracle.deployed_at)}</span>
+                  <span>Oracle 啟動時間</span><span>{clock(oracle.started_at)}</span>
+                </div>
+              </section>
 
               <section className="rounded border border-base-300">
                 <h2 className="border-b border-base-300 bg-base-200 px-3 py-2 font-semibold">Oracle → HF → Render</h2>
@@ -100,6 +112,8 @@ export default function DiagnosticsPanel() {
                   <span>盤中延遲</span><span className={quote.fresh ? "text-success" : data?.phase === "盤中" ? "text-error" : ""}>{data?.phase === "盤中" ? `${value(quote.delay_seconds)} 秒` : "不適用"}</span>
                   <span>分鐘涵蓋率</span><span>{coverageText(quote.coverage)}</span>
                   <span>本次差異筆數</span><span>{value(quote.delta?.rows)}</span>
+                  <span>訊號最新分鐘</span><span>{clock(signals.latest_minute)}</span>
+                  <span>訊號落後 K 線</span><span className={signals.lag_seconds > 0 ? "text-warning" : ""}>{signals.lag_seconds == null ? "-" : `${signals.lag_seconds} 秒`}</span>
                 </div>
               </section>
 
