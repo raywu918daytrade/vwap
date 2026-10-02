@@ -93,9 +93,9 @@ def refresh_live_m1(date_str: str) -> tuple[bool, bool]:
         return target.exists(), False
 
     try:
-        ttl = max(1.0, float(os.environ.get("HF_LIVE_REFRESH_SECONDS", "60")))
+        ttl = max(1.0, float(os.environ.get("HF_LIVE_REFRESH_SECONDS", "10")))
     except ValueError:
-        ttl = 60.0
+        ttl = 10.0
     now = time.monotonic()
     if now - _LAST_CHECK.get(relative_path, 0.0) < ttl:
         return target.exists(), False

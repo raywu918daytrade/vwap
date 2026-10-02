@@ -96,6 +96,15 @@ def _daily_sync() -> None:
         time.sleep(60)
 
 
+def _live_poll_seconds() -> float:
+    # Oracle publishes 40-50s into the next minute, at a time that varies;
+    # polling on a short interval picks each minute up within seconds.
+    try:
+        return max(1.0, float(os.environ.get("HF_LIVE_REFRESH_SECONDS", "10")))
+    except ValueError:
+        return 10.0
+
+
 def _live_m1_sync() -> None:
     """Mirror Oracle's current M1 snapshot from HF while the market is active."""
     from main.hf_live_reader import read_live_signals, refresh_live_m1
@@ -112,10 +121,7 @@ def _live_m1_sync() -> None:
                     replace_live_signals(signals)
                 push_hf_refresh()
             _guard_memory()
-            next_refresh = now.replace(second=22, microsecond=0)
-            if next_refresh <= now:
-                next_refresh += timedelta(minutes=1)
-            time.sleep((next_refresh - now).total_seconds())
+            time.sleep(_live_poll_seconds())
         else:
             time.sleep(60)
 
