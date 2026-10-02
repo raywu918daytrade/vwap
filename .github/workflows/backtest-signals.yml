@@ -38,11 +38,12 @@ jobs:
       MONTHS: ${{ inputs.months || '3' }}
       EXTRA_ARGS: ${{ inputs.extra_args || '' }}
       # Optional fixed window (YYYY-MM-DD) for out-of-sample checks; overrides MONTHS for the date range.
-      FROM_DATE_FIXED: "2026-04-01"
-      TO_DATE_FIXED: "2026-06-30"
-      SYNC_MONTHS: "8"
+      # Set FROM/TO_DATE_FIXED (YYYY-MM-DD) and SYNC_MONTHS for a fixed window; empty = last MONTHS months.
+      FROM_DATE_FIXED: ""
+      TO_DATE_FIXED: ""
+      SYNC_MONTHS: ""
       # 1 = recompute signals/activity for the fixed window on the runner (never uploaded).
-      BUILD_SIGNALS: "1"
+      BUILD_SIGNALS: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
