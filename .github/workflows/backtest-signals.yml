@@ -55,7 +55,7 @@ jobs:
         working-directory: backend
         run: |
           python -m scripts.sync_market_db_from_hf \
-            --only m1 tickers vwap_signals \
+            --only m1 tickers vwap_signals vwap_activity \
             --intraday-months "$((MONTHS + 1))" \
             --no-prune
 

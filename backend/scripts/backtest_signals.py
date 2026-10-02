@@ -38,6 +38,7 @@ _ROOT = Path(__file__).parent.parent
 SIGNAL_DIR = _ROOT / "db/vwap_signals"
 M1_DIR = _ROOT / "db/m1"
 TICK_UNIVERSE = _ROOT / "db/tickers/tick_universe.parquet"
+ACTIVITY_DIR = _ROOT / "db/vwap_activity"
 
 HOLDS = (5, 15, 30)
 LAST_BAR = "13:24"
@@ -68,6 +69,31 @@ def _daytrade_ids() -> set[str]:
     if "daytrade_ok" in df.columns and df["daytrade_ok"].fillna(False).astype(bool).any():
         df = df[df["daytrade_ok"].fillna(False).astype(bool)]
     return set(df["stock_id"].astype(str))
+
+
+def load_activity() -> pd.DataFrame:
+    """每日每股的網頁過濾指標：day_atr、open5_rng、vol5_pr（見 pattern/vwap_activity.py）。"""
+    frames = []
+    for path in sorted(ACTIVITY_DIR.glob("*.parquet")):
+        df = pd.read_parquet(path, columns=["scan_date", "stock_id", "day_atr", "open5_rng", "vol5_pr"])
+        frames.append(df)
+    if not frames:
+        return pd.DataFrame(columns=["date", "stock_id", "day_atr", "open5_rng", "vol5_pr"])
+    df = pd.concat(frames, ignore_index=True)
+    df["date"] = df["scan_date"].astype(str).str[:10]
+    df["stock_id"] = df["stock_id"].astype(str)
+    return df.drop(columns=["scan_date"]).drop_duplicates(["date", "stock_id"], keep="last")
+
+
+def apply_page_filter(trades: pd.DataFrame, min_atr: float, min_open5: float, min_volpr: float) -> pd.Series:
+    """跟網頁 VWAP 框的活動度過濾一樣：指標缺值就不通過，門檻 0 表示不篩。"""
+    act = load_activity()
+    merged = trades[["date", "stock_id"]].merge(act, on=["date", "stock_id"], how="left")
+    ok = pd.Series(True, index=trades.index)
+    for col, threshold in (("day_atr", min_atr), ("open5_rng", min_open5), ("vol5_pr", min_volpr)):
+        if threshold > 0:
+            ok &= (merged[col].to_numpy() >= threshold)
+    return ok
 
 
 def load_events(from_date: str | None, to_date: str | None) -> pd.DataFrame:
@@ -266,23 +292,34 @@ FOCUS_SIGNALS = {
 }
 
 
-def build_report(trades: pd.DataFrame, cost: float, tp: float, sl: float, min_n: int) -> str:
-    tradable = trades.dropna(subset=["ret_eod"])
-    pool = tradable[tradable["daytrade"]]
-    dates = sorted(pool["date"].unique())
-    focus = pool[pool["signal"].isin(FOCUS_SIGNALS)].copy()
+def _focus(df: pd.DataFrame) -> pd.DataFrame:
+    focus = df[df["signal"].isin(FOCUS_SIGNALS)].copy()
     focus["signal"] = focus["signal"].map(FOCUS_SIGNALS)
+    return focus
+
+
+def build_report(trades: pd.DataFrame, cost: float, tp: float, sl: float, min_n: int, filter_text: str) -> str:
+    tradable = trades.dropna(subset=["ret_eod"])
+    unfiltered = tradable[tradable["daytrade"]]
+    pool = unfiltered[unfiltered["page_filter"]]
+    dates = sorted(pool["date"].unique())
+    focus = _focus(pool)
     col = "ret_bracket"
     lines = [
         "# VWAP＋壓力支撐訊號回測",
         "",
         f"- 期間：{dates[0] if dates else '-'} ~ {dates[-1] if dates else '-'}（{len(dates)} 個交易日），可當沖股票",
+        f"- 網頁過濾：{filter_text}",
         f"- 下一分鐘開盤進場，停利 {tp}% / 停損 {sl}%，都沒碰到 13:24 出場；同一根都碰到算停損",
         f"- 扣來回成本 {cost}% 後淨報酬 > 0 才算贏；少於 {min_n} 筆的格子不列",
         "",
         "## 整體",
         "",
         _md(summarize(focus, ["signal"], col, cost, 1)),
+        "",
+        "## 對照：不套網頁過濾",
+        "",
+        _md(summarize(_focus(unfiltered), ["signal"], col, cost, 1)),
         "",
         "## 每 15 分鐘時段",
         "",
@@ -305,6 +342,9 @@ def main() -> None:
     parser.add_argument("--sl", type=float, default=1.0, help="停損 %%")
     parser.add_argument("--last-entry", default="13:10", help="晚於此時間的訊號不進場")
     parser.add_argument("--min-n", type=int, default=30, help="樣本少於此數的分組不列出")
+    parser.add_argument("--min-atr", type=float, default=0.05, help="日 ATR 門檻（網頁預設 ATR>=5%%，0 不篩）")
+    parser.add_argument("--min-open5", type=float, default=0.0, help="開盤 5 分幅門檻（網頁預設不篩）")
+    parser.add_argument("--min-volpr", type=float, default=0.5, help="09:05 量 PR 門檻（網頁預設 PR>=50，0 不篩）")
     parser.add_argument("--out-dir", default="db/backtest")
     args = parser.parse_args()
 
@@ -315,13 +355,16 @@ def main() -> None:
     trades = simulate(events, args.tp, args.sl, args.last_entry)
     daytrade = _daytrade_ids()
     trades["daytrade"] = trades["stock_id"].isin(daytrade) if daytrade else True
+    trades["page_filter"] = apply_page_filter(trades, args.min_atr, args.min_open5, args.min_volpr)
     trades["時段"] = trades["time"].map(_time_bucket)
     trades["第幾次"] = trades["nth"].map(lambda n: _nth_bucket(int(n)) if pd.notna(n) else "")
 
     out_dir = _ROOT / args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     trades.to_csv(out_dir / "trades.csv.gz", index=False)
-    report = build_report(trades, args.cost, args.tp, args.sl, args.min_n)
+    parts = [f"ATR>={args.min_atr:g}" if args.min_atr > 0 else "", f"5分幅>={args.min_open5:g}" if args.min_open5 > 0 else "", f"量PR>={args.min_volpr:g}" if args.min_volpr > 0 else ""]
+    filter_text = "、".join(p for p in parts if p) or "無"
+    report = build_report(trades, args.cost, args.tp, args.sl, args.min_n, filter_text)
     (out_dir / "report.md").write_text(report, encoding="utf-8")
     print(report, flush=True)
     summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
