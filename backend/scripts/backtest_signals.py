@@ -221,7 +221,7 @@ def _bracket(h, l, c_last: float, entry: float, e: int, side: int, tp: float, sl
     return side * (c_last - entry) * 100.0 / entry
 
 
-def _trade(arrays, time: str, side: int, tp: float, sl: float, last_entry: str, sym: tuple[float, ...] = ()) -> dict | None:
+def _trade(arrays, time: str, side: int, tp: float, sl: float, last_entry: str, sym: tuple[float, ...] = (), tp_only: tuple[float, ...] = ()) -> dict | None:
     """One simulated trade on a stock's day bars; None when it cannot be entered."""
     hhmm, o, h, l, c = arrays
     if time > last_entry:
@@ -239,13 +239,17 @@ def _trade(arrays, time: str, side: int, tp: float, sl: float, last_entry: str, 
     row["ret_bracket"] = _bracket(h, l, c[last], entry, e, side, tp, sl)
     for size in sym:
         row[f"ret_sym{size:g}"] = _bracket(h, l, c[last], entry, e, side, size, size)
+    for size in tp_only:
+        row[f"ret_tp{size:g}"] = _bracket(h, l, c[last], entry, e, side, size, math.inf)
     row["entry_time"] = hhmm[e]
     return row
 
 
-def simulate(events: pd.DataFrame, tp: float, sl: float, last_entry: str, sym: tuple[float, ...] = ()) -> pd.DataFrame:
+def simulate(
+    events: pd.DataFrame, tp: float, sl: float, last_entry: str, sym: tuple[float, ...] = (), tp_only: tuple[float, ...] = ()
+) -> pd.DataFrame:
     """Return events with gross % returns for each exit rule (NaN when untradable)."""
-    cols = [f"ret_{h}m" for h in HOLDS] + ["ret_eod", "ret_bracket"] + [f"ret_sym{x:g}" for x in sym]
+    cols = [f"ret_{h}m" for h in HOLDS] + ["ret_eod", "ret_bracket"] + [f"ret_sym{x:g}" for x in sym] + [f"ret_tp{x:g}" for x in tp_only]
     out = events.copy()
     for col in cols:
         out[col] = np.nan
@@ -270,7 +274,7 @@ def simulate(events: pd.DataFrame, tp: float, sl: float, last_entry: str, sym: t
         orders: list[str] = []
         for ev in day_events.itertuples(index=False):
             arrays = bars.get(ev.stock_id)
-            row = _trade(arrays, ev.time, int(ev.side), tp, sl, last_entry, sym) if arrays else None
+            row = _trade(arrays, ev.time, int(ev.side), tp, sl, last_entry, sym, tp_only) if arrays else None
             for col in results:
                 results[col].append(row[col] if row else (np.nan if col != "entry_time" else ""))
             orders.append(
@@ -339,7 +343,9 @@ def _focus(df: pd.DataFrame) -> pd.DataFrame:
     return focus
 
 
-def build_report(trades: pd.DataFrame, cost: float, sym: tuple[float, ...], min_n: int, filter_text: str) -> str:
+def build_report(
+    trades: pd.DataFrame, cost: float, sym: tuple[float, ...], tp_only: tuple[float, ...], min_n: int, filter_text: str
+) -> str:
     tradable = trades.dropna(subset=["ret_eod"])
     unfiltered = tradable[tradable["daytrade"]]
     pool = unfiltered[unfiltered["page_filter"]]
@@ -350,15 +356,17 @@ def build_report(trades: pd.DataFrame, cost: float, sym: tuple[float, ...], min_
         "",
         f"- 期間：{dates[0] if dates else '-'} ~ {dates[-1] if dates else '-'}（{len(dates)} 個交易日），可當沖股票",
         f"- 網頁過濾：{filter_text}",
-        "- 下一分鐘開盤進場，停利＝停損，都沒碰到 13:24 出場；同一根都碰到算停損",
+        "- 下一分鐘開盤進場；出場規則見各節標題，沒碰到停利/停損就 13:24 收盤出場；同一根都碰到算停損",
+        "- 平均淨報酬％＝每筆期望值（已扣成本）",
         f"- 扣來回成本 {cost}% 後淨報酬 > 0 才算贏；少於 {min_n} 筆的格子不列",
         "- 順序：先穿VWAP再碰SR＝SR 那一下觸發；先碰SR再穿VWAP＝VWAP 那一下觸發；同一分鐘＝兩個同時；開盤跳空＝09:00 第一根直接穿過水位",
         "",
     ]
-    for size in sym:
-        col = f"ret_sym{size:g}"
+    sections = [(f"ret_tp{x:g}", f"停利 {x:g}%，不停損，收盤平倉") for x in tp_only]
+    sections += [(f"ret_sym{x:g}", f"停利 {x:g}% / 停損 {x:g}%") for x in sym]
+    for col, title in sections:
         lines += [
-            f"## 停利 {size:g}% / 停損 {size:g}%",
+            f"## {title}",
             "",
             "### 整體（不分順序）",
             "",
@@ -386,6 +394,7 @@ def main() -> None:
     parser.add_argument("--last-entry", default="13:10", help="晚於此時間的訊號不進場")
     parser.add_argument("--min-n", type=int, default=30, help="樣本少於此數的分組不列出")
     parser.add_argument("--sym", default="1,2", help="停利＝停損的大小（%%），逗號分隔")
+    parser.add_argument("--tp-only", default="2", help="只停利不停損的停利 %%，逗號分隔")
     parser.add_argument("--min-atr", type=float, default=0.05, help="日 ATR 門檻（網頁預設 ATR>=5%%，0 不篩）")
     parser.add_argument("--min-open5", type=float, default=0.0, help="開盤 5 分幅門檻（網頁預設不篩）")
     parser.add_argument("--min-volpr", type=float, default=0.5, help="09:05 量 PR 門檻（網頁預設 PR>=50，0 不篩）")
@@ -397,7 +406,8 @@ def main() -> None:
         raise RuntimeError("db/vwap_signals 沒有訊號，請先同步 HF")
     print(f"讀到 {len(events)} 筆訊號，{events['date'].nunique()} 個交易日", flush=True)
     sym = tuple(float(x) for x in args.sym.split(",") if x.strip())
-    trades = simulate(events, args.tp, args.sl, args.last_entry, sym)
+    tp_only = tuple(float(x) for x in args.tp_only.split(",") if x.strip())
+    trades = simulate(events, args.tp, args.sl, args.last_entry, sym, tp_only)
     daytrade = _daytrade_ids()
     trades["daytrade"] = trades["stock_id"].isin(daytrade) if daytrade else True
     trades["page_filter"] = apply_page_filter(trades, args.min_atr, args.min_open5, args.min_volpr)
@@ -409,7 +419,7 @@ def main() -> None:
     trades.to_csv(out_dir / "trades.csv.gz", index=False)
     parts = [f"ATR>={args.min_atr:g}" if args.min_atr > 0 else "", f"5分幅>={args.min_open5:g}" if args.min_open5 > 0 else "", f"量PR>={args.min_volpr:g}" if args.min_volpr > 0 else ""]
     filter_text = "、".join(p for p in parts if p) or "無"
-    report = build_report(trades, args.cost, sym, args.min_n, filter_text)
+    report = build_report(trades, args.cost, sym, tp_only, args.min_n, filter_text)
     (out_dir / "report.md").write_text(report, encoding="utf-8")
     print(report, flush=True)
     summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
