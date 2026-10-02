@@ -39,8 +39,10 @@ jobs:
       EXTRA_ARGS: ${{ inputs.extra_args || '' }}
       # Optional fixed window (YYYY-MM-DD) for out-of-sample checks; overrides MONTHS for the date range.
       FROM_DATE_FIXED: "2026-04-01"
-      TO_DATE_FIXED: "2026-07-01"
+      TO_DATE_FIXED: "2026-06-30"
       SYNC_MONTHS: "8"
+      # 1 = recompute signals/activity for the fixed window on the runner (never uploaded).
+      BUILD_SIGNALS: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,9 +61,17 @@ jobs:
         working-directory: backend
         run: |
           python -m scripts.sync_market_db_from_hf \
-            --only m1 tickers vwap_signals vwap_activity \
+            --only m1 m5_std d1 adjustment_day tickers adjustment_factor tick_adjust_factor vwap_signals vwap_activity d1_flags adjustment_day_flags \
+            --history-months 14 \
             --intraday-months "${SYNC_MONTHS:-$((MONTHS + 1))}" \
             --no-prune
+
+      - name: Rebuild signals for the fixed window (local only, not uploaded)
+        if: ${{ env.BUILD_SIGNALS == '1' }}
+        working-directory: backend
+        run: |
+          python -m scripts.build_vwap_activity --from-date "${FROM_DATE_FIXED}" --to-date "${TO_DATE_FIXED}"
+          python -m scripts.build_vwap_signals --from-date "${FROM_DATE_FIXED}" --to-date "${TO_DATE_FIXED}"
 
       - name: Run backtest
         working-directory: backend
