@@ -301,7 +301,7 @@ def main() -> None:
     parser.add_argument("--from-date", default=None)
     parser.add_argument("--to-date", default=None)
     parser.add_argument("--cost", type=float, default=0.435, help="來回成本 %%，預設手續費 0.1425%%x2 + 當沖稅 0.15%%")
-    parser.add_argument("--tp", type=float, default=1.0, help="停利 %%")
+    parser.add_argument("--tp", type=float, default=2.0, help="停利 %%")
     parser.add_argument("--sl", type=float, default=1.0, help="停損 %%")
     parser.add_argument("--last-entry", default="13:10", help="晚於此時間的訊號不進場")
     parser.add_argument("--min-n", type=int, default=30, help="樣本少於此數的分組不列出")
