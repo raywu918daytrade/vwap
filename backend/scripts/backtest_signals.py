@@ -260,36 +260,39 @@ def _md(df: pd.DataFrame) -> str:
     return head + body
 
 
+FOCUS_SIGNALS = {
+    "觸壓力＋VWAP上（做多）": "站上 VWAP 碰壓力（做多）",
+    "觸支撐＋VWAP下（做空）": "跌破 VWAP 碰支撐（做空）",
+}
+
+
 def build_report(trades: pd.DataFrame, cost: float, tp: float, sl: float, min_n: int) -> str:
     tradable = trades.dropna(subset=["ret_eod"])
-    dates = sorted(tradable["date"].unique())
+    pool = tradable[tradable["daytrade"]]
+    dates = sorted(pool["date"].unique())
+    focus = pool[pool["signal"].isin(FOCUS_SIGNALS)].copy()
+    focus["signal"] = focus["signal"].map(FOCUS_SIGNALS)
+    col = "ret_bracket"
     lines = [
-        "# 盤勢雷達訊號回測",
+        "# VWAP＋壓力支撐訊號回測",
         "",
-        f"- 期間：{dates[0] if dates else '-'} ~ {dates[-1] if dates else '-'}（{len(dates)} 個交易日），可交易訊號 {len(tradable)} 筆",
-        f"- 進場：訊號K的下一根開盤；出場：持有 N 分鐘收盤、或 13:24 收盤；停利停損 +{tp}% / -{sl}%（同根都碰到算停損）",
-        f"- 淨報酬扣來回成本 {cost}%；勝率＝淨報酬 > 0",
+        f"- 期間：{dates[0] if dates else '-'} ~ {dates[-1] if dates else '-'}（{len(dates)} 個交易日），可當沖股票",
+        f"- 下一分鐘開盤進場，停利 {tp}% / 停損 {sl}%，都沒碰到 13:24 出場；同一根都碰到算停損",
+        f"- 扣來回成本 {cost}% 後淨報酬 > 0 才算贏；少於 {min_n} 筆的格子不列",
+        "",
+        "## 整體",
+        "",
+        _md(summarize(focus, ["signal"], col, cost, 1)),
+        "",
+        "## 每 15 分鐘時段",
+        "",
+        _md(summarize(focus, ["signal", "時段"], col, cost, min_n)),
+        "",
+        "## 參考：其他訊號整體（同樣進出場規則）",
+        "",
+        _md(summarize(pool, ["signal"], col, cost, min_n)),
         "",
     ]
-    exits = [(f"ret_{h}m", f"持有 {h} 分鐘") for h in HOLDS] + [("ret_eod", "抱到 13:24"), ("ret_bracket", f"停利 {tp}% / 停損 {sl}%")]
-    for universe in ("當沖股池", "全部"):
-        subset = tradable[tradable["daytrade"]] if universe == "當沖股池" else tradable
-        lines.append(f"## {universe}（{len(subset)} 筆）")
-        lines.append("")
-        for col, label in exits:
-            lines += [f"### 出場：{label}", "", _md(summarize(subset, ["signal"], col, cost, min_n)), ""]
-    pool = tradable[tradable["daytrade"]]
-    sr = pool[pool["family"] == "SR"]
-    for col, label in exits:
-        lines += [
-            f"## 當沖股池：VWAP＋壓力支撐，每 15 分鐘時段（出場：{label}）",
-            "",
-            _md(summarize(sr, ["signal", "時段"], col, cost, min_n)),
-            "",
-        ]
-    lines += ["## 當沖股池：全部訊號，每 15 分鐘時段（停利停損出場）", "", _md(summarize(pool, ["signal", "時段"], "ret_bracket", cost, min_n)), ""]
-    vwap = pool[pool["family"] == "VWAP"]
-    lines += ["## 當沖股池：VWAP 當日第幾次穿越（停利停損出場）", "", _md(summarize(vwap, ["signal", "第幾次"], "ret_bracket", cost, min_n)), ""]
     return "\n".join(lines)
 
 

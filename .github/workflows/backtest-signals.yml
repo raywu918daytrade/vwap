@@ -6,7 +6,7 @@ on:
       months:
         description: "Months of M1 history to download and backtest."
         required: false
-        default: "6"
+        default: "3"
         type: string
       extra_args:
         description: "Extra args for scripts.backtest_signals, e.g. --tp 1.5 --sl 1 --cost 0.3"
@@ -35,7 +35,7 @@ jobs:
       HF_REPO_ID: ${{ secrets.HF_REPO_ID || vars.HF_REPO_ID || 'raywu918daytrade/daytrade' }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_HUB_DISABLE_XET: "1"
-      MONTHS: ${{ inputs.months || '6' }}
+      MONTHS: ${{ inputs.months || '3' }}
       EXTRA_ARGS: ${{ inputs.extra_args || '' }}
     steps:
       - name: Checkout
@@ -56,13 +56,13 @@ jobs:
         run: |
           python -m scripts.sync_market_db_from_hf \
             --only m1 tickers vwap_signals \
-            --intraday-months "${MONTHS}" \
+            --intraday-months "$((MONTHS + 1))" \
             --no-prune
 
       - name: Run backtest
         working-directory: backend
         run: |
-          FROM_DATE="$(TZ=Asia/Taipei date -d "${MONTHS} months ago" +%Y-%m-01)"
+          FROM_DATE="$(TZ=Asia/Taipei date -d "${MONTHS} months ago" +%F)"
           python -m scripts.backtest_signals --from-date "${FROM_DATE}" --out-dir db/backtest ${EXTRA_ARGS}
 
       - name: Upload results
