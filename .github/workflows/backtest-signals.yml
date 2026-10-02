@@ -1,0 +1,74 @@
+name: Backtest Signals
+
+on:
+  workflow_dispatch:
+    inputs:
+      months:
+        description: "Months of M1 history to download and backtest."
+        required: false
+        default: "6"
+        type: string
+      extra_args:
+        description: "Extra args for scripts.backtest_signals, e.g. --tp 1.5 --sl 1 --cost 0.3"
+        required: false
+        default: ""
+        type: string
+  push:
+    branches:
+      - "claude/**"
+    paths:
+      - backend/scripts/backtest_signals.py
+      - .github/workflows/backtest-signals.yml
+
+concurrency:
+  group: backtest-signals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backtest:
+    name: Backtest offline signals
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      HF_REPO_ID: ${{ secrets.HF_REPO_ID || vars.HF_REPO_ID || 'raywu918daytrade/daytrade' }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HUB_DISABLE_XET: "1"
+      MONTHS: ${{ inputs.months || '6' }}
+      EXTRA_ARGS: ${{ inputs.extra_args || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Download signals and M1 bars
+        working-directory: backend
+        run: |
+          python -m scripts.sync_market_db_from_hf \
+            --only m1 tickers vwap_signals \
+            --intraday-months "${MONTHS}" \
+            --no-prune
+
+      - name: Run backtest
+        working-directory: backend
+        run: |
+          FROM_DATE="$(TZ=Asia/Taipei date -d "${MONTHS} months ago" +%Y-%m-01)"
+          python -m scripts.backtest_signals --from-date "${FROM_DATE}" --out-dir db/backtest ${EXTRA_ARGS}
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-signals
+          path: backend/db/backtest/
+          if-no-files-found: ignore
