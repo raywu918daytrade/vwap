@@ -37,6 +37,10 @@ jobs:
       HF_HUB_DISABLE_XET: "1"
       MONTHS: ${{ inputs.months || '3' }}
       EXTRA_ARGS: ${{ inputs.extra_args || '' }}
+      # Optional fixed window (YYYY-MM-DD) for out-of-sample checks; overrides MONTHS for the date range.
+      FROM_DATE_FIXED: "2026-04-01"
+      TO_DATE_FIXED: "2026-07-01"
+      SYNC_MONTHS: "8"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,14 +60,16 @@ jobs:
         run: |
           python -m scripts.sync_market_db_from_hf \
             --only m1 tickers vwap_signals vwap_activity \
-            --intraday-months "$((MONTHS + 1))" \
+            --intraday-months "${SYNC_MONTHS:-$((MONTHS + 1))}" \
             --no-prune
 
       - name: Run backtest
         working-directory: backend
         run: |
-          FROM_DATE="$(TZ=Asia/Taipei date -d "${MONTHS} months ago" +%F)"
-          python -m scripts.backtest_signals --from-date "${FROM_DATE}" --out-dir db/backtest ${EXTRA_ARGS}
+          FROM_DATE="${FROM_DATE_FIXED:-$(TZ=Asia/Taipei date -d "${MONTHS} months ago" +%F)}"
+          TO_ARGS=()
+          if [ -n "${TO_DATE_FIXED:-}" ]; then TO_ARGS=(--to-date "${TO_DATE_FIXED}"); fi
+          python -m scripts.backtest_signals --from-date "${FROM_DATE}" "${TO_ARGS[@]}" --out-dir db/backtest ${EXTRA_ARGS}
 
       - name: Upload results
         if: always()
