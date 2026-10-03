@@ -3,12 +3,14 @@ import ReactDOM from "react-dom/client";
 import "./realtimeBundleCache.js";
 import App from "./App.jsx";
 import DiagnosticsPanel from "./DiagnosticsPanel.jsx";
+import TradeStatsPanel from "./TradeStatsPanel.jsx";
 import "./styles.css";
 import "./compactPatternColumns.js";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <App />
+    <TradeStatsPanel />
     <DiagnosticsPanel />
   </React.StrictMode>,
 );
