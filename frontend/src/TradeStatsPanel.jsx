@@ -27,6 +27,11 @@ function shiftWeekday(iso, step) {
   return d.toISOString().slice(0, 10);
 }
 
+const STRATEGIES = [
+  { key: "sr_short", label: "VWAP＋支撐做空" },
+  { key: "vwap_cross", label: "VWAP 穿越" },
+];
+
 const STATUS_CLASS = {
   停利: "badge-error",
   停損: "badge-success",
@@ -37,6 +42,7 @@ const STATUS_CLASS = {
 export default function TradeStatsPanel() {
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(taipeiTodayIso());
+  const [strategy, setStrategy] = useState(STRATEGIES[0].key);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -48,7 +54,7 @@ export default function TradeStatsPanel() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const payload = await fetchJson(`/api/trade_stats?date=${encodeURIComponent(date)}`);
+      const payload = await fetchJson(`/api/trade_stats?date=${encodeURIComponent(date)}&strategy=${strategy}`);
       if (dateRef.current !== date) return;
       setData(payload);
       setError("");
@@ -57,7 +63,7 @@ export default function TradeStatsPanel() {
     } finally {
       setLoading(false);
     }
-  }, [date]);
+  }, [date, strategy]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -103,6 +109,11 @@ export default function TradeStatsPanel() {
               </div>
             </header>
             <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3 text-xs">
+              <div className="join">
+                {STRATEGIES.map((s) => (
+                  <button key={s.key} type="button" className={`btn btn-xs join-item rounded ${strategy === s.key ? "btn-primary" : ""}`} onClick={() => setStrategy(s.key)}>{s.label}</button>
+                ))}
+              </div>
               {error ? <div className="alert alert-error py-2">{error}</div> : null}
               {rules ? (
                 <div className="text-base-content/60">
@@ -122,6 +133,7 @@ export default function TradeStatsPanel() {
                   <thead>
                     <tr>
                       <th>股票</th>
+                      <th>方向</th>
                       <th>訊號</th>
                       <th>進場</th>
                       <th>出場</th>
@@ -133,6 +145,7 @@ export default function TradeStatsPanel() {
                     {trades.length ? trades.map((t) => (
                       <tr key={t.stock_id}>
                         <td><div className="font-semibold">{t.stock_id}</div><div className="text-base-content/50">{t.name}</div></td>
+                        <td>{t.side === "long" ? <span className="text-error">做多</span> : <span className="text-success">做空</span>}</td>
                         <td>{t.signal_time}</td>
                         <td>{t.entry_time ? <>{t.entry_time}<div className="text-base-content/50">{price(t.entry_price)}</div></> : "-"}</td>
                         <td>
@@ -143,7 +156,7 @@ export default function TradeStatsPanel() {
                       </tr>
                     )) : (
                       <tr>
-                        <td colSpan={6} className="py-8 text-center text-base-content/50">
+                        <td colSpan={7} className="py-8 text-center text-base-content/50">
                           {loading ? "載入中…" : data && !data.activity_ready ? "這天還沒有過濾用的活動度資料" : "這天沒有符合條件的訊號"}
                         </td>
                       </tr>

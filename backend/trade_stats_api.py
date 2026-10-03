@@ -1,11 +1,14 @@
-"""Paper-trade log for the backtested VWAP + support short setup.
+"""Paper-trade logs for dashboard signal setups.
 
-Rules follow backend/scripts/backtest_signals.py (best result, 2026-07..10):
-below VWAP and touching support -> short, signal between 10:00 and 12:15,
-enter at the next minute's open, +2% take profit / -4% stop loss (stop wins
-when one bar hits both), otherwise exit at the 13:24 close. Only stocks that
-pass the dashboard's default filters (ATR >= 5%, open-5-minute volume PR >= 50)
-and only the first qualifying signal per stock per day.
+``sr_short`` follows backend/scripts/backtest_signals.py (best result,
+2026-07..10): below VWAP and touching support -> short, signal between 10:00
+and 12:15. ``vwap_cross`` trades every VWAP cross all day: cross up -> long,
+cross down -> short.
+
+Both enter at the next minute's open, +2% take profit / -4% stop loss (stop
+wins when one bar hits both), otherwise exit at the 13:24 close. Only stocks
+that pass the dashboard's default filters (ATR >= 5%, open-5-minute volume
+PR >= 50) and only the first qualifying signal per stock per day.
 """
 
 from __future__ import annotations
@@ -20,10 +23,7 @@ from fastapi import APIRouter
 router = APIRouter()
 _TW = timezone(timedelta(hours=8))
 
-RULES = {
-    "side": "short",
-    "signal": "跌破 VWAP 碰支撐（做空）",
-    "window": ["10:00", "12:15"],
+_COMMON = {
     "take_profit_pct": 2.0,
     "stop_loss_pct": 4.0,
     "last_bar": "13:24",
@@ -31,11 +31,29 @@ RULES = {
     "min_day_atr": 0.05,
     "min_vol5_pr": 0.5,
 }
+STRATEGIES = {
+    "sr_short": {
+        **_COMMON,
+        "label": "VWAP＋支撐做空",
+        "side": "short",
+        "signal": "跌破 VWAP 碰支撐（做空）",
+        "window": ["10:00", "12:15"],
+    },
+    "vwap_cross": {
+        **_COMMON,
+        "label": "VWAP 穿越",
+        "side": "both",
+        "signal": "VWAP 上穿做多、下穿做空",
+        "window": ["09:00", "13:24"],
+    },
+}
+DEFAULT_STRATEGY = "sr_short"
+RULES = STRATEGIES[DEFAULT_STRATEGY]
 
 _cache: dict[str, tuple[float, dict]] = {}
 _cache_lock = threading.Lock()
 _LIVE_TTL_SECONDS = 20.0
-_MAX_CACHED_DATES = 40
+_MAX_CACHED_DATES = 80
 
 
 def _today() -> str:
@@ -50,28 +68,38 @@ def _num(value) -> float | None:
     return out if out == out else None
 
 
-def _candidates(sr_rows: list[dict], activity: dict) -> list[dict]:
-    """First qualifying short signal per stock, in time order."""
-    start, end = RULES["window"]
+def _signal_side(row: dict, strategy: str) -> str | None:
+    if strategy == "vwap_cross":
+        direction = row.get("direction")
+        return {"up": "long", "down": "short"}.get(direction)
+    if row.get("sr_kind") != "support" or row.get("vwap_dir") == "up":
+        return None
+    return "short"
+
+
+def _candidates(rows: list[dict], activity: dict, strategy: str = DEFAULT_STRATEGY) -> list[dict]:
+    """First qualifying signal per stock, in time order."""
+    rules = STRATEGIES[strategy]
+    start, end = rules["window"]
     picked: dict[str, dict] = {}
-    for row in sr_rows or []:
+    for row in rows or []:
         sid = str(row.get("stock_id") or "")
         hhmm = str(row.get("time") or "")[:5]
         if not sid or len(hhmm) != 5:
             continue
-        if row.get("sr_kind") != "support" or row.get("vwap_dir") == "up":
-            continue
-        if not (start <= hhmm < end):
+        side = _signal_side(row, strategy)
+        if side is None or not (start <= hhmm < end):
             continue
         act = activity.get(sid) or {}
         atr, vol_pr = _num(act.get("day_atr")), _num(act.get("vol5_pr"))
-        if atr is None or vol_pr is None or atr < RULES["min_day_atr"] or vol_pr < RULES["min_vol5_pr"]:
+        if atr is None or vol_pr is None or atr < rules["min_day_atr"] or vol_pr < rules["min_vol5_pr"]:
             continue
         prev = picked.get(sid)
         if prev is None or hhmm < prev["signal_time"]:
             picked[sid] = {
                 "stock_id": sid,
                 "name": row.get("name") or "",
+                "side": side,
                 "signal_time": hhmm,
                 "signal_price": _num(row.get("price")),
                 "support": _num(row.get("support")),
@@ -118,15 +146,17 @@ def _simulate(cand: dict, bars: pd.DataFrame, session_closed: bool) -> dict:
         return trade
     trade["entry_time"] = after["hhmm"].iloc[0]
     trade["entry_price"] = round(entry, 2)
-    tp_price = entry * (1 - RULES["take_profit_pct"] / 100)
-    sl_price = entry * (1 + RULES["stop_loss_pct"] / 100)
+    sign = 1 if cand.get("side") == "long" else -1
+    tp_price = entry * (1 + sign * RULES["take_profit_pct"] / 100)
+    sl_price = entry * (1 - sign * RULES["stop_loss_pct"] / 100)
 
     exit_price = exit_time = None
     for bar in after.itertuples(index=False):
-        if float(bar.high) >= sl_price:
+        high, low = float(bar.high), float(bar.low)
+        if (low <= sl_price) if sign > 0 else (high >= sl_price):
             exit_price, exit_time, trade["status"] = sl_price, bar.hhmm, "停損"
             break
-        if float(bar.low) <= tp_price:
+        if (high >= tp_price) if sign > 0 else (low <= tp_price):
             exit_price, exit_time, trade["status"] = tp_price, bar.hhmm, "停利"
             break
 
@@ -137,12 +167,12 @@ def _simulate(cand: dict, bars: pd.DataFrame, session_closed: bool) -> dict:
             exit_price, exit_time, trade["status"] = last_close, after["hhmm"].iloc[-1], "收盤平倉"
         else:
             trade["status"] = "持有中"
-            gross = (entry - last_close) / entry * 100
+            gross = sign * (last_close - entry) / entry * 100
             trade["gross_pct"] = round(gross, 3)
             trade["net_pct"] = round(gross - RULES["cost_pct"], 3)
             return trade
 
-    gross = (entry - exit_price) / entry * 100
+    gross = sign * (exit_price - entry) / entry * 100
     trade["exit_time"] = exit_time
     trade["exit_price"] = round(exit_price, 2)
     trade["gross_pct"] = round(gross, 3)
@@ -166,46 +196,52 @@ def _summary(trades: list[dict]) -> dict:
     }
 
 
-def _compute(date_str: str) -> dict:
+def _compute(date_str: str, strategy: str) -> dict:
     import api
 
     today = _today()
     now = datetime.now(_TW)
     session_closed = date_str < today or (date_str == today and now.strftime("%H:%M") >= "13:31")
-    sr_rows = api.sr_vwap_cross_today(date=date_str)
+    if strategy == "vwap_cross":
+        rows = api.vwap_breakout_today(date=date_str)
+    else:
+        rows = api.sr_vwap_cross_today(date=date_str)
     activity = (api.vwap_activity(date=date_str) or {}).get("stocks") or {}
     trades = [_simulate(cand, _day_bars(cand["stock_id"], date_str), session_closed)
-              for cand in _candidates(sr_rows, activity)]
+              for cand in _candidates(rows, activity, strategy)]
     return {
         "date": date_str,
+        "strategy": strategy,
         "is_today": date_str == today,
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%S"),
         "activity_ready": bool(activity),
-        "rules": RULES,
+        "rules": STRATEGIES[strategy],
         "summary": _summary(trades),
         "trades": trades,
     }
 
 
 @router.get("/api/trade_stats", tags=["VWAP"], summary="VWAP + 支撐做空模擬交易紀錄")
-def trade_stats(date: str | None = None) -> dict:
+def trade_stats(date: str | None = None, strategy: str = DEFAULT_STRATEGY) -> dict:
     date_str = str(date or _today())[:10]
+    strategy = strategy if strategy in STRATEGIES else DEFAULT_STRATEGY
     today = _today()
     if date_str > today:
-        return {"date": date_str, "is_today": False, "activity_ready": False, "rules": RULES,
-                "summary": _summary([]), "trades": []}
+        return {"date": date_str, "strategy": strategy, "is_today": False, "activity_ready": False,
+                "rules": STRATEGIES[strategy], "summary": _summary([]), "trades": []}
+    key = f"{date_str}|{strategy}"
     with _cache_lock:
-        cached = _cache.get(date_str)
+        cached = _cache.get(key)
     if cached is not None:
         stamp, result = cached
         if date_str < today or time.monotonic() - stamp < _LIVE_TTL_SECONDS:
             return result
 
-    result = _compute(date_str)
+    result = _compute(date_str, strategy)
     # Past days are fixed; keep them, unless nothing was found (data may still be syncing).
     if date_str == today or result["trades"]:
         with _cache_lock:
-            _cache[date_str] = (time.monotonic(), result)
+            _cache[key] = (time.monotonic(), result)
             while len(_cache) > _MAX_CACHED_DATES:
                 _cache.pop(min(_cache), None)
     return result
