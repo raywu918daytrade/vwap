@@ -15,21 +15,25 @@ GOOD = {"day_atr": 0.06, "vol5_pr": 0.7}
 
 
 class CandidatesTest(unittest.TestCase):
-    def test_keeps_first_short_support_signal_in_window_per_stock(self):
+    def test_keeps_first_sr_signal_per_stock_on_both_sides(self):
         rows = [
             {"stock_id": "1111", "time": "10:30", "sr_kind": "support", "vwap_dir": "down"},
             {"stock_id": "1111", "time": "10:05", "sr_kind": "support", "vwap_dir": "down"},
-            {"stock_id": "2222", "time": "09:50", "sr_kind": "support", "vwap_dir": "down"},
-            {"stock_id": "3333", "time": "11:00", "sr_kind": "resistance", "vwap_dir": "up"},
-            {"stock_id": "4444", "time": "12:15", "sr_kind": "support", "vwap_dir": "down"},
+            {"stock_id": "2222", "time": "09:50", "sr_kind": "resistance", "vwap_dir": "down"},
+            {"stock_id": "3333", "time": "13:00", "sr_kind": "resistance", "vwap_dir": "up"},
+            {"stock_id": "4444", "time": "13:24", "sr_kind": "support", "vwap_dir": "down"},
             {"stock_id": "5555", "time": "11:00", "sr_kind": "support", "vwap_dir": "down"},
+            {"stock_id": "6666", "time": "09:01", "sr_kind": "both", "vwap_dir": "up"},
         ]
-        activity = {sid: GOOD for sid in ("1111", "2222", "3333", "4444")}
+        activity = {sid: GOOD for sid in ("1111", "2222", "3333", "4444", "6666")}
         activity["5555"] = {"day_atr": 0.04, "vol5_pr": 0.9}
 
         picked = _candidates(rows, activity)
 
-        self.assertEqual([(c["stock_id"], c["signal_time"], c["side"]) for c in picked], [("1111", "10:05", "short")])
+        self.assertEqual(
+            [(c["stock_id"], c["signal_time"], c["side"]) for c in picked],
+            [("6666", "09:01", "long"), ("1111", "10:05", "short"), ("3333", "13:00", "long")],
+        )
 
     def test_vwap_cross_uses_direction_all_day(self):
         rows = [

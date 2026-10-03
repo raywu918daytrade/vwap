@@ -28,7 +28,7 @@ function shiftWeekday(iso, step) {
 }
 
 const STRATEGIES = [
-  { key: "sr_short", label: "VWAP＋支撐做空" },
+  { key: "sr_short", label: "VWAP＋壓力支撐" },
   { key: "vwap_cross", label: "VWAP 穿越" },
 ];
 

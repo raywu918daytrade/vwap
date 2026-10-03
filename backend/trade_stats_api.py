@@ -1,9 +1,9 @@
 """Paper-trade logs for dashboard signal setups.
 
-``sr_short`` follows backend/scripts/backtest_signals.py (best result,
-2026-07..10): below VWAP and touching support -> short, signal between 10:00
-and 12:15. ``vwap_cross`` trades every VWAP cross all day: cross up -> long,
-cross down -> short.
+``sr_short`` trades the VWAP + support/resistance light all day: above VWAP
+and touching resistance -> long, below VWAP and touching support -> short.
+``vwap_cross`` trades every VWAP cross all day: cross up -> long, cross down
+-> short.
 
 Both enter at the next minute's open, +2% take profit / -4% stop loss (stop
 wins when one bar hits both), otherwise exit at the 13:24 close. Only stocks
@@ -34,10 +34,10 @@ _COMMON = {
 STRATEGIES = {
     "sr_short": {
         **_COMMON,
-        "label": "VWAP＋支撐做空",
-        "side": "short",
-        "signal": "跌破 VWAP 碰支撐（做空）",
-        "window": ["10:00", "12:15"],
+        "label": "VWAP＋壓力支撐",
+        "side": "both",
+        "signal": "站上 VWAP 碰壓力做多、跌破 VWAP 碰支撐做空",
+        "window": ["09:00", "13:24"],
     },
     "vwap_cross": {
         **_COMMON,
@@ -72,9 +72,12 @@ def _signal_side(row: dict, strategy: str) -> str | None:
     if strategy == "vwap_cross":
         direction = row.get("direction")
         return {"up": "long", "down": "short"}.get(direction)
-    if row.get("sr_kind") != "support" or row.get("vwap_dir") == "up":
-        return None
-    return "short"
+    kind, vwap_dir = row.get("sr_kind"), row.get("vwap_dir")
+    if vwap_dir == "up" and kind in ("resistance", "both"):
+        return "long"
+    if vwap_dir == "down" and kind in ("support", "both"):
+        return "short"
+    return None
 
 
 def _candidates(rows: list[dict], activity: dict, strategy: str = DEFAULT_STRATEGY) -> list[dict]:
@@ -103,6 +106,7 @@ def _candidates(rows: list[dict], activity: dict, strategy: str = DEFAULT_STRATE
                 "signal_time": hhmm,
                 "signal_price": _num(row.get("price")),
                 "support": _num(row.get("support")),
+                "resistance": _num(row.get("resistance")),
                 "day_atr": atr,
                 "vol5_pr": vol_pr,
             }
