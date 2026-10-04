@@ -2,6 +2,8 @@
 
 ``sr_short`` trades the VWAP + support/resistance light all day: above VWAP
 and touching resistance -> long, below VWAP and touching support -> short.
+``sr_short_slots`` is the backtest's best setup: short only (below VWAP and
+touching support) in 10:00-10:15 and 10:45-11:15.
 ``vwap_cross`` trades every VWAP cross all day: cross up -> long, cross down
 -> short.
 
@@ -38,6 +40,14 @@ STRATEGIES = {
         "side": "both",
         "signal": "站上 VWAP 碰壓力做多、跌破 VWAP 碰支撐做空",
         "window": ["09:00", "13:24"],
+    },
+    "sr_short_slots": {
+        **_COMMON,
+        "label": "SR 做空・最佳時段",
+        "side": "short",
+        "signal": "跌破 VWAP 碰支撐做空",
+        "window": ["10:00", "11:15"],
+        "windows": [["10:00", "10:15"], ["10:45", "11:15"]],
     },
     "vwap_cross": {
         **_COMMON,
@@ -83,7 +93,8 @@ def _signal_side(row: dict, strategy: str) -> str | None:
 def _candidates(rows: list[dict], activity: dict, strategy: str = DEFAULT_STRATEGY) -> list[dict]:
     """First qualifying signal per stock, in time order."""
     rules = STRATEGIES[strategy]
-    start, end = rules["window"]
+    windows = rules.get("windows") or [rules["window"]]
+    only_side = rules["side"] if rules["side"] != "both" else None
     picked: dict[str, dict] = {}
     for row in rows or []:
         sid = str(row.get("stock_id") or "")
@@ -91,7 +102,9 @@ def _candidates(rows: list[dict], activity: dict, strategy: str = DEFAULT_STRATE
         if not sid or len(hhmm) != 5:
             continue
         side = _signal_side(row, strategy)
-        if side is None or not (start <= hhmm < end):
+        if side is None or (only_side and side != only_side):
+            continue
+        if not any(start <= hhmm < end for start, end in windows):
             continue
         act = activity.get(sid) or {}
         atr, vol_pr = _num(act.get("day_atr")), _num(act.get("vol5_pr"))

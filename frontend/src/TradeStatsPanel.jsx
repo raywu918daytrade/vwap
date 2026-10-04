@@ -29,6 +29,7 @@ function shiftWeekday(iso, step) {
 
 const STRATEGIES = [
   { key: "sr_short", label: "VWAP＋壓力支撐" },
+  { key: "sr_short_slots", label: "SR 做空・最佳時段" },
   { key: "vwap_cross", label: "VWAP 穿越" },
 ];
 
@@ -117,7 +118,7 @@ export default function TradeStatsPanel() {
               {error ? <div className="alert alert-error py-2">{error}</div> : null}
               {rules ? (
                 <div className="text-base-content/60">
-                  {rules.signal}・{rules.window[0]}–{rules.window[1]} 訊號，下一分鐘開盤進場・停利 {rules.take_profit_pct}% / 停損 {rules.stop_loss_pct}%・{rules.last_bar} 收盤平倉・ATR ≥ {rules.min_day_atr * 100}%、量 PR ≥ {rules.min_vol5_pr * 100}・成本 {rules.cost_pct}%・每檔每天一筆
+                  {rules.signal}・{(rules.windows || [rules.window]).map((w) => `${w[0]}–${w[1]}`).join("、")} 訊號，下一分鐘開盤進場・停利 {rules.take_profit_pct}% / 停損 {rules.stop_loss_pct}%・{rules.last_bar} 收盤平倉・ATR ≥ {rules.min_day_atr * 100}%、量 PR ≥ {rules.min_vol5_pr * 100}・成本 {rules.cost_pct}%・每檔每天一筆
                 </div>
               ) : null}
 

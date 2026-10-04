@@ -52,6 +52,21 @@ class CandidatesTest(unittest.TestCase):
         )
 
 
+    def test_sr_short_slots_keeps_short_signals_in_best_slots(self):
+        rows = [
+            {"stock_id": "1111", "time": "10:05", "sr_kind": "support", "vwap_dir": "down"},
+            {"stock_id": "2222", "time": "10:20", "sr_kind": "support", "vwap_dir": "down"},
+            {"stock_id": "3333", "time": "11:10", "sr_kind": "support", "vwap_dir": "down"},
+            {"stock_id": "4444", "time": "10:50", "sr_kind": "resistance", "vwap_dir": "up"},
+            {"stock_id": "5555", "time": "11:15", "sr_kind": "support", "vwap_dir": "down"},
+        ]
+        activity = {sid: GOOD for sid in ("1111", "2222", "3333", "4444", "5555")}
+
+        picked = _candidates(rows, activity, "sr_short_slots")
+
+        self.assertEqual([(c["stock_id"], c["side"]) for c in picked], [("1111", "short"), ("3333", "short")])
+
+
 class SimulateTest(unittest.TestCase):
     cand = {"stock_id": "1111", "signal_time": "10:05"}
 
