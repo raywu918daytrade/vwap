@@ -75,6 +75,11 @@ export default function TradeStatsPanel() {
     return () => window.clearInterval(timer);
   }, [open, isToday, refresh]);
 
+  const openStock = (stockId) => {
+    window.dispatchEvent(new CustomEvent("trade-stats:open-stock", { detail: { stockId, date } }));
+    setOpen(false);
+  };
+
   const rules = data?.rules;
   const summary = data?.summary || {};
   const trades = data?.trades || [];
@@ -118,7 +123,7 @@ export default function TradeStatsPanel() {
               {error ? <div className="alert alert-error py-2">{error}</div> : null}
               {rules ? (
                 <div className="text-base-content/60">
-                  {rules.signal}・{(rules.windows || [rules.window]).map((w) => `${w[0]}–${w[1]}`).join("、")} 訊號，下一分鐘開盤進場・停利 {rules.take_profit_pct}% / 停損 {rules.stop_loss_pct}%・{rules.last_bar} 收盤平倉・ATR ≥ {rules.min_day_atr * 100}%、量 PR ≥ {rules.min_vol5_pr * 100}・成本 {rules.cost_pct}%・每檔每天一筆
+                  {rules.signal}・{(rules.windows || [rules.window]).map((w) => `${w[0]}–${w[1]}`).join("、")} 訊號，下一分鐘開盤進場・停利 {rules.take_profit_pct}% / 停損 {rules.stop_loss_pct}%・{rules.last_bar} 收盤平倉・ATR ≥ {rules.min_day_atr * 100}%、量 PR ≥ {rules.min_vol5_pr * 100}・成本 {rules.cost_pct}%・每檔每天一筆・點擊股票開啟線圖
                 </div>
               ) : null}
 
@@ -144,7 +149,7 @@ export default function TradeStatsPanel() {
                   </thead>
                   <tbody>
                     {trades.length ? trades.map((t) => (
-                      <tr key={t.stock_id}>
+                      <tr key={t.stock_id} className="cursor-pointer hover:bg-primary/10" title="點擊開啟這檔股票的線圖" onClick={() => openStock(t.stock_id)}>
                         <td><div className="font-semibold">{t.stock_id}</div><div className="text-base-content/50">{t.name}</div></td>
                         <td>{t.side === "long" ? <span className="text-error">做多</span> : <span className="text-success">做空</span>}</td>
                         <td>{t.signal_time}</td>

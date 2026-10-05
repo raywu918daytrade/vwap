@@ -1228,6 +1228,31 @@ export default function App() {
     setLoadingIntraday(false);
   }, [vwapDate]);
 
+  // 交易統計 panel: clicking a trade opens that stock's chart on the trade's date.
+  const pendingTradeStockRef = useRef(null);
+  useEffect(() => {
+    const onOpenStock = (event) => {
+      const { stockId: sid, date } = event.detail || {};
+      if (!sid) return;
+      const sameDay = !date || date === vwapDate || (!vwapDate && date === today);
+      if (sameDay) {
+        selectStock(sid);
+        return;
+      }
+      pendingTradeStockRef.current = String(sid);
+      changeVwapDate(date);
+    };
+    window.addEventListener("trade-stats:open-stock", onOpenStock);
+    return () => window.removeEventListener("trade-stats:open-stock", onOpenStock);
+  }, [changeVwapDate, selectStock, today, vwapDate]);
+
+  useEffect(() => {
+    const sid = pendingTradeStockRef.current;
+    if (!sid) return;
+    pendingTradeStockRef.current = null;
+    selectStock(sid);
+  }, [selectStock, vwapDate]);
+
   useEffect(() => {
     if (isVwapChart && signalLoadedKey !== signalLoadKey) return undefined;
     if (selectedChartDate !== activeChartDate) return undefined;
