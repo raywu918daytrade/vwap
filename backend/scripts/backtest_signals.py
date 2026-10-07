@@ -42,6 +42,7 @@ ACTIVITY_DIR = _ROOT / "db/vwap_activity"
 
 HOLDS = (5, 15, 30)
 LAST_BAR = "13:24"
+MACD_MAX_GAP_MIN = 30  # 網頁交易統計：背離後 30 分鐘內穿 VWAP 才算
 BUCKET_MINUTES = 15
 
 
@@ -141,6 +142,7 @@ def load_events(from_date: str | None, to_date: str | None) -> pd.DataFrame:
                         "signal": f"{name}{'多' if bull else '空'}（{'做多' if bull else '做空'}）",
                         "side": 1 if bull else -1, "time": str(ev.get("time") or ""),
                     })
+    rows.extend(_macd_vwap_rows(rows))
     events = pd.DataFrame(rows, columns=["date", "stock_id", "family", "signal", "side", "time", "res", "sup", "price"])
     for col in ("res", "sup", "price"):
         events[col] = pd.to_numeric(events[col], errors="coerce")
@@ -153,6 +155,41 @@ def load_events(from_date: str | None, to_date: str | None) -> pd.DataFrame:
     flips = set(zip(events.loc[vwap, "date"], events.loc[vwap, "stock_id"], events.loc[vwap, "time"]))
     events["vwap_flip_now"] = [(d, s, t) in flips for d, s, t in zip(events["date"], events["stock_id"], events["time"])]
     return events
+
+
+def _minutes(hhmm: str) -> int:
+    return int(hhmm[:2]) * 60 + int(hhmm[3:5])
+
+
+def _macd_vwap_rows(rows: list[dict]) -> list[dict]:
+    """同網頁「MACD 背離＋VWAP」：底背離後 30 分鐘內上穿 VWAP 做多、頂背離後下穿做空。
+    訊號時間＝穿越那一分鐘；同一個穿越只配最近的一次背離。"""
+    vwap: dict[tuple[str, str], list[tuple[str, int]]] = {}
+    macd: dict[tuple[str, str], list[tuple[str, int]]] = {}
+    for r in rows:
+        key = (r["date"], r["stock_id"])
+        if r["family"] == "VWAP" and len(r["time"]) == 5:
+            vwap.setdefault(key, []).append((r["time"], r["side"]))
+        elif r["family"] == "MACD" and len(r["time"]) == 5:
+            macd.setdefault(key, []).append((r["time"], r["side"]))
+    out: list[dict] = []
+    for key, divs in macd.items():
+        crosses = sorted(set(vwap.get(key, [])))
+        used: set[str] = set()
+        for d_time, side in sorted(set(divs)):
+            for c_time, c_side in crosses:
+                if c_side != side or c_time in used or c_time <= d_time:
+                    continue
+                if _minutes(c_time) - _minutes(d_time) > MACD_MAX_GAP_MIN:
+                    break
+                used.add(c_time)
+                out.append({
+                    "date": key[0], "stock_id": key[1], "family": "MACD+VWAP",
+                    "signal": "MACD底背離＋VWAP上穿（做多）" if side > 0 else "MACD頂背離＋VWAP下穿（做空）",
+                    "side": side, "time": c_time,
+                })
+                break
+    return out
 
 
 def _sr_order(arrays, time: str, res: float, sup: float, price: float, vwap_now: bool) -> str:
@@ -335,7 +372,14 @@ WINDOW = ("10:00", "12:15")
 FOCUS_SIGNALS = {
     "觸壓力＋VWAP上（做多）": "站上 VWAP 碰壓力（做多）",
     "觸支撐＋VWAP下（做空）": "跌破 VWAP 碰支撐（做空）",
+    "MACD底背離＋VWAP上穿（做多）": "MACD底背離＋VWAP上穿（做多）",
+    "MACD頂背離＋VWAP下穿（做空）": "MACD頂背離＋VWAP下穿（做空）",
 }
+
+
+def _first_per_stock_day(df: pd.DataFrame) -> pd.DataFrame:
+    """網頁交易統計的口徑：每檔每天只算第一筆訊號。"""
+    return df.sort_values(["date", "stock_id", "time"]).drop_duplicates(["date", "stock_id", "signal"], keep="first")
 
 
 def _focus(df: pd.DataFrame) -> pd.DataFrame:
@@ -380,6 +424,14 @@ def build_report(
             "### 整體（不分順序）",
             "",
             _md(summarize(focus, ["signal"], col, cost, 1)),
+            "",
+            "### 每檔每天只算第一筆（同網頁交易統計）",
+            "",
+            _md(summarize(_first_per_stock_day(focus), ["signal"], col, cost, 1)),
+            "",
+            "### 每檔每天第一筆 × 每 15 分鐘時段",
+            "",
+            _md(summarize(_first_per_stock_day(focus), ["signal", "時段"], col, cost, min_n)),
             "",
             f"### 只看 {WINDOW[0]}-{WINDOW[1]} 進場",
             "",
