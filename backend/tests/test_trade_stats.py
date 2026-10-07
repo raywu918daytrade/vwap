@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from trade_stats_api import _candidates, _simulate, _summary
+from trade_stats_api import _attach_macd, _candidates, _simulate, _summary
 
 
 def _bars(rows):
@@ -33,6 +33,28 @@ class CandidatesTest(unittest.TestCase):
         self.assertEqual(
             [(c["stock_id"], c["signal_time"], c["side"]) for c in picked],
             [("6666", "09:01", "long"), ("1111", "10:05", "short"), ("3333", "13:00", "long")],
+        )
+
+    def test_macd_vwap_needs_matching_recent_divergence(self):
+        rows = [
+            {"stock_id": "1111", "time": "09:40", "direction": "up"},    # bull div 09:20 -> long
+            {"stock_id": "2222", "time": "10:00", "direction": "up"},    # latest div is bear -> skip
+            {"stock_id": "2222", "time": "10:15", "direction": "down"},  # bear div 09:50 -> short
+            {"stock_id": "3333", "time": "11:00", "direction": "up"},    # div 40 min old -> skip
+            {"stock_id": "4444", "time": "09:30", "direction": "down"},  # no div
+        ]
+        macd = {
+            "1111": {"events": [{"kind": "bull", "time": "09:20"}]},
+            "2222": {"events": [{"kind": "bull", "time": "09:30"}, {"kind": "bear", "time": "09:50"}]},
+            "3333": {"events": [{"kind": "bull", "time": "10:20"}]},
+        }
+        activity = {sid: GOOD for sid in ("1111", "2222", "3333", "4444")}
+
+        picked = _candidates(_attach_macd(rows, macd, 30), activity, "macd_vwap")
+
+        self.assertEqual(
+            [(c["stock_id"], c["signal_time"], c["side"], c["macd_time"]) for c in picked],
+            [("1111", "09:40", "long", "09:20"), ("2222", "10:15", "short", "09:50")],
         )
 
     def test_vwap_cross_uses_direction_all_day(self):

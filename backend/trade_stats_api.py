@@ -6,8 +6,11 @@ and touching resistance -> long, below VWAP and touching support -> short.
 touching support) in 10:00-10:15 and 10:45-11:15.
 ``vwap_cross`` trades every VWAP cross all day: cross up -> long, cross down
 -> short.
+``macd_vwap`` trades a VWAP cross that follows a MACD histogram divergence:
+bullish divergence then cross up -> long, bearish divergence then cross down
+-> short (the latest divergence confirmed within 30 minutes before the cross).
 
-Both enter at the next minute's open, +2% take profit / -4% stop loss (stop
+All enter at the next minute's open, +2% take profit / -4% stop loss (stop
 wins when one bar hits both), otherwise exit at the 13:24 close. Only stocks
 that pass the dashboard's default filters (ATR >= 5%, open-5-minute volume
 PR >= 50) and only the first qualifying signal per stock per day.
@@ -56,6 +59,14 @@ STRATEGIES = {
         "signal": "VWAP 上穿做多、下穿做空",
         "window": ["09:00", "13:24"],
     },
+    "macd_vwap": {
+        **_COMMON,
+        "label": "MACD 背離＋VWAP",
+        "side": "both",
+        "signal": "MACD 底背離後上穿 VWAP 做多、頂背離後下穿 VWAP 做空（背離在穿越前 30 分內）",
+        "window": ["09:00", "13:24"],
+        "macd_max_gap_min": 30,
+    },
 }
 DEFAULT_STRATEGY = "sr_short"
 RULES = STRATEGIES[DEFAULT_STRATEGY]
@@ -78,7 +89,33 @@ def _num(value) -> float | None:
     return out if out == out else None
 
 
+def _minutes(hhmm: str) -> int:
+    return int(hhmm[:2]) * 60 + int(hhmm[3:5])
+
+
+def _attach_macd(rows: list[dict], macd: dict, max_gap_min: int) -> list[dict]:
+    """Tag each VWAP cross with the latest MACD divergence confirmed at or before it."""
+    out = []
+    for row in rows or []:
+        hhmm = str(row.get("time") or "")[:5]
+        events = ((macd or {}).get(str(row.get("stock_id") or "")) or {}).get("events") or []
+        hits = [e for e in events if len(hhmm) == 5 and len(str(e.get("time") or "")) >= 5
+                and str(e["time"])[:5] <= hhmm]
+        latest = max(hits, key=lambda e: str(e["time"])[:5], default=None)
+        if latest and _minutes(hhmm) - _minutes(str(latest["time"])[:5]) <= max_gap_min:
+            row = {**row, "macd_kind": latest.get("kind"), "macd_time": str(latest["time"])[:5]}
+        out.append(row)
+    return out
+
+
 def _signal_side(row: dict, strategy: str) -> str | None:
+    if strategy == "macd_vwap":
+        direction, kind = row.get("direction"), row.get("macd_kind")
+        if direction == "up" and kind == "bull":
+            return "long"
+        if direction == "down" and kind == "bear":
+            return "short"
+        return None
     if strategy == "vwap_cross":
         direction = row.get("direction")
         return {"up": "long", "down": "short"}.get(direction)
@@ -122,6 +159,7 @@ def _candidates(rows: list[dict], activity: dict, strategy: str = DEFAULT_STRATE
                 "resistance": _num(row.get("resistance")),
                 "day_atr": atr,
                 "vol5_pr": vol_pr,
+                "macd_time": row.get("macd_time"),
             }
     return sorted(picked.values(), key=lambda item: (item["signal_time"], item["stock_id"]))
 
@@ -221,6 +259,10 @@ def _compute(date_str: str, strategy: str) -> dict:
     session_closed = date_str < today or (date_str == today and now.strftime("%H:%M") >= "13:31")
     if strategy == "vwap_cross":
         rows = api.vwap_breakout_today(date=date_str)
+    elif strategy == "macd_vwap":
+        macd = (api.vwap_macd_div(date=date_str) or {}).get("stocks") or {}
+        rows = _attach_macd(api.vwap_breakout_today(date=date_str), macd,
+                            STRATEGIES[strategy]["macd_max_gap_min"])
     else:
         rows = api.sr_vwap_cross_today(date=date_str)
     activity = (api.vwap_activity(date=date_str) or {}).get("stocks") or {}

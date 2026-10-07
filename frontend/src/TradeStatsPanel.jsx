@@ -31,6 +31,7 @@ const STRATEGIES = [
   { key: "sr_short", label: "VWAP＋壓力支撐" },
   { key: "sr_short_slots", label: "SR 做空・最佳時段" },
   { key: "vwap_cross", label: "VWAP 穿越" },
+  { key: "macd_vwap", label: "MACD 背離＋VWAP" },
 ];
 
 const STATUS_CLASS = {
@@ -115,7 +116,7 @@ export default function TradeStatsPanel() {
               </div>
             </header>
             <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3 text-xs">
-              <div className="join">
+              <div className="join flex-wrap">
                 {STRATEGIES.map((s) => (
                   <button key={s.key} type="button" className={`btn btn-xs join-item rounded ${strategy === s.key ? "btn-primary" : ""}`} onClick={() => setStrategy(s.key)}>{s.label}</button>
                 ))}
@@ -152,7 +153,7 @@ export default function TradeStatsPanel() {
                       <tr key={t.stock_id} className="cursor-pointer hover:bg-primary/10" title="點擊開啟這檔股票的線圖" onClick={() => openStock(t.stock_id)}>
                         <td><div className="font-semibold">{t.stock_id}</div><div className="text-base-content/50">{t.name}</div></td>
                         <td>{t.side === "long" ? <span className="text-error">做多</span> : <span className="text-success">做空</span>}</td>
-                        <td>{t.signal_time}</td>
+                        <td>{t.signal_time}{t.macd_time ? <div className="text-base-content/50">背離 {t.macd_time}</div> : null}</td>
                         <td>{t.entry_time ? <>{t.entry_time}<div className="text-base-content/50">{price(t.entry_price)}</div></> : "-"}</td>
                         <td>
                           {t.exit_time ? <>{t.exit_time}<div className="text-base-content/50">{price(t.exit_price)}</div></> : t.status === "持有中" ? <span className="text-base-content/50">現價 {price(t.last_price)}</span> : "-"}
