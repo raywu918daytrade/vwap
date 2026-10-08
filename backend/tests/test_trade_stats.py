@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from trade_stats_api import _attach_macd, _candidates, _simulate, _summary
+from trade_stats_api import STRATEGIES, _attach_macd, _candidates, _simulate, _summary
 
 
 def _bars(rows):
@@ -59,8 +59,8 @@ class CandidatesTest(unittest.TestCase):
 
     def test_vwap_cross_uses_direction_all_day(self):
         rows = [
-            {"stock_id": "1111", "time": "09:03", "direction": "up"},
-            {"stock_id": "1111", "time": "09:01", "direction": "down"},
+            {"stock_id": "1111", "time": "09:08", "direction": "up"},
+            {"stock_id": "1111", "time": "09:01", "direction": "down"},  # opening fake cross
             {"stock_id": "2222", "time": "13:10", "direction": "up"},
             {"stock_id": "3333", "time": "13:24", "direction": "up"},
         ]
@@ -70,7 +70,25 @@ class CandidatesTest(unittest.TestCase):
 
         self.assertEqual(
             [(c["stock_id"], c["signal_time"], c["side"]) for c in picked],
-            [("1111", "09:01", "short"), ("2222", "13:10", "long")],
+            [("1111", "09:08", "long"), ("2222", "13:10", "long")],
+        )
+
+    def test_max_chase_skips_longs_up_and_shorts_down_too_far(self):
+        rows = [
+            {"stock_id": "1111", "time": "09:10", "direction": "up", "price": 105.0},    # +5% -> skip
+            {"stock_id": "1111", "time": "09:30", "direction": "up", "price": 104.0},    # +4% -> long
+            {"stock_id": "2222", "time": "09:10", "direction": "down", "price": 94.0},   # -6% -> skip
+            {"stock_id": "3333", "time": "09:10", "direction": "down", "price": 106.0},  # short while up is fine
+        ]
+        activity = {sid: GOOD for sid in ("1111", "2222", "3333")}
+        rules = {**STRATEGIES["vwap_cross"], "max_chase_pct": 5.0}
+        prev_close = {"1111": 100.0, "2222": 100.0, "3333": 100.0}
+
+        picked = _candidates(rows, activity, "vwap_cross", rules, prev_close)
+
+        self.assertEqual(
+            [(c["stock_id"], c["signal_time"], c["side"], c["chg_pct"]) for c in picked],
+            [("3333", "09:10", "short", 6.0), ("1111", "09:30", "long", 4.0)],
         )
 
 

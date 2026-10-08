@@ -57,7 +57,9 @@ STRATEGIES = {
         "label": "VWAP 穿越",
         "side": "both",
         "signal": "VWAP 上穿做多、下穿做空",
-        "window": ["09:00", "13:24"],
+        # 09:00-09:04 is skipped: the first bar's close equals its own VWAP, so
+        # the second bar almost always reads as a fake cross.
+        "window": ["09:05", "13:24"],
     },
     "macd_vwap": {
         **_COMMON,
@@ -127,9 +129,21 @@ def _signal_side(row: dict, strategy: str) -> str | None:
     return None
 
 
-def _candidates(rows: list[dict], activity: dict, strategy: str = DEFAULT_STRATEGY) -> list[dict]:
-    """First qualifying signal per stock, in time order."""
-    rules = STRATEGIES[strategy]
+def _chg_pct(price: float | None, prev_close: float | None) -> float | None:
+    if price is None or not prev_close:
+        return None
+    return round((price / prev_close - 1) * 100, 2)
+
+
+def _candidates(rows: list[dict], activity: dict, strategy: str = DEFAULT_STRATEGY,
+                rules: dict | None = None, prev_close: dict | None = None) -> list[dict]:
+    """First qualifying signal per stock, in time order.
+
+    ``rules["max_chase_pct"]`` (optional) skips longs already up that much from
+    the previous close at the signal, and shorts already down that much.
+    """
+    rules = rules or STRATEGIES[strategy]
+    max_chase = rules.get("max_chase_pct")
     windows = rules.get("windows") or [rules["window"]]
     only_side = rules["side"] if rules["side"] != "both" else None
     picked: dict[str, dict] = {}
@@ -148,19 +162,25 @@ def _candidates(rows: list[dict], activity: dict, strategy: str = DEFAULT_STRATE
         if atr is None or vol_pr is None or atr < rules["min_day_atr"] or vol_pr < rules["min_vol5_pr"]:
             continue
         prev = picked.get(sid)
-        if prev is None or hhmm < prev["signal_time"]:
-            picked[sid] = {
-                "stock_id": sid,
-                "name": row.get("name") or "",
-                "side": side,
-                "signal_time": hhmm,
-                "signal_price": _num(row.get("price")),
-                "support": _num(row.get("support")),
-                "resistance": _num(row.get("resistance")),
-                "day_atr": atr,
-                "vol5_pr": vol_pr,
-                "macd_time": row.get("macd_time"),
-            }
+        if prev is not None and hhmm >= prev["signal_time"]:
+            continue
+        chg = _chg_pct(_num(row.get("price")), (prev_close or {}).get(sid))
+        if max_chase is not None:
+            if chg is None or (side == "long" and chg >= max_chase) or (side == "short" and chg <= -max_chase):
+                continue
+        picked[sid] = {
+            "stock_id": sid,
+            "name": row.get("name") or "",
+            "side": side,
+            "signal_time": hhmm,
+            "signal_price": _num(row.get("price")),
+            "support": _num(row.get("support")),
+            "resistance": _num(row.get("resistance")),
+            "day_atr": atr,
+            "vol5_pr": vol_pr,
+            "macd_time": row.get("macd_time"),
+            "chg_pct": chg,
+        }
     return sorted(picked.values(), key=lambda item: (item["signal_time"], item["stock_id"]))
 
 
@@ -184,7 +204,8 @@ def _day_bars(stock_id: str, date_str: str) -> pd.DataFrame:
     return df.drop_duplicates("hhmm", keep="last").sort_values("hhmm").reset_index(drop=True)
 
 
-def _simulate(cand: dict, bars: pd.DataFrame, session_closed: bool) -> dict:
+def _simulate(cand: dict, bars: pd.DataFrame, session_closed: bool, rules: dict | None = None) -> dict:
+    rules = rules or RULES
     trade = {**cand, "status": "等待進場", "entry_time": None, "entry_price": None,
              "exit_time": None, "exit_price": None, "last_price": None, "gross_pct": None, "net_pct": None}
     if bars.empty:
@@ -202,8 +223,8 @@ def _simulate(cand: dict, bars: pd.DataFrame, session_closed: bool) -> dict:
     trade["entry_time"] = after["hhmm"].iloc[0]
     trade["entry_price"] = round(entry, 2)
     sign = 1 if cand.get("side") == "long" else -1
-    tp_price = entry * (1 + sign * RULES["take_profit_pct"] / 100)
-    sl_price = entry * (1 - sign * RULES["stop_loss_pct"] / 100)
+    tp_price = entry * (1 + sign * rules["take_profit_pct"] / 100)
+    sl_price = entry * (1 - sign * rules["stop_loss_pct"] / 100)
 
     exit_price = exit_time = None
     for bar in after.itertuples(index=False):
@@ -218,20 +239,20 @@ def _simulate(cand: dict, bars: pd.DataFrame, session_closed: bool) -> dict:
     last_close = float(after["close"].iloc[-1])
     trade["last_price"] = round(last_close, 2)
     if exit_price is None:
-        if session_closed or after["hhmm"].iloc[-1] >= RULES["last_bar"]:
+        if session_closed or after["hhmm"].iloc[-1] >= rules["last_bar"]:
             exit_price, exit_time, trade["status"] = last_close, after["hhmm"].iloc[-1], "收盤平倉"
         else:
             trade["status"] = "持有中"
             gross = sign * (last_close - entry) / entry * 100
             trade["gross_pct"] = round(gross, 3)
-            trade["net_pct"] = round(gross - RULES["cost_pct"], 3)
+            trade["net_pct"] = round(gross - rules["cost_pct"], 3)
             return trade
 
     gross = sign * (exit_price - entry) / entry * 100
     trade["exit_time"] = exit_time
     trade["exit_price"] = round(exit_price, 2)
     trade["gross_pct"] = round(gross, 3)
-    trade["net_pct"] = round(gross - RULES["cost_pct"], 3)
+    trade["net_pct"] = round(gross - rules["cost_pct"], 3)
     return trade
 
 
