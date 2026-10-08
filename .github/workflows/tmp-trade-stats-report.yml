@@ -2,7 +2,7 @@ name: tmp trade stats report
 on:
   push:
     branches: ["claude/**"]
-    paths: [".github/workflows/tmp-trade-stats-report.yml", "backend/scripts/trade_stats_report.py"]
+    paths: [".github/workflows/tmp-trade-stats-report.yml", "backend/scripts/trade_stats_report.py", "backend/scripts/combo_report.py"]
 jobs:
   report:
     runs-on: ubuntu-latest
@@ -27,7 +27,7 @@ jobs:
         run: |
           python -m scripts.sync_market_db_from_hf \
             --only m1 m5_std d1 adjustment_day tickers adjustment_factor tick_adjust_factor vwap_signals vwap_activity d1_flags adjustment_day_flags \
-            --history-months 14 --intraday-months 3 --no-prune
-      - name: Report
+            --history-months 14 --intraday-months 4 --no-prune
+      - name: Combo report
         working-directory: backend
-        run: python -m scripts.trade_stats_report --from-date 2026-09-01 --to-date 2026-10-07
+        run: python -m scripts.combo_report --train 2026-07-01 2026-08-31 --test 2026-09-01 2026-10-07
