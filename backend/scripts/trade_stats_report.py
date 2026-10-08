@@ -36,6 +36,21 @@ def _rows(strategy: str, bundle: dict, rules: dict) -> list[dict]:
 MARTINGALE = (1, 2, 4, 8)
 
 
+def one_at_a_time(trades: list[dict]) -> list[dict]:
+    """Only one position open at a time: skip signals until the last trade exits.
+
+    Doubling sizes each trade from the previous result, which is only known
+    once that trade exits, so overlapping trades cannot be sized that way.
+    """
+    out: list[dict] = []
+    for t in sorted(trades, key=lambda t: (t["date"], t.get("entry_time") or "", t["stock_id"])):
+        last = out[-1] if out else None
+        if last and last["date"] == t["date"] and (t.get("entry_time") or "") <= (last.get("exit_time") or ""):
+            continue
+        out.append(t)
+    return out
+
+
 def streaks(trades: list[dict]) -> dict:
     """Losing streaks and a 1-2-4-8 doubling run over trades in entry order.
 
@@ -133,20 +148,21 @@ def main() -> None:
                 print(f"| {base['label']} | {label} | {len(sel)} | {sum(x > 0 for x in net) / len(net) * 100:.1f}% "
                       f"| {sum(net) / len(net):+.3f}% | {sum(net):+.1f}% | {exits} |")
 
-        print(f"\n----- {variant}：連續虧損與 1-2-4-8 加倍 -----")
-        print("| 策略 | 方向 | 筆數 | 最多連勝 | 最多連輸 | 連輸4次(爆) | 每筆1單位合計 | 輸加倍合計 | 輸加倍最大回落 | 贏加倍合計 | 贏加倍最大回落 | 連勝1/2/3/4/5+次 | 連輸1/2/3/4/5+次 |")
-        print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
-        for strategy, base in ts.STRATEGIES.items():
-            trades = results[(variant, strategy)]
-            for side in ("long", "short", "all"):
-                sel = [t for t in trades if side == "all" or t["side"] == side]
-                if not sel:
-                    continue
-                r = streaks(sel)
-                label = {"long": "多", "short": "空", "all": "合計"}[side]
-                print(f"| {base['label']} | {label} | {r['n']} | {r['max_win']} | {r['max_streak']} | {r['busts']} "
-                      f"| {r['flat']:+.1f}% | {r['mart']:+.1f}% | {r['max_dd']:.1f}% | {r['anti']:+.1f}% | {r['anti_dd']:.1f}% "
-                      f"| {'/'.join(map(str, r['dist']['win']))} | {'/'.join(map(str, r['dist']['loss']))} |")
+        for mode, pick in (("所有訊號都下", lambda x: x), ("一次只拿一筆（有單在手就不接新訊號）", one_at_a_time)):
+            print(f"\n----- {variant}：連勝連輸與加倍（{mode}）-----")
+            print("| 策略 | 方向 | 筆數 | 最多連勝 | 最多連輸 | 連輸4次(爆) | 每筆1單位合計 | 輸加倍合計 | 輸加倍最大回落 | 贏加倍合計 | 贏加倍最大回落 | 連勝1/2/3/4/5+次 | 連輸1/2/3/4/5+次 |")
+            print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+            for strategy, base in ts.STRATEGIES.items():
+                trades = results[(variant, strategy)]
+                for side in ("long", "short", "all"):
+                    sel = [t for t in trades if side == "all" or t["side"] == side]
+                    if not sel:
+                        continue
+                    r = streaks(pick(sel))
+                    label = {"long": "多", "short": "空", "all": "合計"}[side]
+                    print(f"| {base['label']} | {label} | {r['n']} | {r['max_win']} | {r['max_streak']} | {r['busts']} "
+                          f"| {r['flat']:+.1f}% | {r['mart']:+.1f}% | {r['max_dd']:.1f}% | {r['anti']:+.1f}% | {r['anti_dd']:.1f}% "
+                          f"| {'/'.join(map(str, r['dist']['win']))} | {'/'.join(map(str, r['dist']['loss']))} |")
 
 
 if __name__ == "__main__":
