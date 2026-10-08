@@ -45,6 +45,8 @@ def streaks(trades: list[dict]) -> dict:
     """
     ordered = sorted(trades, key=lambda t: (t["date"], t.get("entry_time") or "", t["stock_id"]))
     max_streak = streak = busts = level = 0
+    max_win = win_run = 0
+    runs: dict[str, list[int]] = {"win": [], "loss": []}
     flat = mart = peak = max_dd = 0.0
     for t in ordered:
         net = t["net_pct"]
@@ -53,14 +55,26 @@ def streaks(trades: list[dict]) -> dict:
         peak = max(peak, mart)
         max_dd = max(max_dd, peak - mart)
         if net > 0:
+            if streak:
+                runs["loss"].append(streak)
+            win_run += 1
+            max_win = max(max_win, win_run)
             streak, level = 0, 0
             continue
+        if win_run:
+            runs["win"].append(win_run)
+        win_run = 0
         streak += 1
         max_streak = max(max_streak, streak)
         level += 1
         if level == len(MARTINGALE):
             busts, level = busts + 1, 0
-    return {"n": len(ordered), "max_streak": max_streak, "busts": busts,
+    if streak:
+        runs["loss"].append(streak)
+    if win_run:
+        runs["win"].append(win_run)
+    dist = {k: [sum(1 for r in v if (r >= n if n == 5 else r == n)) for n in range(1, 6)] for k, v in runs.items()}
+    return {"n": len(ordered), "max_streak": max_streak, "busts": busts, "max_win": max_win, "dist": dist,
             "flat": flat, "mart": mart, "max_dd": max_dd}
 
 
@@ -113,8 +127,8 @@ def main() -> None:
                       f"| {sum(net) / len(net):+.3f}% | {sum(net):+.1f}% | {exits} |")
 
         print(f"\n----- {variant}：連續虧損與 1-2-4-8 加倍 -----")
-        print("| 策略 | 方向 | 筆數 | 最多連輸 | 連輸4次(爆) | 每筆1單位合計 | 加倍法合計 | 加倍法最大回落 |")
-        print("|---|---|---|---|---|---|---|---|")
+        print("| 策略 | 方向 | 筆數 | 最多連勝 | 最多連輸 | 連輸4次(爆) | 每筆1單位合計 | 加倍法合計 | 加倍法最大回落 | 連勝1/2/3/4/5+次 | 連輸1/2/3/4/5+次 |")
+        print("|---|---|---|---|---|---|---|---|---|---|---|")
         for strategy, base in ts.STRATEGIES.items():
             trades = results[(variant, strategy)]
             for side in ("long", "short", "all"):
@@ -123,8 +137,9 @@ def main() -> None:
                     continue
                 r = streaks(sel)
                 label = {"long": "多", "short": "空", "all": "合計"}[side]
-                print(f"| {base['label']} | {label} | {r['n']} | {r['max_streak']} | {r['busts']} "
-                      f"| {r['flat']:+.1f}% | {r['mart']:+.1f}% | {r['max_dd']:.1f}% |")
+                print(f"| {base['label']} | {label} | {r['n']} | {r['max_win']} | {r['max_streak']} | {r['busts']} "
+                      f"| {r['flat']:+.1f}% | {r['mart']:+.1f}% | {r['max_dd']:.1f}% "
+                      f"| {'/'.join(map(str, r['dist']['win']))} | {'/'.join(map(str, r['dist']['loss']))} |")
 
 
 if __name__ == "__main__":
