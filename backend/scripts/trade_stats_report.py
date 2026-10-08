@@ -21,7 +21,8 @@ from pattern.vwap_sr_scan import prev_close_for_date, stock_ids_for_universe
 
 VARIANTS = {
     "原本 停利2/停損4": {},
-    "停利3/停損3＋漲跌5%限制": {"take_profit_pct": 3.0, "stop_loss_pct": 3.0, "max_chase_pct": 5.0},
+    "停利3.5/停損3": {"take_profit_pct": 3.5, "stop_loss_pct": 3.0},
+    "停利3.5/停損3＋漲跌5%限制": {"take_profit_pct": 3.5, "stop_loss_pct": 3.0, "max_chase_pct": 5.0},
 }
 
 
