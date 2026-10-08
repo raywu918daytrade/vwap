@@ -214,12 +214,23 @@ def main() -> None:
     out = Path(args.chart_dir)
     out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(args.seed)
+
+    def sample3(items, key):
+        # 3 random picks, with at least one of each direction when both exist.
+        groups = {}
+        for it in items:
+            groups.setdefault(it[key], []).append(it)
+        picks = [rng.choice(g) for g in groups.values()][:3]
+        rest = [it for it in items if all(it is not p for p in picks)]
+        picks += rng.sample(rest, min(3 - len(picks), len(rest)))
+        return picks
+
     print("\n抽樣圖：")
-    for i, div in enumerate(rng.sample(divs, min(3, len(divs))), 1):
+    for i, div in enumerate(sample3(divs, "kind"), 1):
         p = out / f"step1_{i}_{div['stock_id']}_{div['confirm_date']}_{div['kind']}.png"
         chart_divergence(div, day, p)
         print(f"  {p.name}  背離 {div['kind']} 點 {div['d1']} / {div['d2']}")
-    for i, ent in enumerate(rng.sample(entries, min(3, len(entries))), 1):
+    for i, ent in enumerate(sample3(entries, "side"), 1):
         bars = bars_cache.get((ent["stock_id"], ent["date"]))
         if bars is None or bars.empty:
             continue
@@ -227,7 +238,7 @@ def main() -> None:
         chart_intraday(ent, bars, None, f"Step 2  VWAP cross {ent['side']}  {ent['stock_id']}  {ent['date']} "
                                         f"(D1 {ent['kind']} confirmed {ent['confirm_date']})", p)
         print(f"  {p.name}  穿越 {ent['signal_time']}")
-    for i, t in enumerate(rng.sample(trades, min(3, len(trades))), 1):
+    for i, t in enumerate(sample3(trades, "side"), 1):
         bars = bars_cache[(t["stock_id"], t["date"])]
         p = out / f"step3_{i}_{t['stock_id']}_{t['date']}_{t['side']}.png"
         chart_intraday(t, bars, t, f"Step 3  trade {t['side']}  {t['stock_id']}  {t['date']}  "

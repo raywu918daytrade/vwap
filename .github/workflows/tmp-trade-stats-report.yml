@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
-      contents: read
+      contents: write
     env:
       HF_REPO_ID: ${{ secrets.HF_REPO_ID || vars.HF_REPO_ID || 'raywu918daytrade/daytrade' }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -31,7 +31,8 @@ jobs:
       - name: Report
         working-directory: backend
         run: python -m scripts.d1_div_vwap_report --from-date 2026-07-01 --to-date 2026-10-08
-      - uses: actions/upload-artifact@v4
-        with:
-          name: d1-div-vwap-charts
-          path: backend/db/d1_div_vwap_charts/
+      - name: Commit charts to branch
+        run: |
+          mkdir -p tmp-charts && cp backend/db/d1_div_vwap_charts/*.png tmp-charts/
+          git config user.name github-actions && git config user.email github-actions@users.noreply.github.com
+          git add tmp-charts && git commit -m "tmp charts" && git push origin HEAD:${{ github.ref_name }}
