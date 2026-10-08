@@ -20,7 +20,6 @@ from pattern.vwap_signal_store import read_vwap_signals
 from pattern.vwap_sr_scan import prev_close_for_date, stock_ids_for_universe
 
 VARIANTS = {
-    "原本 停利2/停損4": {},
     "停利3.5/停損3": {"take_profit_pct": 3.5, "stop_loss_pct": 3.0},
     "停利3.5/停損3＋漲跌5%限制": {"take_profit_pct": 3.5, "stop_loss_pct": 3.0, "max_chase_pct": 5.0},
 }
@@ -48,10 +47,18 @@ def streaks(trades: list[dict]) -> dict:
     max_win = win_run = 0
     runs: dict[str, list[int]] = {"win": [], "loss": []}
     flat = mart = peak = max_dd = 0.0
+    # Win-doubling: stake doubles after each win, back to 1 after a loss or
+    # after the 4th win in a row.
+    anti = anti_peak = anti_dd = 0.0
+    anti_level = 0
     for t in ordered:
         net = t["net_pct"]
         flat += net
         mart += MARTINGALE[level] * net
+        anti += MARTINGALE[anti_level] * net
+        anti_peak = max(anti_peak, anti)
+        anti_dd = max(anti_dd, anti_peak - anti)
+        anti_level = (anti_level + 1) % len(MARTINGALE) if net > 0 else 0
         peak = max(peak, mart)
         max_dd = max(max_dd, peak - mart)
         if net > 0:
@@ -75,7 +82,7 @@ def streaks(trades: list[dict]) -> dict:
         runs["win"].append(win_run)
     dist = {k: [sum(1 for r in v if (r >= n if n == 5 else r == n)) for n in range(1, 6)] for k, v in runs.items()}
     return {"n": len(ordered), "max_streak": max_streak, "busts": busts, "max_win": max_win, "dist": dist,
-            "flat": flat, "mart": mart, "max_dd": max_dd}
+            "flat": flat, "mart": mart, "max_dd": max_dd, "anti": anti, "anti_dd": anti_dd}
 
 
 def main() -> None:
@@ -127,8 +134,8 @@ def main() -> None:
                       f"| {sum(net) / len(net):+.3f}% | {sum(net):+.1f}% | {exits} |")
 
         print(f"\n----- {variant}：連續虧損與 1-2-4-8 加倍 -----")
-        print("| 策略 | 方向 | 筆數 | 最多連勝 | 最多連輸 | 連輸4次(爆) | 每筆1單位合計 | 加倍法合計 | 加倍法最大回落 | 連勝1/2/3/4/5+次 | 連輸1/2/3/4/5+次 |")
-        print("|---|---|---|---|---|---|---|---|---|---|---|")
+        print("| 策略 | 方向 | 筆數 | 最多連勝 | 最多連輸 | 連輸4次(爆) | 每筆1單位合計 | 輸加倍合計 | 輸加倍最大回落 | 贏加倍合計 | 贏加倍最大回落 | 連勝1/2/3/4/5+次 | 連輸1/2/3/4/5+次 |")
+        print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for strategy, base in ts.STRATEGIES.items():
             trades = results[(variant, strategy)]
             for side in ("long", "short", "all"):
@@ -138,7 +145,7 @@ def main() -> None:
                 r = streaks(sel)
                 label = {"long": "多", "short": "空", "all": "合計"}[side]
                 print(f"| {base['label']} | {label} | {r['n']} | {r['max_win']} | {r['max_streak']} | {r['busts']} "
-                      f"| {r['flat']:+.1f}% | {r['mart']:+.1f}% | {r['max_dd']:.1f}% "
+                      f"| {r['flat']:+.1f}% | {r['mart']:+.1f}% | {r['max_dd']:.1f}% | {r['anti']:+.1f}% | {r['anti_dd']:.1f}% "
                       f"| {'/'.join(map(str, r['dist']['win']))} | {'/'.join(map(str, r['dist']['loss']))} |")
 
 
