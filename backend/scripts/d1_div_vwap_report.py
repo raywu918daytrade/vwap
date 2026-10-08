@@ -8,6 +8,10 @@
    opens the trade at the next minute's open. One trade per divergence.
 3. Exit at +TP% / -SL% (stop wins when one bar hits both), else the 13:24 close.
 
+With --ma-cross, step 2 first waits for a D1 MA5/MA10 cross in the same
+direction (bull: MA5 crosses above MA10, bear: below) in the 5 trading days after
+the divergence; the VWAP window then starts the day after that cross.
+
 Prints win rate, streaks and the 1-2-4-8 runs for long / short / both, and
 saves 3 random charts per step to --chart-dir for checking by eye.
 
@@ -58,8 +62,32 @@ def find_divergences(day: pd.DataFrame, from_date: str, to_date: str) -> list[di
     return sorted(out, key=lambda d: (d["confirm_date"], d["stock_id"], d["kind"]))
 
 
+def find_ma_crosses(divs: list[dict], day: pd.DataFrame) -> list[dict]:
+    """Divergences followed by a same-direction D1 MA5/MA10 cross within 5 trading days."""
+    by_stock = {}
+    for sid, g in day.groupby("stock_id", sort=False):
+        g = g.sort_values("date")
+        close = g["close"].astype(float)
+        by_stock[str(sid)] = (g["date"].dt.strftime("%Y-%m-%d").tolist(),
+                              close.rolling(5).mean().to_numpy(), close.rolling(10).mean().to_numpy())
+    out = []
+    for div in divs:
+        dates, ma5, ma10 = by_stock[div["stock_id"]]
+        if div["confirm_date"] not in dates:
+            continue
+        c = dates.index(div["confirm_date"])
+        for j in range(c + 1, min(c + 1 + WINDOW_DAYS, len(dates))):
+            diff_prev, diff = ma5[j - 1] - ma10[j - 1], ma5[j] - ma10[j]
+            if not (np.isfinite(diff_prev) and np.isfinite(diff)):
+                continue
+            if (div["kind"] == "bull" and diff_prev <= 0 < diff) or (div["kind"] == "bear" and diff_prev >= 0 > diff):
+                out.append({**div, "ma_date": dates[j]})
+                break
+    return out
+
+
 def find_entries(divs: list[dict], trade_days: list[str], stock_ids: set[str]) -> list[dict]:
-    """First matching VWAP cross in the 5 trading days after each divergence."""
+    """First matching VWAP cross in the 5 trading days after each divergence (or MA cross)."""
     crosses: dict[tuple[str, str], list[dict]] = {}
     for d in trade_days:
         bundle = read_vwap_signals(d, stock_ids=stock_ids) or {}
@@ -70,7 +98,8 @@ def find_entries(divs: list[dict], trade_days: list[str], stock_ids: set[str]) -
     entries = []
     for div in divs:
         want = "up" if div["kind"] == "bull" else "down"
-        later = [d for d in trade_days if d > div["confirm_date"]][:WINDOW_DAYS]
+        start = div.get("ma_date") or div["confirm_date"]
+        later = [d for d in trade_days if d > start][:WINDOW_DAYS]
         for d in later:
             hits = sorted((r for r in crosses.get((d, div["stock_id"]), []) if r.get("direction") == want),
                           key=lambda r: r["time"])
@@ -86,10 +115,11 @@ def _vwap(bars: pd.DataFrame) -> pd.Series:
     return (bars["close"].astype(float) * vol).cumsum() / vol.cumsum().replace(0, np.nan)
 
 
-def chart_divergence(div: dict, day: pd.DataFrame, path: Path) -> None:
+def chart_divergence(div: dict, day: pd.DataFrame, path: Path, title: str | None = None) -> None:
     import matplotlib.pyplot as plt
 
-    full = day[(day["stock_id"] == div["stock_id"]) & (day["date"] <= pd.Timestamp(div["confirm_date"]))]
+    end = div.get("ma_date") or div["confirm_date"]
+    full = day[(day["stock_id"] == div["stock_id"]) & (day["date"] <= pd.Timestamp(end))]
     full = full.sort_values("date")
     hist = macd_histogram(full["close"].astype(float).to_numpy())
     g = full.tail(80).reset_index(drop=True)
@@ -109,8 +139,15 @@ def chart_divergence(div: dict, day: pd.DataFrame, path: Path) -> None:
                          textcoords="offset points", ha="center", color="blue", fontsize=9)
             ax1.plot(i, price, "o", color="blue")
             ax2.axvline(i, color="blue", linewidth=0.8, linestyle="--")
-    ax1.axvline(len(g) - 1, color="purple", linewidth=0.8, linestyle=":")
-    ax1.set_title(f"Step 1  D1 MACD {div['kind']} divergence  {div['stock_id']}  confirmed {div['confirm_date']}")
+    if div["confirm_date"] in ds:
+        ax1.axvline(ds.index(div["confirm_date"]), color="purple", linewidth=0.8, linestyle=":")
+    if div.get("ma_date"):
+        close = full["close"].astype(float)
+        ax1.plot(x, close.rolling(5).mean().to_numpy()[-len(g):], color="tab:orange", linewidth=1, label="MA5")
+        ax1.plot(x, close.rolling(10).mean().to_numpy()[-len(g):], color="tab:blue", linewidth=1, label="MA10")
+        ax1.axvline(len(g) - 1, color="tab:orange", linewidth=1, linestyle="--")
+        ax1.legend(loc="upper left")
+    ax1.set_title(title or f"Step 1  D1 MACD {div['kind']} divergence  {div['stock_id']}  confirmed {div['confirm_date']}")
     step = max(1, len(g) // 10)
     ax2.set_xticks(x[::step], [d[5:] for d in ds[::step]])
     fig.tight_layout()
@@ -160,6 +197,7 @@ def main() -> None:
     parser.add_argument("--sl", type=float, default=SL)
     parser.add_argument("--chart-dir", default="db/d1_div_vwap_charts")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--ma-cross", action="store_true", help="require a D1 MA5/MA10 cross after the divergence")
     args = parser.parse_args()
     TP, SL = args.tp, args.sl
     rules = {**ts.RULES, "take_profit_pct": TP, "stop_loss_pct": SL}
@@ -174,8 +212,14 @@ def main() -> None:
 
     divs = find_divergences(day, div_from, args.to_date)
     print(f"Step 1  D1 背離：{len(divs)} 個（底 {sum(d['kind'] == 'bull' for d in divs)}、頂 {sum(d['kind'] == 'bear' for d in divs)}）", flush=True)
-    entries = find_entries(divs, trade_days, stock_ids)
-    print(f"Step 2  5 日內穿越 VWAP：{len(entries)} 筆（多 {sum(e['side'] == 'long' for e in entries)}、空 {sum(e['side'] == 'short' for e in entries)}）", flush=True)
+    ma_divs = None
+    if args.ma_cross:
+        ma_divs = find_ma_crosses(divs, day)
+        print(f"Step 2  5 日內 MA5/MA10 同向交叉：{len(ma_divs)} 個（金叉 {sum(d['kind'] == 'bull' for d in ma_divs)}、"
+              f"死叉 {sum(d['kind'] == 'bear' for d in ma_divs)}）", flush=True)
+    n = 3 if args.ma_cross else 2
+    entries = find_entries(ma_divs if args.ma_cross else divs, trade_days, stock_ids)
+    print(f"Step {n}  5 日內穿越 VWAP：{len(entries)} 筆（多 {sum(e['side'] == 'long' for e in entries)}、空 {sum(e['side'] == 'short' for e in entries)}）", flush=True)
 
     trades, bars_cache = [], {}
     for ent in entries:
@@ -185,9 +229,10 @@ def main() -> None:
         trade = ts._simulate(ent, bars_cache[key], True, rules)
         if trade["net_pct"] is not None:
             trades.append({**trade, "date": ent["date"]})
-    print(f"Step 3  完成交易：{len(trades)} 筆", flush=True)
+    print(f"Step {n + 1}  完成交易：{len(trades)} 筆", flush=True)
 
-    print(f"\n===== D1 MACD 背離 → 5 日內 M1 穿越 VWAP（停利 {TP:g}% / 停損 {SL:g}%，成本 {rules['cost_pct']}%）=====")
+    name = "D1 MACD 背離 → 5 日內 MA5/MA10 交叉 → 5 日內 M1 穿越 VWAP" if args.ma_cross else "D1 MACD 背離 → 5 日內 M1 穿越 VWAP"
+    print(f"\n===== {name}（停利 {TP:g}% / 停損 {SL:g}%，成本 {rules['cost_pct']}%）=====")
     print("| 方向 | 筆數 | 勝率 | 平均 | 合計 | 停利/停損/收盤 |")
     print("|---|---|---|---|---|---|")
     for side, label in (("long", "多"), ("short", "空"), ("all", "多＋空")):
@@ -230,18 +275,24 @@ def main() -> None:
         p = out / f"step1_{i}_{div['stock_id']}_{div['confirm_date']}_{div['kind']}.png"
         chart_divergence(div, day, p)
         print(f"  {p.name}  背離 {div['kind']} 點 {div['d1']} / {div['d2']}")
+    for i, div in enumerate(sample3(ma_divs or [], "kind"), 1):
+        cross = "golden" if div["kind"] == "bull" else "death"
+        p = out / f"step2_{i}_{div['stock_id']}_{div['ma_date']}_{div['kind']}.png"
+        chart_divergence(div, day, p, f"Step 2  MA5/MA10 {cross} cross  {div['stock_id']}  {div['ma_date']}  "
+                                      f"(MACD {div['kind']} confirmed {div['confirm_date']})")
+        print(f"  {p.name}  MA 交叉 {div['ma_date']}（背離確認 {div['confirm_date']}）")
     for i, ent in enumerate(sample3(entries, "side"), 1):
         bars = bars_cache.get((ent["stock_id"], ent["date"]))
         if bars is None or bars.empty:
             continue
-        p = out / f"step2_{i}_{ent['stock_id']}_{ent['date']}_{ent['side']}.png"
-        chart_intraday(ent, bars, None, f"Step 2  VWAP cross {ent['side']}  {ent['stock_id']}  {ent['date']} "
+        p = out / f"step{n}_{i}_{ent['stock_id']}_{ent['date']}_{ent['side']}.png"
+        chart_intraday(ent, bars, None, f"Step {n}  VWAP cross {ent['side']}  {ent['stock_id']}  {ent['date']} "
                                         f"(D1 {ent['kind']} confirmed {ent['confirm_date']})", p)
         print(f"  {p.name}  穿越 {ent['signal_time']}")
     for i, t in enumerate(sample3(trades, "side"), 1):
         bars = bars_cache[(t["stock_id"], t["date"])]
-        p = out / f"step3_{i}_{t['stock_id']}_{t['date']}_{t['side']}.png"
-        chart_intraday(t, bars, t, f"Step 3  trade {t['side']}  {t['stock_id']}  {t['date']}  "
+        p = out / f"step{n + 1}_{i}_{t['stock_id']}_{t['date']}_{t['side']}.png"
+        chart_intraday(t, bars, t, f"Step {n + 1}  trade {t['side']}  {t['stock_id']}  {t['date']}  "
                                    f"in {t['entry_time']} @{t['entry_price']}  out {t['exit_time']} @{t['exit_price']}  "
                                    f"net {t['net_pct']:+.2f}%", p)
         print(f"  {p.name}  {t['status']} {t['net_pct']:+.2f}%")
