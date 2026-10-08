@@ -1,0 +1,46 @@
+name: tmp trade stats report
+on:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/tmp-trade-stats-report.yml"]
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Aggregate /api/trade_stats from production
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request, datetime as dt
+          BASE = "https://day-trade.just1stock.com/api/trade_stats"
+          start, end = dt.date(2026, 9, 1), dt.date(2026, 10, 7)
+          days = [start + dt.timedelta(n) for n in range((end - start).days + 1)]
+          days = [d.isoformat() for d in days if d.weekday() < 5]
+          strategies = ["sr_short", "sr_short_slots", "vwap_cross", "macd_vwap"]
+          for s in strategies:
+              trades, per_day = [], []
+              for d in days:
+                  url = f"{BASE}?date={d}&strategy={s}"
+                  for attempt in range(3):
+                      try:
+                          with urllib.request.urlopen(url, timeout=180) as r:
+                              data = json.load(r)
+                          break
+                      except Exception as e:
+                          print("retry", s, d, e, flush=True); time.sleep(5); data = None
+                  if not data:
+                      per_day.append((d, "ERR")); continue
+                  closed = [t for t in data.get("trades", []) if t.get("status") in ("停利", "停損", "收盤平倉")]
+                  trades += [(d, t) for t in closed]
+                  per_day.append((d, len(closed), round(sum(t["net_pct"] for t in closed), 2)))
+                  time.sleep(1)
+              print(f"\n===== {s} =====")
+              for row in per_day: print("DAY", *row)
+              for side in ("long", "short", None):
+                  sel = [t for _, t in trades if side is None or t.get("side") == side]
+                  if not sel: print("SIDE", side or "all", "n=0"); continue
+                  net = [t["net_pct"] for t in sel]
+                  st = {k: sum(1 for t in sel if t["status"] == k) for k in ("停利", "停損", "收盤平倉")}
+                  print("SIDE", side or "all", f"n={len(sel)}", f"win={sum(x > 0 for x in net) / len(net) * 100:.1f}%",
+                        f"avg={sum(net) / len(net):+.3f}%", f"total={sum(net):+.2f}%", json.dumps(st, ensure_ascii=False))
+          PY
