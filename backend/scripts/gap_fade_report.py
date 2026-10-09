@@ -1,0 +1,158 @@
+"""隔日沖賣壓：昨天大漲、今天開高，跌破開盤價（或開盤 5 分鐘低點）就當沖放空。
+
+1. D1（還原日K）：昨天漲幅 >= --min-gain 且今天開盤 > 昨天收盤。
+2. 當天 ATR14 >= 5% 且開盤 5 分鐘量 PR >= 50（網頁同一個數字）。
+3. M1：09:05 ~ 11:00 第一根收盤跌破觸發價（today open 或 09:00-09:04 最低）就放空，
+   下一分鐘開盤進場；停利 3.5% / 停損 3%，否則 13:24 收盤平倉。成本 0.435%。
+
+參數只在 7～8 月比較（漲幅門檻 x 觸發價），用 7～8 月平均最好的那組去跑 9～10 月。
+對照組：同期間通過 ATR／量篩選的股票，在 09:05 ~ 11:00 隨機一分鐘放空（看大盤漂移）。
+
+    python -m scripts.gap_fade_report --train 2026-07-01 2026-08-31 --test 2026-09-01 2026-10-08
+"""
+
+from __future__ import annotations
+
+import argparse
+import random
+
+import numpy as np
+import pandas as pd
+
+import trade_stats_api as ts
+from data.adjustment_query import load_pattern_day
+from pattern.vwap_activity import metrics_for_date as activity_for_date
+from pattern.vwap_sr_scan import stock_ids_for_universe
+from scripts.trade_stats_report import one_at_a_time, streaks
+
+FIRST, LAST = "09:05", "11:00"
+GAINS = (0.05, 0.07, 0.095)
+TRIGGERS = {"open": "跌破開盤價", "low5": "跌破開盤5分低"}
+
+
+def candidates(day: pd.DataFrame, trade_days: list[str], min_gain: float) -> list[dict]:
+    """(date, stock) where yesterday rose >= min_gain and today opens above yesterday's close."""
+    d = day.sort_values(["stock_id", "date"]).copy()
+    g = d.groupby("stock_id", sort=False)["close"]
+    d["prev_close"] = g.shift(1)
+    d["prev_gain"] = d["prev_close"] / g.shift(2) - 1
+    d["ds"] = d["date"].dt.strftime("%Y-%m-%d")
+    sel = d[d["ds"].isin(trade_days) & (d["prev_gain"] >= min_gain) & (d["open"] > d["prev_close"])]
+    return [{"stock_id": str(r.stock_id), "date": r.ds, "prev_gain": float(r.prev_gain),
+             "gap": float(r.open / r.prev_close - 1)} for r in sel.itertuples(index=False)]
+
+
+def trigger_time(bars: pd.DataFrame, how: str) -> str | None:
+    if bars.empty:
+        return None
+    level = float(bars["open"].iloc[0]) if how == "open" else float(bars[bars["hhmm"] < FIRST]["low"].min())
+    if not np.isfinite(level):
+        return None
+    win = bars[(bars["hhmm"] >= FIRST) & (bars["hhmm"] <= LAST)]
+    hit = win[win["close"].astype(float) < level]
+    return str(hit["hhmm"].iloc[0]) if not hit.empty else None
+
+
+def stats(trades: list[dict]) -> str:
+    if not trades:
+        return "| 0 | - | - | - | - | - | - |"
+    net = [t["net_pct"] for t in trades]
+    one = streaks(one_at_a_time(trades))
+    exits = "/".join(str(sum(t["status"] == k for t in trades)) for k in ("停利", "停損", "收盤平倉"))
+    return (f"| {len(net)} | {sum(x > 0 for x in net) / len(net) * 100:.1f}% | {np.mean(net):+.3f}% | {exits} "
+            f"| {one['n']} 筆 {one['flat']:+.1f}% | {one['max_streak']} | {one['mart']:+.1f}% |")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train", nargs=2, required=True)
+    parser.add_argument("--test", nargs=2, required=True)
+    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--baseline-n", type=int, default=1500, help="random stock-days per period")
+    args = parser.parse_args()
+    rules = {**ts.RULES, "take_profit_pct": 3.5, "stop_loss_pct": 3.0}
+    periods = {"7～8月（找參數）": tuple(args.train), "9～10月（驗證）": tuple(args.test)}
+
+    stock_ids = stock_ids_for_universe("daytrade")
+    start = (pd.Timestamp(args.train[0]) - pd.Timedelta(days=60)).strftime("%Y-%m-%d")
+    day = load_pattern_day(start_date=start, end_date=args.test[1])
+    day["stock_id"] = day["stock_id"].astype(str)
+    day = day[day["stock_id"].isin(stock_ids)]
+    all_days = sorted(day["date"].dt.strftime("%Y-%m-%d").unique())
+
+    act_cache: dict[str, dict] = {}
+
+    def passes(sid: str, d: str) -> bool:
+        if d not in act_cache:
+            act_cache[d] = {str(k): v for k, v in (activity_for_date(d) or {}).items()}
+        m = act_cache[d].get(sid) or {}
+        return (m.get("day_atr") or 0) >= 0.05 and (m.get("vol5_pr") or 0) >= 0.5
+
+    bars_cache: dict[tuple[str, str], pd.DataFrame] = {}
+
+    def bars(sid: str, d: str) -> pd.DataFrame:
+        if (sid, d) not in bars_cache:
+            bars_cache[(sid, d)] = ts._day_bars(sid, d)
+        return bars_cache[(sid, d)]
+
+    def run(cands: list[dict], how: str) -> list[dict]:
+        out = []
+        for c in cands:
+            b = bars(c["stock_id"], c["date"])
+            t = trigger_time(b, how)
+            if t is None:
+                continue
+            trade = ts._simulate({**c, "side": "short", "signal_time": t}, b, True, rules)
+            if trade["net_pct"] is not None:
+                out.append(trade)
+        return out
+
+    header = ("| 組合 | 筆數 | 勝率 | 平均 | 停利/停損/收盤 | 一次一筆 | 最多連輸 | 輸加倍 1-2-4-8 |\n"
+              "|---|---|---|---|---|---|---|---|")
+    results: dict[str, dict[tuple, list[dict]]] = {}
+    for label, (a, b) in periods.items():
+        tdays = [d for d in all_days if a <= d <= b]
+        results[label] = {}
+        print(f"\n===== {label} {a} ~ {b}（{len(tdays)} 天，只做空，停利 3.5 / 停損 3，成本 {rules['cost_pct']}%）=====")
+        print(header)
+        for g in GAINS:
+            cands = [c for c in candidates(day, tdays, g) if passes(c["stock_id"], c["date"])]
+            for how, name in TRIGGERS.items():
+                trades = run(cands, how)
+                results[label][(g, how)] = trades
+                print(f"| 昨漲≥{g * 100:g}%＋開高＋{name}（候選 {len(cands)}）{stats(trades)}", flush=True)
+
+        # Baseline: random filtered stock-days, short at a random minute in the same window.
+        rng = random.Random(args.seed)
+        pool = [(sid, d) for d in tdays for sid in sorted(stock_ids) if passes(sid, d)]
+        sample = rng.sample(pool, min(args.baseline_n, len(pool)))
+        base = []
+        for sid, d in sample:
+            b = bars(sid, d)
+            mins = b[(b["hhmm"] >= FIRST) & (b["hhmm"] <= LAST)]["hhmm"].tolist() if not b.empty else []
+            if not mins:
+                continue
+            trade = ts._simulate({"stock_id": sid, "date": d, "side": "short", "signal_time": rng.choice(mins)},
+                                 b, True, rules)
+            if trade["net_pct"] is not None:
+                base.append(trade)
+            bars_cache.pop((sid, d), None)
+        print(f"| 對照：ATR＋量篩選後隨機時間放空（抽 {len(sample)} 個股票日）{stats(base)}", flush=True)
+
+    train, test = list(periods)
+    scored = [(np.mean([t["net_pct"] for t in v]), k) for k, v in results[train].items() if len(v) >= 20]
+    if scored:
+        best = max(scored)[1]
+        print(f"\n7～8月平均最好（至少 20 筆）：昨漲≥{best[0] * 100:g}%＋{TRIGGERS[best[1]]}")
+        print(header)
+        for label in periods:
+            print(f"| {label} {stats(results[label][best])}")
+        sample = results[test][best][:]
+        print("\n9～10月 這組的交易：")
+        for t in sorted(sample, key=lambda t: (t["date"], t["entry_time"])):
+            print(f"  {t['date']} {t['stock_id']} 昨漲 {t['prev_gain'] * 100:.1f}% 開高 {t['gap'] * 100:.1f}% "
+                  f"進 {t['entry_time']} @{t['entry_price']} 出 {t['exit_time']} {t['status']} {t['net_pct']:+.2f}%")
+
+
+if __name__ == "__main__":
+    main()
