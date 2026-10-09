@@ -1,6 +1,7 @@
 """隔日沖賣壓：昨天大漲、今天開高，跌破開盤價（或開盤 5 分鐘低點）就當沖放空。
 
 1. D1（還原日K）：昨天漲幅 >= --min-gain 且今天開盤 > 昨天收盤。
+   m5_vol（Ray 2026-10-09）：跌破的那根 M5 成交量 < 前一根紅 K 成交量的一半。
    m5_res（Ray 2026-10-09）：那根收盤跌破的 M5 還要「最高 >= D1 壓力線 > 收盤」，壓力線同網頁
    （pattern.horizontal_sr，用當天之前的還原日K）；沒有壓力線的股票不做。
    進場改成（Ray 2026-10-09）：M5 收紅 K，下一根 M5 收盤收在這根紅 K 低點之下，再下一根 M5 開盤放空。
@@ -31,7 +32,8 @@ from scripts.trade_stats_report import one_at_a_time, streaks
 
 FIRST, LAST = "09:05", "11:00"
 GAINS = (0.05, 0.07, 0.095)
-TRIGGERS = {"m5": "紅M5後下一根M5收盤跌破其低點"}
+TRIGGERS = {"m5": "紅M5後下一根M5收盤跌破其低點",
+            "m5_vol": "同上＋跌破那根M5量＜紅K量一半"}
 
 
 def candidates(day: pd.DataFrame, trade_days: list[str], min_gain: float) -> list[dict]:
@@ -53,7 +55,7 @@ def candidates(day: pd.DataFrame, trade_days: list[str], min_gain: float) -> lis
     return out
 
 
-def m5_break_time(bars: pd.DataFrame, res: float | None = None) -> str | None:
+def m5_break_time(bars: pd.DataFrame, res: float | None = None, vol_ratio: float | None = None) -> str | None:
     """Last minute of the first M5 bar that closes below the low of the previous M5 bar, when that bar was up.
 
     The trade then opens at the next minute's open, i.e. the next M5 bar's open.
@@ -61,13 +63,15 @@ def m5_break_time(bars: pd.DataFrame, res: float | None = None) -> str | None:
     hh = bars["hhmm"]
     bucket = hh.str[:3] + (hh.str[3:].astype(int) // 5 * 5).astype(str).str.zfill(2)
     m5 = bars.groupby(bucket, sort=True).agg(open=("open", "first"), close=("close", "last"),
-                                             low=("low", "min"), high=("high", "max"),
+                                             low=("low", "min"), high=("high", "max"), volume=("volume", "sum"),
                                              last=("hhmm", "last"))
     rows = list(m5.itertuples())
     for p, c in zip(rows, rows[1:]):
         if not float(p.close) > float(p.open):
             continue
         if res is not None and not (float(c.high) >= res > float(c.close)):
+            continue
+        if vol_ratio is not None and not (float(c.volume) < vol_ratio * float(p.volume)):
             continue
         if float(c.close) < float(p.low) and FIRST <= c.last <= LAST:
             return str(c.last)
@@ -79,6 +83,8 @@ def trigger_time(bars: pd.DataFrame, how: str, res: float | None = None) -> str 
         return None
     if how == "m5":
         return m5_break_time(bars)
+    if how == "m5_vol":
+        return m5_break_time(bars, vol_ratio=0.5)
     if how == "m5_res":
         return m5_break_time(bars, res) if res is not None else None
     level = float(bars["open"].iloc[0]) if how == "open" else float(bars[bars["hhmm"] < FIRST]["low"].min())
