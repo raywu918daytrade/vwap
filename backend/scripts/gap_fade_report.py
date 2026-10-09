@@ -1,8 +1,9 @@
 """隔日沖賣壓：昨天大漲、今天開高，跌破開盤價（或開盤 5 分鐘低點）就當沖放空。
 
 1. D1（還原日K）：昨天漲幅 >= --min-gain 且今天開盤 > 昨天收盤。
+   進場改成（Ray 2026-10-09）：M5 收紅 K，下一根 M5 跌破這根紅 K 的低點就放空。
 2. 當天 ATR14 >= 5% 且開盤 5 分鐘量 PR >= 50（網頁同一個數字）。
-3. M1：09:05 ~ 11:00 第一根收盤跌破觸發價（today open 或 09:00-09:04 最低）就放空，
+3. M1：09:05 ~ 11:00 第一次觸發就放空（舊版觸發價：開盤價或 09:00-09:04 最低），
    下一分鐘開盤進場；停利 3.5% / 停損 3%，否則 13:24 收盤平倉。成本 0.435%。
 
 參數只在 7～8 月比較（漲幅門檻 x 觸發價），用 7～8 月平均最好的那組去跑 9～10 月。
@@ -27,7 +28,7 @@ from scripts.trade_stats_report import one_at_a_time, streaks
 
 FIRST, LAST = "09:05", "11:00"
 GAINS = (0.05, 0.07, 0.095)
-TRIGGERS = {"open": "跌破開盤價", "low5": "跌破開盤5分低"}
+TRIGGERS = {"m5": "紅M5後下一根M5跌破其低點"}
 
 
 def candidates(day: pd.DataFrame, trade_days: list[str], min_gain: float) -> list[dict]:
@@ -42,9 +43,28 @@ def candidates(day: pd.DataFrame, trade_days: list[str], min_gain: float) -> lis
              "gap": float(r.open / r.prev_close - 1)} for r in sel.itertuples(index=False)]
 
 
+def m5_break_time(bars: pd.DataFrame) -> str | None:
+    """First minute (in the window) where price breaks the low of the previous M5 bar, when that bar was up."""
+    hh = bars["hhmm"]
+    bucket = hh.str[:3] + (hh.str[3:].astype(int) // 5 * 5).astype(str).str.zfill(2)
+    m5 = bars.groupby(bucket, sort=True).agg(open=("open", "first"), close=("close", "last"), low=("low", "min"))
+    keys = list(m5.index)
+    for prev, cur in zip(keys, keys[1:]):
+        p = m5.loc[prev]
+        if not float(p["close"]) > float(p["open"]):
+            continue
+        rows = bars[(bucket == cur) & (bars["low"].astype(float) < float(p["low"]))]
+        rows = rows[(rows["hhmm"] >= FIRST) & (rows["hhmm"] <= LAST)]
+        if not rows.empty:
+            return str(rows["hhmm"].iloc[0])
+    return None
+
+
 def trigger_time(bars: pd.DataFrame, how: str) -> str | None:
     if bars.empty:
         return None
+    if how == "m5":
+        return m5_break_time(bars)
     level = float(bars["open"].iloc[0]) if how == "open" else float(bars[bars["hhmm"] < FIRST]["low"].min())
     if not np.isfinite(level):
         return None
