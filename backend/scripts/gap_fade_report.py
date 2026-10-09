@@ -32,8 +32,12 @@ from scripts.trade_stats_report import one_at_a_time, streaks
 
 FIRST, LAST = "09:05", "11:00"
 GAINS = (0.05, 0.07, 0.095)
-TRIGGERS = {"m5": "紅M5後下一根M5收盤跌破其低點",
-            "m5_vol": "同上＋跌破那根M5量＜紅K量一半"}
+# Suffix _red / _bar: stop at the red M5's high / the breaking M5's high instead of a fixed 3%.
+TRIGGERS = {"m5": "紅M5後下一根M5收盤跌破其低點（停損3%）",
+            "m5_red": "同上，停損改紅K高點",
+            "m5_bar": "同上，停損改跌破那根M5高點",
+            "m5_vol": "＋量＜紅K一半（停損3%）",
+            "m5_vol_red": "＋量＜紅K一半，停損改紅K高點"}
 
 
 def candidates(day: pd.DataFrame, trade_days: list[str], min_gain: float) -> list[dict]:
@@ -55,6 +59,9 @@ def candidates(day: pd.DataFrame, trade_days: list[str], min_gain: float) -> lis
     return out
 
 
+LEVELS: dict[str, float] = {}  # stop candidates of the last M5 trigger found
+
+
 def m5_break_time(bars: pd.DataFrame, res: float | None = None, vol_ratio: float | None = None) -> str | None:
     """Last minute of the first M5 bar that closes below the low of the previous M5 bar, when that bar was up.
 
@@ -74,6 +81,7 @@ def m5_break_time(bars: pd.DataFrame, res: float | None = None, vol_ratio: float
         if vol_ratio is not None and not (float(c.volume) < vol_ratio * float(p.volume)):
             continue
         if float(c.close) < float(p.low) and FIRST <= c.last <= LAST:
+            LEVELS.update(red_high=float(p.high), bar_high=float(c.high))
             return str(c.last)
     return None
 
@@ -81,10 +89,10 @@ def m5_break_time(bars: pd.DataFrame, res: float | None = None, vol_ratio: float
 def trigger_time(bars: pd.DataFrame, how: str, res: float | None = None) -> str | None:
     if bars.empty:
         return None
-    if how == "m5":
-        return m5_break_time(bars)
-    if how == "m5_vol":
+    if how.startswith("m5_vol"):
         return m5_break_time(bars, vol_ratio=0.5)
+    if how.startswith("m5") and how != "m5_res":
+        return m5_break_time(bars)
     if how == "m5_res":
         return m5_break_time(bars, res) if res is not None else None
     level = float(bars["open"].iloc[0]) if how == "open" else float(bars[bars["hhmm"] < FIRST]["low"].min())
@@ -153,9 +161,20 @@ def main() -> None:
             t = trigger_time(b, how, c.get("res"))
             if t is None:
                 continue
-            trade = ts._simulate({**c, "side": "short", "signal_time": t}, b, True, rules)
+            r = rules
+            if how.endswith(("_red", "_bar")):
+                stop = LEVELS["red_high" if how.endswith("_red") else "bar_high"]
+                after = b[b["hhmm"] > t]
+                if after.empty:
+                    continue
+                entry = float(after["open"].iloc[0])
+                sl_pct = (stop / entry - 1) * 100
+                if not sl_pct > 0:
+                    continue  # opens above the stop: no valid trade
+                r = {**rules, "stop_loss_pct": sl_pct}
+            trade = ts._simulate({**c, "side": "short", "signal_time": t}, b, True, r)
             if trade["net_pct"] is not None:
-                out.append(trade)
+                out.append({**trade, "sl_pct": r["stop_loss_pct"]})
         return out
 
     header = ("| 組合 | 筆數 | 勝率 | 平均 | 停利/停損/收盤 | 一次一筆 | 最多連輸 | 輸加倍 1-2-4-8 | 扣最好一天的平均 |\n"
@@ -171,7 +190,8 @@ def main() -> None:
             for how, name in TRIGGERS.items():
                 trades = run(cands, how)
                 results[label][(g, how)] = trades
-                print(f"| 昨漲≥{g * 100:g}%＋開高＋{name}（候選 {len(cands)}）{stats(trades)}", flush=True)
+                sl = f"，平均停損距離 {np.mean([t['sl_pct'] for t in trades]):.2f}%" if trades and how.endswith(("_red", "_bar")) else ""
+                print(f"| 昨漲≥{g * 100:g}%＋開高＋{name}（候選 {len(cands)}{sl}）{stats(trades)}", flush=True)
 
         # Baseline: random filtered stock-days, short at a random minute in the same window.
         rng = random.Random(args.seed)
