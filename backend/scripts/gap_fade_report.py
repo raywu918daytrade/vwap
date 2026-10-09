@@ -106,14 +106,14 @@ def stats(trades: list[dict]) -> str:
 
 
 def main() -> None:
+    global FIRST, LAST
     parser = argparse.ArgumentParser()
     parser.add_argument("--train", nargs=2, required=True)
     parser.add_argument("--test", nargs=2, required=True)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--window", nargs=2, default=[FIRST, LAST], help="entry window, e.g. 10:00 13:00")
+    parser.add_argument("--window", nargs=2, default=["09:05", "11:00"], help="entry window, e.g. 10:00 13:00")
     parser.add_argument("--baseline-n", type=int, default=1500, help="random stock-days per period")
     args = parser.parse_args()
-    global FIRST, LAST
     FIRST, LAST = args.window
     rules = {**ts.RULES, "take_profit_pct": 3.5, "stop_loss_pct": 3.0}
     periods = {"7～8月（找參數）": tuple(args.train), "9～10月（驗證）": tuple(args.test)}
