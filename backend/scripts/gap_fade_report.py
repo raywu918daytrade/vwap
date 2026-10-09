@@ -145,6 +145,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--window", nargs=2, default=["09:05", "11:00"], help="entry window, e.g. 10:00 13:00")
     parser.add_argument("--triggers", default="", help="comma list of TRIGGERS keys to run (default all)")
+    parser.add_argument("--exits", default="", help="TP:SL list, e.g. 1:1,1:1.5,1:2 (exit-grid mode)")
+    parser.add_argument("--costs", default="0.435", help="round-trip cost list for exit-grid mode")
     parser.add_argument("--baseline-n", type=int, default=1500, help="random stock-days per period")
     args = parser.parse_args()
     FIRST, LAST = args.window
@@ -198,6 +200,31 @@ def main() -> None:
             if trade["net_pct"] is not None:
                 out.append({**trade, "sl_pct": r["stop_loss_pct"]})
         return out
+
+    if args.exits:
+        grid = [tuple(map(float, e.split(":"))) for e in args.exits.split(",")]
+        costs = [float(c) for c in args.costs.split(",")]
+        spans = {**periods, "全期": (args.train[0], args.test[1])}
+        cands = {lbl: {g: [c for c in candidates(day, [d for d in all_days if a <= d <= b], g)
+                           if passes(c["stock_id"], c["date"])] for g in GAINS} for lbl, (a, b) in spans.items()}
+        for cost in costs:
+            for tp, sl in grid:
+                rules = {**ts.RULES, "take_profit_pct": tp, "stop_loss_pct": sl, "cost_pct": cost}
+                be = (sl + cost) / (tp + sl) * 100
+                print(f"\n===== 停利 {tp:g}% / 停損 {sl:g}%，成本 {cost}%（打平勝率 {be:.1f}%），訊號 {FIRST}～{LAST} =====")
+                print("| 組合 | 全部筆數 | 全部勝率 | 全部平均 | 停利/停損/收盤 | 扣最好一天 |\n|---|---|---|---|---|---|")
+                rows = []
+                for g in GAINS:
+                    for how, name in TRIGGERS.items():
+                        for lbl in spans:
+                            trades = run(cands[lbl][g], how)
+                            st = stats(trades).split("|")
+                            print(f"| 昨漲≥{g * 100:g}% {name} {lbl[:5]} |{st[1]}|{st[2]}|{st[3]}|{st[4]}|{st[8]}|", flush=True)
+                            rows += money_rows(f"昨漲≥{g * 100:g}% {name} {lbl[:5]}", trades)
+                print("\n一次一筆：\n| 組合 | 筆數 | 勝率 | 最多連勝 | 最多連敗 | 連勝分布 | 連敗分布 | 固定 1 單位 | 輸加倍 1-2-4-8 | 贏加倍 1-2-4-8 |\n"
+                      "|---|---|---|---|---|---|---|---|---|---|")
+                print(*rows, sep="\n", flush=True)
+        return
 
     header = ("| 組合 | 筆數 | 勝率 | 平均 | 停利/停損/收盤 | 一次一筆 | 最多連輸 | 輸加倍 1-2-4-8 | 扣最好一天的平均 |\n"
               "|---|---|---|---|---|---|---|---|---|")
