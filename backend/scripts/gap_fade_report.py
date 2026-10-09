@@ -31,8 +31,7 @@ from scripts.trade_stats_report import one_at_a_time, streaks
 
 FIRST, LAST = "09:05", "11:00"
 GAINS = (0.05, 0.07, 0.095)
-TRIGGERS = {"m5": "紅M5後下一根M5收盤跌破其低點",
-            "m5_res": "同上＋那根M5由上往下穿越D1壓力線"}
+TRIGGERS = {"m5": "紅M5後下一根M5收盤跌破其低點"}
 
 
 def candidates(day: pd.DataFrame, trade_days: list[str], min_gain: float) -> list[dict]:
@@ -111,8 +110,11 @@ def main() -> None:
     parser.add_argument("--train", nargs=2, required=True)
     parser.add_argument("--test", nargs=2, required=True)
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--window", nargs=2, default=[FIRST, LAST], help="entry window, e.g. 10:00 13:00")
     parser.add_argument("--baseline-n", type=int, default=1500, help="random stock-days per period")
     args = parser.parse_args()
+    global FIRST, LAST
+    FIRST, LAST = args.window
     rules = {**ts.RULES, "take_profit_pct": 3.5, "stop_loss_pct": 3.0}
     periods = {"7～8月（找參數）": tuple(args.train), "9～10月（驗證）": tuple(args.test)}
 
@@ -156,7 +158,7 @@ def main() -> None:
     for label, (a, b) in periods.items():
         tdays = [d for d in all_days if a <= d <= b]
         results[label] = {}
-        print(f"\n===== {label} {a} ~ {b}（{len(tdays)} 天，只做空，停利 3.5 / 停損 3，成本 {rules['cost_pct']}%）=====")
+        print(f"\n===== {label} {a} ~ {b}（{len(tdays)} 天，訊號 {FIRST}～{LAST}，只做空，停利 3.5 / 停損 3，成本 {rules['cost_pct']}%）=====")
         print(header)
         for g in GAINS:
             cands = [c for c in candidates(day, tdays, g) if passes(c["stock_id"], c["date"])]
