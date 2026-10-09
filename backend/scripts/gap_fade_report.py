@@ -1,6 +1,8 @@
 """隔日沖賣壓：昨天大漲、今天開高，跌破開盤價（或開盤 5 分鐘低點）就當沖放空。
 
 1. D1（還原日K）：昨天漲幅 >= --min-gain 且今天開盤 > 昨天收盤。
+   m5_res（Ray 2026-10-09）：那根收盤跌破的 M5 還要「最高 >= D1 壓力線 > 收盤」，壓力線同網頁
+   （pattern.horizontal_sr，用當天之前的還原日K）；沒有壓力線的股票不做。
    進場改成（Ray 2026-10-09）：M5 收紅 K，下一根 M5 收盤收在這根紅 K 低點之下，再下一根 M5 開盤放空。
 2. 當天 ATR14 >= 5% 且開盤 5 分鐘量 PR >= 50（網頁同一個數字）。
 3. M1：09:05 ~ 11:00 第一次觸發就放空（舊版觸發價：開盤價或 09:00-09:04 最低），
@@ -22,13 +24,15 @@ import pandas as pd
 
 import trade_stats_api as ts
 from data.adjustment_query import load_pattern_day
+from pattern.horizontal_sr import horizontal_sr_prices
 from pattern.vwap_activity import metrics_for_date as activity_for_date
 from pattern.vwap_sr_scan import stock_ids_for_universe
 from scripts.trade_stats_report import one_at_a_time, streaks
 
 FIRST, LAST = "09:05", "11:00"
 GAINS = (0.05, 0.07, 0.095)
-TRIGGERS = {"m5": "紅M5後下一根M5收盤跌破其低點"}
+TRIGGERS = {"m5": "紅M5後下一根M5收盤跌破其低點",
+            "m5_res": "同上＋那根M5由上往下穿越D1壓力線"}
 
 
 def candidates(day: pd.DataFrame, trade_days: list[str], min_gain: float) -> list[dict]:
@@ -39,11 +43,18 @@ def candidates(day: pd.DataFrame, trade_days: list[str], min_gain: float) -> lis
     d["prev_gain"] = d["prev_close"] / g.shift(2) - 1
     d["ds"] = d["date"].dt.strftime("%Y-%m-%d")
     sel = d[d["ds"].isin(trade_days) & (d["prev_gain"] >= min_gain) & (d["open"] > d["prev_close"])]
-    return [{"stock_id": str(r.stock_id), "date": r.ds, "prev_gain": float(r.prev_gain),
-             "gap": float(r.open / r.prev_close - 1)} for r in sel.itertuples(index=False)]
+    by_stock = {str(k): v for k, v in day.groupby("stock_id", sort=False)} if not sel.empty else {}
+    out = []
+    for r in sel.itertuples(index=False):
+        g = by_stock.get(str(r.stock_id))
+        hist = g[g["date"] < r.date] if g is not None else None
+        res = horizontal_sr_prices(hist)[0] if hist is not None else None
+        out.append({"stock_id": str(r.stock_id), "date": r.ds, "prev_gain": float(r.prev_gain),
+                    "gap": float(r.open / r.prev_close - 1), "res": res})
+    return out
 
 
-def m5_break_time(bars: pd.DataFrame) -> str | None:
+def m5_break_time(bars: pd.DataFrame, res: float | None = None) -> str | None:
     """Last minute of the first M5 bar that closes below the low of the previous M5 bar, when that bar was up.
 
     The trade then opens at the next minute's open, i.e. the next M5 bar's open.
@@ -51,21 +62,26 @@ def m5_break_time(bars: pd.DataFrame) -> str | None:
     hh = bars["hhmm"]
     bucket = hh.str[:3] + (hh.str[3:].astype(int) // 5 * 5).astype(str).str.zfill(2)
     m5 = bars.groupby(bucket, sort=True).agg(open=("open", "first"), close=("close", "last"),
-                                             low=("low", "min"), last=("hhmm", "last"))
+                                             low=("low", "min"), high=("high", "max"),
+                                             last=("hhmm", "last"))
     rows = list(m5.itertuples())
     for p, c in zip(rows, rows[1:]):
         if not float(p.close) > float(p.open):
+            continue
+        if res is not None and not (float(c.high) >= res > float(c.close)):
             continue
         if float(c.close) < float(p.low) and FIRST <= c.last <= LAST:
             return str(c.last)
     return None
 
 
-def trigger_time(bars: pd.DataFrame, how: str) -> str | None:
+def trigger_time(bars: pd.DataFrame, how: str, res: float | None = None) -> str | None:
     if bars.empty:
         return None
     if how == "m5":
         return m5_break_time(bars)
+    if how == "m5_res":
+        return m5_break_time(bars, res) if res is not None else None
     level = float(bars["open"].iloc[0]) if how == "open" else float(bars[bars["hhmm"] < FIRST]["low"].min())
     if not np.isfinite(level):
         return None
@@ -76,12 +92,18 @@ def trigger_time(bars: pd.DataFrame, how: str) -> str | None:
 
 def stats(trades: list[dict]) -> str:
     if not trades:
-        return "| 0 | - | - | - | - | - | - |"
+        return "| 0 | - | - | - | - | - | - | - |"
     net = [t["net_pct"] for t in trades]
     one = streaks(one_at_a_time(trades))
     exits = "/".join(str(sum(t["status"] == k for t in trades)) for k in ("停利", "停損", "收盤平倉"))
+    by_day: dict[str, float] = {}
+    for t in trades:
+        by_day[t["date"]] = by_day.get(t["date"], 0.0) + t["net_pct"]
+    top = max(by_day, key=by_day.get)
+    rest = [t["net_pct"] for t in trades if t["date"] != top]
+    rest_s = f"{np.mean(rest):+.3f}%（扣 {top[5:]}）" if rest else "-"
     return (f"| {len(net)} | {sum(x > 0 for x in net) / len(net) * 100:.1f}% | {np.mean(net):+.3f}% | {exits} "
-            f"| {one['n']} 筆 {one['flat']:+.1f}% | {one['max_streak']} | {one['mart']:+.1f}% |")
+            f"| {one['n']} 筆 {one['flat']:+.1f}% | {one['max_streak']} | {one['mart']:+.1f}% | {rest_s} |")
 
 
 def main() -> None:
@@ -95,7 +117,7 @@ def main() -> None:
     periods = {"7～8月（找參數）": tuple(args.train), "9～10月（驗證）": tuple(args.test)}
 
     stock_ids = stock_ids_for_universe("daytrade")
-    start = (pd.Timestamp(args.train[0]) - pd.Timedelta(days=60)).strftime("%Y-%m-%d")
+    start = (pd.Timestamp(args.train[0]) - pd.Timedelta(days=200)).strftime("%Y-%m-%d")
     day = load_pattern_day(start_date=start, end_date=args.test[1])
     day["stock_id"] = day["stock_id"].astype(str)
     day = day[day["stock_id"].isin(stock_ids)]
@@ -120,7 +142,7 @@ def main() -> None:
         out = []
         for c in cands:
             b = bars(c["stock_id"], c["date"])
-            t = trigger_time(b, how)
+            t = trigger_time(b, how, c.get("res"))
             if t is None:
                 continue
             trade = ts._simulate({**c, "side": "short", "signal_time": t}, b, True, rules)
@@ -128,8 +150,8 @@ def main() -> None:
                 out.append(trade)
         return out
 
-    header = ("| 組合 | 筆數 | 勝率 | 平均 | 停利/停損/收盤 | 一次一筆 | 最多連輸 | 輸加倍 1-2-4-8 |\n"
-              "|---|---|---|---|---|---|---|---|")
+    header = ("| 組合 | 筆數 | 勝率 | 平均 | 停利/停損/收盤 | 一次一筆 | 最多連輸 | 輸加倍 1-2-4-8 | 扣最好一天的平均 |\n"
+              "|---|---|---|---|---|---|---|---|---|")
     results: dict[str, dict[tuple, list[dict]]] = {}
     for label, (a, b) in periods.items():
         tdays = [d for d in all_days if a <= d <= b]
