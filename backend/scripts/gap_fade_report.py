@@ -119,6 +119,24 @@ def stats(trades: list[dict]) -> str:
             f"| {one['n']} 筆 {one['flat']:+.1f}% | {one['max_streak']} | {one['mart']:+.1f}% | {rest_s} |")
 
 
+def money_rows(name: str, trades: list[dict]) -> list[str]:
+    """Streaks and sizing on the one-position-at-a-time sequence (units of % of one stake)."""
+    seq = sorted(one_at_a_time(trades), key=lambda t: (t["date"], t.get("entry_time") or "", t["stock_id"]))
+    if not seq:
+        return [f"| {name} | 0 | - | - | - | - | - | - | - | - |"]
+    s = streaks(seq)
+    flat = peak = dd = 0.0
+    for t in seq:
+        flat += t["net_pct"]
+        peak = max(peak, flat)
+        dd = max(dd, peak - flat)
+    win = sum(t["net_pct"] > 0 for t in seq) / len(seq) * 100
+    dist = lambda k: "/".join(map(str, s["dist"][k]))
+    return [f"| {name} | {s['n']} | {win:.1f}% | {s['max_win']} | {s['max_streak']} | {dist('win')} | {dist('loss')} "
+            f"| {s['flat']:+.1f}%（回撤 {dd:.1f}%） | {s['mart']:+.1f}%（回撤 {s['max_dd']:.1f}%，爆 {s['busts']} 次） "
+            f"| {s['anti']:+.1f}%（回撤 {s['anti_dd']:.1f}%） |"]
+
+
 def main() -> None:
     global FIRST, LAST
     parser = argparse.ArgumentParser()
@@ -126,9 +144,13 @@ def main() -> None:
     parser.add_argument("--test", nargs=2, required=True)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--window", nargs=2, default=["09:05", "11:00"], help="entry window, e.g. 10:00 13:00")
+    parser.add_argument("--triggers", default="", help="comma list of TRIGGERS keys to run (default all)")
     parser.add_argument("--baseline-n", type=int, default=1500, help="random stock-days per period")
     args = parser.parse_args()
     FIRST, LAST = args.window
+    if args.triggers:
+        for k in [k for k in TRIGGERS if k not in args.triggers.split(",")]:
+            del TRIGGERS[k]
     rules = {**ts.RULES, "take_profit_pct": 3.5, "stop_loss_pct": 3.0}
     periods = {"7～8月（找參數）": tuple(args.train), "9～10月（驗證）": tuple(args.test)}
 
@@ -180,6 +202,7 @@ def main() -> None:
     header = ("| 組合 | 筆數 | 勝率 | 平均 | 停利/停損/收盤 | 一次一筆 | 最多連輸 | 輸加倍 1-2-4-8 | 扣最好一天的平均 |\n"
               "|---|---|---|---|---|---|---|---|---|")
     results: dict[str, dict[tuple, list[dict]]] = {}
+    train_label, test_label = list(periods)
     for label, (a, b) in periods.items():
         tdays = [d for d in all_days if a <= d <= b]
         results[label] = {}
@@ -209,6 +232,16 @@ def main() -> None:
                 base.append(trade)
             bars_cache.pop((sid, d), None)
         print(f"| 對照：ATR＋量篩選後隨機時間放空（抽 {len(sample)} 個股票日）{stats(base)}", flush=True)
+
+    print("\n===== 連勝/連敗與資金控管（一次一筆；單位 = 每筆本金的 %；連勝/連敗分布 = 1/2/3/4/5+ 次各出現幾次）=====")
+    print("| 組合 | 筆數 | 勝率 | 最多連勝 | 最多連敗 | 連勝分布 | 連敗分布 | 固定 1 單位 | 輸加倍 1-2-4-8 | 贏加倍 1-2-4-8 |\n"
+          "|---|---|---|---|---|---|---|---|---|---|")
+    for g in GAINS:
+        for how, name in TRIGGERS.items():
+            label = f"昨漲≥{g * 100:g}%＋{name}"
+            for per in periods:
+                print(*money_rows(f"{label} {per[:5]}", results[per][(g, how)]), sep="\n")
+            print(*money_rows(f"{label} 全期", results[train_label][(g, how)] + results[test_label][(g, how)]), sep="\n")
 
     train, test = list(periods)
     scored = [(np.mean([t["net_pct"] for t in v]), k) for k, v in results[train].items() if len(v) >= 20]
