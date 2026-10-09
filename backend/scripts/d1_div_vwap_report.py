@@ -12,8 +12,10 @@ With --ma-cross, step 2 first waits for a D1 MA5/MA10 cross in the same
 direction (bull: MA5 crosses above MA10, bear: below) in the 5 trading days after
 the divergence; the VWAP window then starts the day after that cross.
 
-With --min-atr 0.05, a VWAP cross only counts on a day whose ATR14 (as of the
-day before, same number the dashboard filter uses) is at least 5%.
+With --min-atr 0.05, a VWAP cross only counts on a day whose ATR (as of the day
+before, divided by that day's open, like the dashboard filter) is at least 5%.
+--atr-n picks the ATR length (14 = the dashboard's stored number). With
+--min-vol5-pr 0.5, the day's first-5-minute volume PR must also be >= 50.
 
 Prints win rate, streaks and the 1-2-4-8 runs for long / short / both, and
 saves 3 random charts per step to --chart-dir for checking by eye.
@@ -90,18 +92,34 @@ def find_ma_crosses(divs: list[dict], day: pd.DataFrame) -> list[dict]:
     return out
 
 
+def atr_table(day: pd.DataFrame, n: int) -> dict[tuple[str, str], float]:
+    """(date, stock_id) -> ATR(n) of the days before, divided by that day's open."""
+    day = day.sort_values(["stock_id", "date"]).copy()
+    prev = day.groupby("stock_id", sort=False)["close"].shift(1)
+    tr = np.maximum(np.maximum((day["high"] - day["low"]).abs(), (day["high"] - prev).abs()), (day["low"] - prev).abs())
+    atr = tr.groupby(day["stock_id"]).transform(lambda x: x.rolling(n, min_periods=n).mean())
+    pct = atr.groupby(day["stock_id"]).shift(1) / day["open"].replace(0, np.nan)
+    keys = zip(day["date"].dt.strftime("%Y-%m-%d"), day["stock_id"].astype(str))
+    return {k: float(v) for k, v in zip(keys, pct) if np.isfinite(v)}
+
+
 def find_entries(divs: list[dict], trade_days: list[str], stock_ids: set[str],
-                 min_atr: float | None = None) -> list[dict]:
+                 min_atr: float | None = None, atr_by_day: dict | None = None,
+                 min_vol5_pr: float | None = None) -> list[dict]:
     """First matching VWAP cross in the 5 trading days after each divergence (or MA cross)."""
     crosses: dict[tuple[str, str], list[dict]] = {}
     for d in trade_days:
-        atr = {}
-        if min_atr is not None:
-            atr = {str(k): v.get("day_atr") for k, v in (activity_for_date(d) or {}).items()}
+        act = (activity_for_date(d) or {}) if (min_atr is not None or min_vol5_pr is not None) else {}
+        atr = {str(k): v.get("day_atr") for k, v in act.items()}
+        if atr_by_day is not None:
+            atr = {sid: atr_by_day.get((d, sid)) for sid in stock_ids}
+        vol = {str(k): v.get("vol5_pr") for k, v in act.items()}
         bundle = read_vwap_signals(d, stock_ids=stock_ids) or {}
         for row in bundle.get("vwap") or []:
             hhmm = str(row.get("time") or "")[:5]
             if min_atr is not None and not ((atr.get(str(row.get("stock_id"))) or 0) >= min_atr):
+                continue
+            if min_vol5_pr is not None and not ((vol.get(str(row.get("stock_id"))) or 0) >= min_vol5_pr):
                 continue
             if FIRST_CROSS <= hhmm < ts.RULES["last_bar"]:
                 crosses.setdefault((d, str(row.get("stock_id"))), []).append({**row, "time": hhmm})
@@ -208,6 +226,8 @@ def main() -> None:
     parser.add_argument("--chart-dir", default="db/d1_div_vwap_charts")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--min-atr", type=float, default=None, help="e.g. 0.05 = ATR14 >= 5%% on the entry day")
+    parser.add_argument("--atr-n", type=int, default=14, help="ATR length; 14 uses the dashboard's stored number")
+    parser.add_argument("--min-vol5-pr", type=float, default=None, help="e.g. 0.5 = first-5-minute volume PR >= 50")
     parser.add_argument("--ma-cross", action="store_true", help="require a D1 MA5/MA10 cross after the divergence")
     args = parser.parse_args()
     TP, SL = args.tp, args.sl
@@ -229,8 +249,13 @@ def main() -> None:
         print(f"Step 2  5 日內 MA5/MA10 同向交叉：{len(ma_divs)} 個（金叉 {sum(d['kind'] == 'bull' for d in ma_divs)}、"
               f"死叉 {sum(d['kind'] == 'bear' for d in ma_divs)}）", flush=True)
     n = 3 if args.ma_cross else 2
-    entries = find_entries(ma_divs if args.ma_cross else divs, trade_days, stock_ids, args.min_atr)
-    atr_note = f"ATR≥{args.min_atr * 100:g}% 且" if args.min_atr is not None else ""
+    atr_by_day = atr_table(day, args.atr_n) if args.min_atr is not None and args.atr_n != 14 else None
+    entries = find_entries(ma_divs if args.ma_cross else divs, trade_days, stock_ids, args.min_atr, atr_by_day,
+                           args.min_vol5_pr)
+    atr_note = f"ATR{args.atr_n}≥{args.min_atr * 100:g}% " if args.min_atr is not None else ""
+    if args.min_vol5_pr is not None:
+        atr_note += f"開盤5分量PR≥{args.min_vol5_pr * 100:g} "
+    atr_note = f"{atr_note}且" if atr_note else ""
     print(f"Step {n}  5 日內{atr_note}穿越 VWAP：{len(entries)} 筆（多 {sum(e['side'] == 'long' for e in entries)}、空 {sum(e['side'] == 'short' for e in entries)}）", flush=True)
 
     trades, bars_cache = [], {}
@@ -244,8 +269,8 @@ def main() -> None:
     print(f"Step {n + 1}  完成交易：{len(trades)} 筆", flush=True)
 
     name = "D1 MACD 背離 → 5 日內 MA5/MA10 交叉 → 5 日內 M1 穿越 VWAP" if args.ma_cross else "D1 MACD 背離 → 5 日內 M1 穿越 VWAP"
-    if args.min_atr is not None:
-        name = name.replace("M1 穿越 VWAP", f"ATR≥{args.min_atr * 100:g}% 的 M1 穿越 VWAP")
+    if atr_note:
+        name = name.replace("M1 穿越 VWAP", f"{atr_note[:-1]}的 M1 穿越 VWAP")
     print(f"\n===== {name}（停利 {TP:g}% / 停損 {SL:g}%，成本 {rules['cost_pct']}%）=====")
     print("| 方向 | 筆數 | 勝率 | 平均 | 合計 | 停利/停損/收盤 |")
     print("|---|---|---|---|---|---|")
