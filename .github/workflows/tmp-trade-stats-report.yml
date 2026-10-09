@@ -30,17 +30,9 @@ jobs:
             --history-months 14 --intraday-months 4 --no-prune
       - name: Report
         working-directory: backend
-        run: |
-          echo "##### A: ATR5 + vol PR50"
-          python -m scripts.d1_div_vwap_report --from-date 2026-07-01 --to-date 2026-10-08 --min-atr 0.05 --atr-n 5 --min-vol5-pr 0.5 --chart-dir db/charts_a
-          echo "##### B: ATR5 + vol PR50 + MA"
-          python -m scripts.d1_div_vwap_report --from-date 2026-07-01 --to-date 2026-10-08 --min-atr 0.05 --atr-n 5 --min-vol5-pr 0.5 --ma-cross --chart-dir db/charts_b
-          echo "##### C: ATR14 + vol PR50 (reference)"
-          python -m scripts.d1_div_vwap_report --from-date 2026-07-01 --to-date 2026-10-08 --min-atr 0.05 --min-vol5-pr 0.5 --chart-dir db/charts_c
-          echo "##### D: ATR14 + vol PR50 + MA (reference)"
-          python -m scripts.d1_div_vwap_report --from-date 2026-07-01 --to-date 2026-10-08 --min-atr 0.05 --min-vol5-pr 0.5 --ma-cross --chart-dir db/charts_d
+        run: python -m scripts.d1_div_vwap_report --from-date 2026-07-01 --to-date 2026-10-08 --min-atr 0.05 --min-vol5-pr 0.5 --chart-dir db/charts_c
       - name: Commit charts to branch
         run: |
-          mkdir -p tmp-charts/a tmp-charts/b && cp backend/db/charts_a/*.png tmp-charts/a/ && cp backend/db/charts_b/*.png tmp-charts/b/
+          mkdir -p tmp-charts && cp backend/db/charts_c/*.png tmp-charts/
           git config user.name github-actions && git config user.email github-actions@users.noreply.github.com
           git add tmp-charts && git commit -m "tmp charts" && git push origin HEAD:${{ github.ref_name }}
