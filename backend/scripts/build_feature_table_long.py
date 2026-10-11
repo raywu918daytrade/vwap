@@ -81,8 +81,9 @@ def main() -> None:
     parser.add_argument("--to-month", required=True, help="YYYY-MM")
     parser.add_argument("--out", required=True)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--tp", type=float, default=3.5, help="take profit %%; 0 = none (hold to the close)")
     args = parser.parse_args()
-    rules = {**ts.RULES, "take_profit_pct": 3.5, "stop_loss_pct": 3.0}
+    rules = {**ts.RULES, "take_profit_pct": args.tp or 1e6, "stop_loss_pct": 3.0}
 
     stock_ids = stock_ids_for_universe("daytrade")
     first = pd.Timestamp(args.from_month + "-01")
