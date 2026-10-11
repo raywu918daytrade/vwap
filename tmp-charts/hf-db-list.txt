@@ -1,0 +1,40 @@
+(root): 1 files, 0.0 MB, first .DS_Store, last .DS_Store
+adjustment_day: 130 files, 79.0 MB, first 2016_01.parquet, last 2026_10.parquet
+    2016_01.parquet 2016_02.parquet 2016_03.parquet 2016_04.parquet 2016_05.parquet 2016_06.parquet 2016_07.parquet 2016_08.parquet 2016_09.parquet 2016_10.parquet 2016_11.parquet 2016_12.parquet 2017_01.parquet 2017_02.parquet 2017_03.parquet 2017_04.parquet 2017_05.parquet 2017_06.parquet 2017_07.parquet 2017_08.parquet 2017_09.parquet 2017_10.parquet 2017_11.parquet 2017_12.parquet 2018_01.parquet 2018_02.parquet 2018_03.parquet 2018_04.parquet 2018_05.parquet 2018_06.parquet 2018_07.parquet 2018_08.parquet 2018_09.parquet 2018_10.parquet 2018_11.parquet 2018_12.parquet 2019_01.parquet 2019_02.parquet 2019_03.parquet 2019_04.parquet 2019_05.parquet 2019_06.parquet 2019_07.parquet 2019_08.parquet 2019_09.parquet 2019_10.parquet 2019_11.parquet 2019_12.parquet 2020_01.parquet 2020_02.parquet 2020_03.parquet 2020_04.parquet 2020_05.parquet 2020_06.parquet 2020_07.parquet 2020_08.parquet 2020_09.parquet 2020_10.parquet 2020_11.parquet 2020_12.parquet
+adjustment_day_flags: 1 files, 0.2 MB, first day_flag.parquet, last day_flag.parquet
+adjustment_factor: 130 files, 16.7 MB, first 2016_01.parquet, last 2026_10.parquet
+    2016_01.parquet 2016_02.parquet 2016_03.parquet 2016_04.parquet 2016_05.parquet 2016_06.parquet 2016_07.parquet 2016_08.parquet 2016_09.parquet 2016_10.parquet 2016_11.parquet 2016_12.parquet 2017_01.parquet 2017_02.parquet 2017_03.parquet 2017_04.parquet 2017_05.parquet 2017_06.parquet 2017_07.parquet 2017_08.parquet 2017_09.parquet 2017_10.parquet 2017_11.parquet 2017_12.parquet 2018_01.parquet 2018_02.parquet 2018_03.parquet 2018_04.parquet 2018_05.parquet 2018_06.parquet 2018_07.parquet 2018_08.parquet 2018_09.parquet 2018_10.parquet 2018_11.parquet 2018_12.parquet 2019_01.parquet 2019_02.parquet 2019_03.parquet 2019_04.parquet 2019_05.parquet 2019_06.parquet 2019_07.parquet 2019_08.parquet 2019_09.parquet 2019_10.parquet 2019_11.parquet 2019_12.parquet 2020_01.parquet 2020_02.parquet 2020_03.parquet 2020_04.parquet 2020_05.parquet 2020_06.parquet 2020_07.parquet 2020_08.parquet 2020_09.parquet 2020_10.parquet 2020_11.parquet 2020_12.parquet
+breakout_retest_day: 14 files, 0.1 MB, first 2025_07.parquet, last 2026_08.parquet
+breakout_retest_trigger: 14 files, 0.8 MB, first 2025_07.parquet, last 2026_08.parquet
+d1: 130 files, 58.5 MB, first 2016_01.parquet, last 2026_10.parquet
+    2016_01.parquet 2016_02.parquet 2016_03.parquet 2016_04.parquet 2016_05.parquet 2016_06.parquet 2016_07.parquet 2016_08.parquet 2016_09.parquet 2016_10.parquet 2016_11.parquet 2016_12.parquet 2017_01.parquet 2017_02.parquet 2017_03.parquet 2017_04.parquet 2017_05.parquet 2017_06.parquet 2017_07.parquet 2017_08.parquet 2017_09.parquet 2017_10.parquet 2017_11.parquet 2017_12.parquet 2018_01.parquet 2018_02.parquet 2018_03.parquet 2018_04.parquet 2018_05.parquet 2018_06.parquet 2018_07.parquet 2018_08.parquet 2018_09.parquet 2018_10.parquet 2018_11.parquet 2018_12.parquet 2019_01.parquet 2019_02.parquet 2019_03.parquet 2019_04.parquet 2019_05.parquet 2019_06.parquet 2019_07.parquet 2019_08.parquet 2019_09.parquet 2019_10.parquet 2019_11.parquet 2019_12.parquet 2020_01.parquet 2020_02.parquet 2020_03.parquet 2020_04.parquet 2020_05.parquet 2020_06.parquet 2020_07.parquet 2020_08.parquet 2020_09.parquet 2020_10.parquet 2020_11.parquet 2020_12.parquet
+d1_flags: 1 files, 0.1 MB, first day_flag.parquet, last day_flag.parquet
+ib: 5 files, 44.5 MB, first 201501_202605.parquet, last 2026_8.parquet
+inference_live: 19 files, 2.1 MB, first 2026-07-03.parquet, last 2026-08-17.parquet
+info: 1 files, 0.0 MB, first info.parquet, last info.parquet
+m1: 82 files, 2432.1 MB, first 2020_01.parquet, last 2026_10.parquet
+    2020_01.parquet 2020_02.parquet 2020_03.parquet 2020_04.parquet 2020_05.parquet 2020_06.parquet 2020_07.parquet 2020_08.parquet 2020_09.parquet 2020_10.parquet 2020_11.parquet 2020_12.parquet 2021_01.parquet 2021_02.parquet 2021_03.parquet 2021_04.parquet 2021_05.parquet 2021_06.parquet 2021_07.parquet 2021_08.parquet 2021_09.parquet 2021_10.parquet 2021_11.parquet 2021_12.parquet 2022_01.parquet 2022_02.parquet 2022_03.parquet 2022_04.parquet 2022_05.parquet 2022_06.parquet 2022_07.parquet 2022_08.parquet 2022_09.parquet 2022_10.parquet 2022_11.parquet 2022_12.parquet 2023_01.parquet 2023_02.parquet 2023_03.parquet 2023_04.parquet 2023_05.parquet 2023_06.parquet 2023_07.parquet 2023_08.parquet 2023_09.parquet 2023_10.parquet 2023_11.parquet 2023_12.parquet 2024_01.parquet 2024_02.parquet 2024_03.parquet 2024_04.parquet 2024_05.parquet 2024_06.parquet 2024_07.parquet 2024_08.parquet 2024_09.parquet 2024_10.parquet 2024_11.parquet 2024_12.parquet
+m1_delta: 2667 files, 26.6 MB, first 0800.parquet, last 1330.parquet
+m1_empty: 79 files, 0.3 MB, first 2020_01.parquet, last 2026_07.parquet
+m1_flags: 1 files, 0.2 MB, first m1_flag.parquet, last m1_flag.parquet
+m1_live: 8 files, 7.1 MB, first 2026-09-29.parquet, last 2026-10-08.parquet
+m3: 82 files, 3251.6 MB, first 2020_01.parquet, last 2026_10.parquet
+m3_std: 82 files, 1761.7 MB, first 2020_01.parquet, last 2026_10.parquet
+m5: 82 files, 3202.9 MB, first 2020_01.parquet, last 2026_10.parquet
+m5_std: 82 files, 1286.0 MB, first 2020_01.parquet, last 2026_10.parquet
+    2020_01.parquet 2020_02.parquet 2020_03.parquet 2020_04.parquet 2020_05.parquet 2020_06.parquet 2020_07.parquet 2020_08.parquet 2020_09.parquet 2020_10.parquet 2020_11.parquet 2020_12.parquet 2021_01.parquet 2021_02.parquet 2021_03.parquet 2021_04.parquet 2021_05.parquet 2021_06.parquet 2021_07.parquet 2021_08.parquet 2021_09.parquet 2021_10.parquet 2021_11.parquet 2021_12.parquet 2022_01.parquet 2022_02.parquet 2022_03.parquet 2022_04.parquet 2022_05.parquet 2022_06.parquet 2022_07.parquet 2022_08.parquet 2022_09.parquet 2022_10.parquet 2022_11.parquet 2022_12.parquet 2023_01.parquet 2023_02.parquet 2023_03.parquet 2023_04.parquet 2023_05.parquet 2023_06.parquet 2023_07.parquet 2023_08.parquet 2023_09.parquet 2023_10.parquet 2023_11.parquet 2023_12.parquet 2024_01.parquet 2024_02.parquet 2024_03.parquet 2024_04.parquet 2024_05.parquet 2024_06.parquet 2024_07.parquet 2024_08.parquet 2024_09.parquet 2024_10.parquet 2024_11.parquet 2024_12.parquet
+margin: 5 files, 32.5 MB, first 201501_202605.parquet, last 2026_8.parquet
+pattern_scan: 4 files, 33.2 MB, first 2026_07.parquet, last 2026_10.parquet
+poc_day: 32 files, 5.7 MB, first 2024_03.parquet, last 2026_10.parquet
+signal_delta: 2595 files, 673.8 MB, first 0800.json, last 1330.json
+signal_live: 9 files, 15.8 MB, first 2026-09-29.json, last 2026-10-09.json
+tick: 32 files, 4707.9 MB, first 2024_03.parquet, last 2026_10.parquet
+tick_adjust_factor: 130 files, 1.7 MB, first 2016_01.parquet, last 2026_10.parquet
+tick_empty: 29 files, 0.1 MB, first 2024_03.parquet, last 2026_07.parquet
+tick_flags: 1 files, 0.2 MB, first tick_flag.parquet, last tick_flag.parquet
+tick_live: 9 files, 31.4 MB, first 2026-08-03.parquet, last 2026-08-17.parquet
+tickers: 3 files, 0.1 MB, first stock_universe_2000.parquet, last tickers.parquet
+volume_profile: 32 files, 32.6 MB, first 2024_03.parquet, last 2026_10.parquet
+vwap_activity: 4 files, 1.0 MB, first 2026_07.parquet, last 2026_10.parquet
+    2026_07.parquet 2026_08.parquet 2026_09.parquet 2026_10.parquet
+vwap_signals: 4 files, 47.6 MB, first 2026_07.parquet, last 2026_10.parquet
