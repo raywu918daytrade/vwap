@@ -1,0 +1,43 @@
+name: tmp hf list
+on:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/tmp-hf-list.yml"]
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      HF_REPO_ID: ${{ secrets.HF_REPO_ID || vars.HF_REPO_ID || 'raywu918daytrade/daytrade' }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install huggingface_hub
+      - name: List db folders
+        run: |
+          mkdir -p tmp-charts
+          python - <<'PY' | tee tmp-charts/hf-db-list.txt
+          import os, collections
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ.get("HF_TOKEN") or None)
+          files = [f for f in api.list_repo_tree(os.environ["HF_REPO_ID"], repo_type="dataset", path_in_repo="db", recursive=True) if hasattr(f, "size")]
+          by = collections.defaultdict(list)
+          for f in files:
+              parts = f.path.split("/")
+              by[parts[1] if len(parts) > 2 else "(root)"].append((parts[-1], f.size))
+          for k in sorted(by):
+              v = sorted(by[k])
+              mb = sum(s for _, s in v) / 1e6
+              print(f"{k}: {len(v)} files, {mb:.1f} MB, first {v[0][0]}, last {v[-1][0]}")
+              if k in ("m1", "m5_std", "d1", "vwap_activity", "adjustment_day", "adjustment_factor"):
+                  print("   ", " ".join(n for n, _ in v[:60]))
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions && git config user.email github-actions@users.noreply.github.com
+          git add tmp-charts && git commit -m "tmp hf list" && git push origin HEAD:${{ github.ref_name }}
