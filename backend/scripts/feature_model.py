@@ -51,15 +51,17 @@ def one_at_a_time_net(df: pd.DataFrame, side: str) -> tuple[int, float, int]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--table", default="db/feature_table.parquet")
+    parser.add_argument("--split", default=SPLIT, help="first test date")
     args = parser.parse_args()
     from sklearn.ensemble import HistGradientBoostingRegressor
     from sklearn.tree import DecisionTreeRegressor, export_text
 
     df = pd.read_parquet(args.table)
     feats = [c for c in df.columns if c not in NOT_FEATURES]
-    train, test = df[df["date"] < SPLIT], df[df["date"] >= SPLIT]
-    print(f"表格 {len(df)} 列；訓練 7-8月 {len(train)} 列 / {train['date'].nunique()} 天；"
-          f"測試 9-10月 {len(test)} 列 / {test['date'].nunique()} 天；特徵 {len(feats)} 個\n")
+    train, test = df[df["date"] < args.split], df[df["date"] >= args.split]
+    print(f"表格 {len(df)} 列；訓練 {train['date'].min()}~{train['date'].max()} {len(train)} 列 / "
+          f"{train['date'].nunique()} 天；測試 {test['date'].min()}~{test['date'].max()} {len(test)} 列 / "
+          f"{test['date'].nunique()} 天；特徵 {len(feats)} 個\n")
 
     for side, label in (("short", "空"), ("long", "多")):
         y = f"{side}_net"
@@ -70,7 +72,7 @@ def main() -> None:
         print(f"| 所有點 | {stat(train[y])} | {stat(test[y])} |")
         print(f"| 每檔每天第一個點 | {stat(first_per_day(train)[y])} | {stat(first_per_day(test)[y])} |")
 
-        print("\n### 單一條件（分 5 組，切點用 7-8 月決定）\n")
+        print("\n### 單一條件（分 5 組，切點用訓練期決定）\n")
         print("| 條件 | 組別 | 訓練 筆數 | 勝率 | 平均 | 測試 筆數 | 勝率 | 平均 | 兩段都 ≥53% |")
         print("|---|---|---|---|---|---|---|---|---|")
         for f in feats:
@@ -91,7 +93,7 @@ def main() -> None:
                 both = "✓" if len(a) and len(b) and (a > 0).mean() >= .53 and (b > 0).mean() >= .53 else ""
                 print(f"| {f} | {name} | {stat(a)} | {stat(b)} | {both} |")
 
-        print("\n### 決策樹（深度 3，每葉至少 2000 列，用 7-8 月訓練）\n")
+        print("\n### 決策樹（深度 3，每葉至少 2000 列，用訓練期訓練）\n")
         tree = DecisionTreeRegressor(max_depth=3, min_samples_leaf=2000, random_state=0)
         X_tr, X_te = train[feats].fillna(-999), test[feats].fillna(-999)
         tree.fit(X_tr, train[y])
@@ -104,7 +106,7 @@ def main() -> None:
         for leaf in np.unique(leaf_tr):
             print(f"| {leaf} | {stat(train[y][leaf_tr == leaf])} | {stat(test[y][leaf_te == leaf])} |")
 
-        print("\n### 梯度提升模型（7-8 月訓練，9-10 月測試）\n")
+        print("\n### 梯度提升模型（訓練期訓練，測試期測試）\n")
         gbm = HistGradientBoostingRegressor(max_depth=4, learning_rate=0.05, max_iter=200,
                                             min_samples_leaf=500, l2_regularization=1.0, random_state=0)
         gbm.fit(train[feats], train[y])
