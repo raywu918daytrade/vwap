@@ -17,6 +17,11 @@ before, divided by that day's open, like the dashboard filter) is at least 5%.
 --atr-n picks the ATR length (14 = the dashboard's stored number). With
 --min-vol5-pr 0.5, the day's first-5-minute volume PR must also be >= 50.
 
+With --speed, each trade also gets the 5 M1 bars up to the cross (r1..r5 = the
+1-minute moves from the close 5 bars earlier). "Accelerating" means the last two
+moves average further in the trade's direction than the first three, and the
+last two point that way. Win rates are split by that, and by Jul-Aug / Sep-Oct.
+
 Prints win rate, streaks and the 1-2-4-8 runs for long / short / both, and
 saves 3 random charts per step to --chart-dir for checking by eye.
 
@@ -138,6 +143,21 @@ def find_entries(divs: list[dict], trade_days: list[str], stock_ids: set[str],
     return entries
 
 
+def speed_features(bars: pd.DataFrame, signal_time: str, side: str) -> dict | None:
+    """5-bar move up to the cross bar, signed so that + is the trade's direction."""
+    hh = bars["hhmm"].tolist()
+    if signal_time not in hh:
+        return None
+    i = hh.index(signal_time)
+    if i < 5:
+        return None
+    close = bars["close"].astype(float).to_numpy()[i - 5:i + 1]
+    sign = 1 if side == "long" else -1
+    r = np.diff(close) / close[:-1] * 100 * sign
+    early, late = r[:3].mean(), r[3:].mean()
+    return {"m5_move": float((close[-1] / close[0] - 1) * 100 * sign), "accel": bool(late > early and late > 0)}
+
+
 def _vwap(bars: pd.DataFrame) -> pd.Series:
     vol = bars["volume"].astype(float) if "volume" in bars else pd.Series(1.0, index=bars.index)
     return (bars["close"].astype(float) * vol).cumsum() / vol.cumsum().replace(0, np.nan)
@@ -183,7 +203,8 @@ def chart_divergence(div: dict, day: pd.DataFrame, path: Path, title: str | None
     plt.close(fig)
 
 
-def chart_intraday(ent: dict, bars: pd.DataFrame, trade: dict | None, title: str, path: Path) -> None:
+def chart_intraday(ent: dict, bars: pd.DataFrame, trade: dict | None, title: str, path: Path,
+                   span: bool = False) -> None:
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(11, 5))
@@ -193,6 +214,8 @@ def chart_intraday(ent: dict, bars: pd.DataFrame, trade: dict | None, title: str
     hh = bars["hhmm"].tolist()
     if ent["signal_time"] in hh:
         i = hh.index(ent["signal_time"])
+        if span and i >= 5:
+            ax.axvspan(i - 5, i, color="gold", alpha=0.3, label="5 x M1 before cross")
         ax.axvline(i, color="purple", linestyle=":", linewidth=1)
         ax.annotate(f"cross {ent['signal_time']}", (i, float(bars['close'].iloc[i])), xytext=(5, 10),
                     textcoords="offset points", color="purple", fontsize=9)
@@ -228,6 +251,7 @@ def main() -> None:
     parser.add_argument("--min-atr", type=float, default=None, help="e.g. 0.05 = ATR14 >= 5%% on the entry day")
     parser.add_argument("--atr-n", type=int, default=14, help="ATR length; 14 uses the dashboard's stored number")
     parser.add_argument("--min-vol5-pr", type=float, default=None, help="e.g. 0.5 = first-5-minute volume PR >= 50")
+    parser.add_argument("--speed", action="store_true", help="split results by the 5-bar speed before the cross")
     parser.add_argument("--ma-cross", action="store_true", help="require a D1 MA5/MA10 cross after the divergence")
     args = parser.parse_args()
     TP, SL = args.tp, args.sl
@@ -265,7 +289,8 @@ def main() -> None:
             bars_cache[key] = ts._day_bars(ent["stock_id"], ent["date"])
         trade = ts._simulate(ent, bars_cache[key], True, rules)
         if trade["net_pct"] is not None:
-            trades.append({**trade, "date": ent["date"]})
+            sp = speed_features(bars_cache[key], ent["signal_time"], ent["side"]) if args.speed else None
+            trades.append({**trade, "date": ent["date"], **(sp or {"m5_move": None, "accel": None})})
     print(f"Step {n + 1}  完成交易：{len(trades)} 筆", flush=True)
 
     name = "D1 MACD 背離 → 5 日內 MA5/MA10 交叉 → 5 日內 M1 穿越 VWAP" if args.ma_cross else "D1 MACD 背離 → 5 日內 M1 穿越 VWAP"
@@ -294,6 +319,36 @@ def main() -> None:
             print(f"| {label} | {r['n']} | {r['max_win']} | {r['max_streak']} | {r['busts']} | {r['flat']:+.1f}% "
                   f"| {r['mart']:+.1f}% | {r['anti']:+.1f}% | {'/'.join(map(str, r['dist']['win']))} "
                   f"| {'/'.join(map(str, r['dist']['loss']))} |")
+
+    if args.speed:
+        print("\n===== 穿越前 5 根 M1 的速度（同方向為正；加速 = 後 2 根平均比前 3 根快且同向）=====")
+        print("| 方向 | 分組 | 期間 | 筆數 | 勝率 | 平均 | 合計 |")
+        print("|---|---|---|---|---|---|---|")
+        groups = (("全部", lambda t: True), ("加速", lambda t: t["accel"] is True),
+                  ("沒加速", lambda t: t["accel"] is False),
+                  ("5分鐘已同向走", lambda t: t["m5_move"] is not None and t["m5_move"] > 0),
+                  ("5分鐘沒同向走", lambda t: t["m5_move"] is not None and t["m5_move"] <= 0),
+                  ("加速且同向走≥1%", lambda t: t["accel"] is True and t["m5_move"] >= 1))
+        periods = (("全期", lambda d: True), ("7-8月", lambda d: d < "2026-09-01"), ("9-10月", lambda d: d >= "2026-09-01"))
+        for side, label in (("long", "多"), ("short", "空"), ("all", "多＋空")):
+            for gname, gf in groups:
+                for pname, pf in periods:
+                    sel = [t for t in trades if (side == "all" or t["side"] == side) and gf(t) and pf(t["date"])]
+                    if not sel:
+                        print(f"| {label} | {gname} | {pname} | 0 | - | - | - |")
+                        continue
+                    net = [t["net_pct"] for t in sel]
+                    print(f"| {label} | {gname} | {pname} | {len(sel)} | {sum(x > 0 for x in net) / len(net) * 100:.1f}% "
+                          f"| {sum(net) / len(net):+.3f}% | {sum(net):+.1f}% |")
+        print("\n----- 加速組 連勝連輸與加倍（一次只拿一筆）-----")
+        print("| 方向 | 筆數 | 最多連勝 | 最多連輸 | 連輸4次 | 每筆1單位 | 輸加倍 | 贏加倍 |")
+        print("|---|---|---|---|---|---|---|---|")
+        for side, label in (("long", "多"), ("short", "空"), ("all", "多＋空")):
+            sel = [t for t in trades if (side == "all" or t["side"] == side) and t["accel"] is True]
+            if sel:
+                r = streaks(one_at_a_time(sel))
+                print(f"| {label} | {r['n']} | {r['max_win']} | {r['max_streak']} | {r['busts']} | {r['flat']:+.1f}% "
+                      f"| {r['mart']:+.1f}% | {r['anti']:+.1f}% |")
 
     out = Path(args.chart_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -335,6 +390,15 @@ def main() -> None:
                                    f"in {t['entry_time']} @{t['entry_price']}  out {t['exit_time']} @{t['exit_price']}  "
                                    f"net {t['net_pct']:+.2f}%", p)
         print(f"  {p.name}  {t['status']} {t['net_pct']:+.2f}%")
+    if args.speed:
+        for tag, want in (("accel", True), ("noaccel", False)):
+            for i, t in enumerate(sample3([t for t in trades if t["accel"] is want], "side"), 1):
+                bars = bars_cache[(t["stock_id"], t["date"])]
+                p = out / f"speed_{tag}_{i}_{t['stock_id']}_{t['date']}_{t['side']}.png"
+                chart_intraday(t, bars, t, f"{'Accelerating' if want else 'Not accelerating'}  {t['side']}  "
+                                           f"{t['stock_id']}  {t['date']}  5-bar move {t['m5_move']:+.2f}%  "
+                                           f"net {t['net_pct']:+.2f}%", p, span=True)
+                print(f"  {p.name}  5根 {t['m5_move']:+.2f}%  {t['status']} {t['net_pct']:+.2f}%")
 
 
 if __name__ == "__main__":
