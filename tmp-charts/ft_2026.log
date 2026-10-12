@@ -1,0 +1,20 @@
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table_long.py:97: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`). Please use a specific unit instead.
+  day = load_pattern_day(start_date=(first - pd.Timedelta(days=240)).strftime("%Y-%m-%d"),
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table_long.py:109: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`). Please use a specific unit instead.
+  divs = find_divergences(day, (first - pd.Timedelta(days=15)).strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d"))
+股票 552 檔，D1 194077 列，背離 1998 個
+2025_12  +0 列（累計 0，股票日 0，剔除異常 0）
+2026_01  +251484 列（累計 251484，股票日 5234，剔除異常 0）
+2026_02  +139744 列（累計 391228，股票日 8218，剔除異常 0）
+2026_03  +306557 列（累計 697785，股票日 14744，剔除異常 0）
+2026_04  +261490 列（累計 959275，股票日 20199，剔除異常 0）
+2026_05  +302020 列（累計 1261295，股票日 26378，剔除異常 0）
+2026_06  +299326 列（累計 1560621，股票日 32486，剔除異常 0）
+2026_07  +264278 列（累計 1824899，股票日 37972，剔除異常 60）
+2026_08  +281910 列（累計 2106809，股票日 43888，剔除異常 68）
+2026_09  +249398 列（累計 2356207，股票日 49053，剔除異常 72）
+2026_10  +95869 列（累計 2452076，股票日 50993，剔除異常 72）
+
+完成：2452076 列 × 40 欄 → db/tp_2026.parquet；股票日 50993；剔除異常 72
+
+完成：2452076 列 × 40 欄 → db/hold_2026.parquet；股票日 50993；剔除異常 72
