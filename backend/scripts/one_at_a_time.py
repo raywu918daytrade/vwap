@@ -82,7 +82,7 @@ def main() -> None:
                      & (test["liq_amt20"].fillna(0) >= liq)]
             s = s.sort_values(["date", "minute", "score"], ascending=[True, True, False]).groupby("date").head(1)
             r = s["short_hold"].to_numpy(float)
-            bw, bl, dist = streaks(list(r > 0))
+            bw, bl, dist = streaks([bool(x) for x in r > 0])
             ld, ldd = doubling(r, True)
             wd, wdd = doubling(r, False)
             hh = s.groupby(half(s["date"]))["short_hold"].sum()
