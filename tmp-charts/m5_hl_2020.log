@@ -1,0 +1,31 @@
+/home/runner/work/vwap/vwap/backend/scripts/build_m5_hl.py:31: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`). Please use a specific unit instead.
+  day = load_pattern_day(start_date=(first - pd.Timedelta(days=60)).strftime("%Y-%m-%d"),
+2020_01 20 stock-days
+2020_02 166 stock-days
+/home/runner/work/vwap/vwap/backend/scripts/build_m5_hl.py:55: RuntimeWarning: divide by zero encountered in divide
+  r[f"m5_{k}_pct"] = ((m5[k].to_numpy(float) / prev_close - 1) * 100).astype("float32")
+/home/runner/work/vwap/vwap/backend/scripts/build_m5_hl.py:55: RuntimeWarning: divide by zero encountered in divide
+  r[f"m5_{k}_pct"] = ((m5[k].to_numpy(float) / prev_close - 1) * 100).astype("float32")
+/home/runner/work/vwap/vwap/backend/scripts/build_m5_hl.py:55: RuntimeWarning: divide by zero encountered in divide
+  r[f"m5_{k}_pct"] = ((m5[k].to_numpy(float) / prev_close - 1) * 100).astype("float32")
+/home/runner/work/vwap/vwap/backend/scripts/build_m5_hl.py:55: RuntimeWarning: divide by zero encountered in divide
+  r[f"m5_{k}_pct"] = ((m5[k].to_numpy(float) / prev_close - 1) * 100).astype("float32")
+2020_03 1750 stock-days
+2020_04 652 stock-days
+2020_05 189 stock-days
+2020_06 115 stock-days
+/home/runner/work/vwap/vwap/backend/scripts/build_m5_hl.py:55: RuntimeWarning: divide by zero encountered in divide
+  r[f"m5_{k}_pct"] = ((m5[k].to_numpy(float) / prev_close - 1) * 100).astype("float32")
+/home/runner/work/vwap/vwap/backend/scripts/build_m5_hl.py:55: RuntimeWarning: divide by zero encountered in divide
+  r[f"m5_{k}_pct"] = ((m5[k].to_numpy(float) / prev_close - 1) * 100).astype("float32")
+/home/runner/work/vwap/vwap/backend/scripts/build_m5_hl.py:55: RuntimeWarning: divide by zero encountered in divide
+  r[f"m5_{k}_pct"] = ((m5[k].to_numpy(float) / prev_close - 1) * 100).astype("float32")
+/home/runner/work/vwap/vwap/backend/scripts/build_m5_hl.py:55: RuntimeWarning: divide by zero encountered in divide
+  r[f"m5_{k}_pct"] = ((m5[k].to_numpy(float) / prev_close - 1) * 100).astype("float32")
+2020_07 347 stock-days
+2020_08 384 stock-days
+2020_09 391 stock-days
+2020_10 272 stock-days
+2020_11 313 stock-days
+2020_12 599 stock-days
+rows 253857
