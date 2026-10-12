@@ -1,0 +1,45 @@
+name: tmp trade charts
+on:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/tmp-charts.yml"]
+jobs:
+  charts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      HF_REPO_ID: ${{ secrets.HF_REPO_ID || vars.HF_REPO_ID || 'raywu918daytrade/daytrade' }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HUB_DISABLE_XET: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt matplotlib
+      - name: Download
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download
+          pats = [f"db/m1/{m}.parquet" for m in "2023_08 2023_09 2024_04 2024_09 2025_03 2025_04 2025_10 2026_03 2026_06 2026_07".split()]
+          pats += [f"db/{f}/*" for f in ("adjustment_day", "adjustment_factor", "tick_adjust_factor", "tickers", "d1", "d1_flags", "adjustment_day_flags")]
+          snapshot_download(os.environ["HF_REPO_ID"], repo_type="dataset", local_dir=".", allow_patterns=pats,
+                            token=os.environ.get("HF_TOKEN") or None)
+          PY
+      - name: Charts
+        working-directory: backend
+        run: python -m scripts.chart_trades --trades ../tmp-input/picks.csv --out ../tmp-charts 2>&1 | tee ../charts.log
+      - name: Commit
+        if: always()
+        run: |
+          mkdir -p tmp-charts && cp charts.log tmp-charts/ || true
+          git config user.name github-actions && git config user.email github-actions@users.noreply.github.com
+          git add tmp-charts && git commit -m "tmp trade charts"
+          for i in 1 2 3 4 5 6; do git pull --rebase origin ${{ github.ref_name }} && git push origin HEAD:${{ github.ref_name }} && break; sleep $((i*7)); done
