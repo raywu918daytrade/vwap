@@ -1,0 +1,48 @@
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table_long.py:97: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`). Please use a specific unit instead.
+  day = load_pattern_day(start_date=(first - pd.Timedelta(days=240)).strftime("%Y-%m-%d"),
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table_long.py:109: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`). Please use a specific unit instead.
+  divs = find_divergences(day, (first - pd.Timedelta(days=15)).strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d"))
+股票 552 檔，D1 216985 列，背離 2329 個
+2021_12  +0 列（累計 0，股票日 0，剔除異常 0）
+2022_01  +99380 列（累計 99380，股票日 2152，剔除異常 0）
+2022_02  +82534 列（累計 181914，股票日 3923，剔除異常 0）
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table_long.py:156: RuntimeWarning: divide by zero encountered in scalar divide
+  base["open5_rng"] = (first5["high"].max() - first5["low"].min()) / first5["open"].iloc[0] * 100
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:105: RuntimeWarning: divide by zero encountered in divide
+  r = np.diff(c[i - 5:i + 1]) / c[i - 5:i] * 100
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:115: RuntimeWarning: divide by zero encountered in scalar divide
+  "chg_from_prev_close": (c[i] / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:116: RuntimeWarning: invalid value encountered in scalar divide
+  "gap_open": (day_open / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:117: RuntimeWarning: divide by zero encountered in scalar divide
+  "chg_from_open": (c[i] / day_open - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:119: RuntimeWarning: divide by zero encountered in scalar divide
+  "from_day_low": (c[i] / lo_so_far - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:130: RuntimeWarning: divide by zero encountered in scalar divide
+  "m1x5_move": (c[i] / c[i - 5] - 1) * 100,
+2022_03  +138953 列（累計 320867，股票日 6919，剔除異常 0）
+2022_04  +104153 列（累計 425020，股票日 9153，剔除異常 0）
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table_long.py:156: RuntimeWarning: divide by zero encountered in scalar divide
+  base["open5_rng"] = (first5["high"].max() - first5["low"].min()) / first5["open"].iloc[0] * 100
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:115: RuntimeWarning: divide by zero encountered in scalar divide
+  "chg_from_prev_close": (c[i] / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:116: RuntimeWarning: invalid value encountered in scalar divide
+  "gap_open": (day_open / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:117: RuntimeWarning: divide by zero encountered in scalar divide
+  "chg_from_open": (c[i] / day_open - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:119: RuntimeWarning: divide by zero encountered in scalar divide
+  "from_day_low": (c[i] / lo_so_far - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:125: RuntimeWarning: divide by zero encountered in scalar divide
+  "prev_m5_ret": (p_c / p_o - 1) * 100,
+2022_05  +136770 列（累計 561790，股票日 12218，剔除異常 0）
+2022_06  +116574 列（累計 678364，股票日 14801，剔除異常 0）
+2022_07  +189107 列（累計 867471，股票日 19114，剔除異常 0）
+2022_08  +133534 列（累計 1001005，股票日 22019，剔除異常 0）
+2022_09  +125325 列（累計 1126330，股票日 24755，剔除異常 0）
+2022_10  +171719 列（累計 1298049，股票日 28721，剔除異常 0）
+2022_11  +132291 列（累計 1430340，股票日 31588，剔除異常 0）
+2022_12  +100933 列（累計 1531273，股票日 33780，剔除異常 0）
+
+完成：1531273 列 × 40 欄 → db/tp_2022.parquet；股票日 33780；剔除異常 0
+
+完成：1531273 列 × 40 欄 → db/hold_2022.parquet；股票日 33780；剔除異常 0
