@@ -1,0 +1,13 @@
+/home/runner/work/vwap/vwap/backend/scripts/build_m5_hl.py:31: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`). Please use a specific unit instead.
+  day = load_pattern_day(start_date=(first - pd.Timedelta(days=60)).strftime("%Y-%m-%d"),
+2026_01 1208 stock-days
+2026_02 1055 stock-days
+2026_03 2767 stock-days
+2026_04 2452 stock-days
+2026_05 3040 stock-days
+2026_06 2958 stock-days
+2026_07 2656 stock-days
+2026_08 3003 stock-days
+2026_09 1711 stock-days
+2026_10 574 stock-days
+rows 1070076
