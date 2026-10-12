@@ -1,0 +1,36 @@
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table_long.py:97: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`). Please use a specific unit instead.
+  day = load_pattern_day(start_date=(first - pd.Timedelta(days=240)).strftime("%Y-%m-%d"),
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table_long.py:109: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`). Please use a specific unit instead.
+  divs = find_divergences(day, (first - pd.Timedelta(days=15)).strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d"))
+股票 552 檔，D1 213154 列，背離 1942 個
+2020_12  +0 列（累計 0，股票日 0，剔除異常 0）
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table_long.py:156: RuntimeWarning: divide by zero encountered in scalar divide
+  base["open5_rng"] = (first5["high"].max() - first5["low"].min()) / first5["open"].iloc[0] * 100
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:105: RuntimeWarning: divide by zero encountered in divide
+  r = np.diff(c[i - 5:i + 1]) / c[i - 5:i] * 100
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:115: RuntimeWarning: divide by zero encountered in scalar divide
+  "chg_from_prev_close": (c[i] / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:116: RuntimeWarning: invalid value encountered in scalar divide
+  "gap_open": (day_open / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:117: RuntimeWarning: divide by zero encountered in scalar divide
+  "chg_from_open": (c[i] / day_open - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:119: RuntimeWarning: divide by zero encountered in scalar divide
+  "from_day_low": (c[i] / lo_so_far - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/build_feature_table.py:130: RuntimeWarning: divide by zero encountered in scalar divide
+  "m1x5_move": (c[i] / c[i - 5] - 1) * 100,
+2021_01  +183765 列（累計 183765，股票日 3853，剔除異常 0）
+2021_02  +113379 列（累計 297144，股票日 6244，剔除異常 1）
+2021_03  +162664 列（累計 459808，股票日 9661，剔除異常 1）
+2021_04  +172154 列（累計 631962，股票日 13198，剔除異常 1）
+2021_05  +259658 列（累計 891620，股票日 18657，剔除異常 1）
+2021_06  +161496 列（累計 1053116，股票日 22092，剔除異常 1）
+2021_07  +201323 列（累計 1254439，股票日 26295，剔除異常 1）
+2021_08  +169756 列（累計 1424195，股票日 29957，剔除異常 1）
+2021_09  +133024 列（累計 1557219，股票日 32839，剔除異常 1）
+2021_10  +166747 列（累計 1723966，股票日 36482，剔除異常 2）
+2021_11  +170212 列（累計 1894178，股票日 40065，剔除異常 2）
+2021_12  +125717 列（累計 2019895，股票日 42702，剔除異常 2）
+
+完成：2019895 列 × 40 欄 → db/tp_2021.parquet；股票日 42702；剔除異常 2
+
+完成：2019895 列 × 40 欄 → db/hold_2021.parquet；股票日 42702；剔除異常 2
