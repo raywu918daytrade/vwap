@@ -38,8 +38,11 @@ def main() -> None:
         "排除 漲≥6.8%": (near, False),
         "排除 漲≥6.8% 或 今日碰過漲停": (near | touched, False),
         "排除 漲≥6.8% 或 今日碰過漲停（重新訓練）": (near | touched, True),
-        "排除 漲≥5%": (df["chg_from_prev_close"] >= 5, False),
     }
+    for cap in (5, 3, 0):
+        ex = (df["chg_from_prev_close"] > cap) | touched
+        variants[f"只空 漲≤{cap}%（未碰漲停）"] = (ex, False)
+        variants[f"只空 漲≤{cap}%（未碰漲停，重新訓練）"] = (ex, True)
     full_tr, full_te = gbm_scores(df[is_tr], df[~is_tr], base)
     print("# 排除可能卡漲停的訊號（做空，ATR≥5 PR≥50，前 2%，一次一筆，收盤平倉、停損 3%，2023-26）\n")
     print("| 版本 | 交易天數 | 勝率 | 平均 | 合計 | 最大回落 | 最多連輸 | 正的半年 | 每半年合計 |")
@@ -59,7 +62,7 @@ def main() -> None:
         hh = s.groupby(half(s["date"]))["short_hold"].sum()
         print(f"| {name} | {len(s)}/{n_days} | {(r > 0).mean() * 100:.1f}% | {r.mean():+.3f}% | {r.sum():+.1f}% | "
               f"{flat_dd(r):.1f}% | {bl} | {(hh > 0).sum()}/{len(hh)} | " + "、".join(f"{h} {v:+.0f}%" for h, v in hh.items()) + " |")
-        if name.startswith("排除 漲≥6.8% 或"):
+        if retrain:
             cols = ["minute", "chg_from_prev_close", "vs_vwap", "d1_prev_chg", "d1_vs_ma20", "vol5_pr", "m5_ret"]
             print(f"\n  （{name} 選到的訊號中位數：" + "、".join(f"{c} {s[c].median():.2f}" for c in cols) + "）\n")
 
