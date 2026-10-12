@@ -82,8 +82,14 @@ def main() -> None:
     parser.add_argument("--out", required=True)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--tp", type=float, default=3.5, help="take profit %%; 0 = none (hold to the close)")
+    parser.add_argument("--min-atr", type=float, default=None, help="ATR14 floor as a fraction (default: trade-stats rule 0.05)")
+    parser.add_argument("--min-pr", type=float, default=None, help="open-5-min volume PR floor 0-1 (default 0.5)")
     args = parser.parse_args()
     rules = {**ts.RULES, "take_profit_pct": args.tp or 1e6, "stop_loss_pct": 3.0}
+    if args.min_atr is not None:
+        rules["min_day_atr"] = args.min_atr
+    if args.min_pr is not None:
+        rules["min_vol5_pr"] = args.min_pr
 
     stock_ids = stock_ids_for_universe("daytrade")
     first = pd.Timestamp(args.from_month + "-01")
@@ -93,12 +99,20 @@ def main() -> None:
     day["stock_id"] = day["stock_id"].astype(str)
     day = day[day["stock_id"].isin(stock_ids) & (day["open"] > 0)]
     atrs = atr_table(day)
+    # Previous day's D1 volume vs the 20 days before it (D1 volume spike).
+    dvol: dict[tuple[str, str], tuple[float, float]] = {}
+    for sid, g in day.groupby("stock_id", sort=False):
+        v = g["volume"].astype(float).reset_index(drop=True)
+        prev, base20 = v.shift(1), v.shift(2).rolling(20, min_periods=10).mean()
+        for d, a, b in zip(g["date"].dt.strftime("%Y-%m-%d"), prev, base20):
+            dvol[(str(sid), d)] = (a, a / b if b and b > 0 else np.nan)
     divs = find_divergences(day, (first - pd.Timedelta(days=15)).strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d"))
     ctx = d1_context(day, divs)
     print(f"股票 {len(stock_ids)} 檔，D1 {len(day)} 列，背離 {len(divs)} 個", flush=True)
 
     # The month before the range only feeds the 20-day volume history.
     vol_hist: dict[str, deque] = defaultdict(lambda: deque(maxlen=LOOKBACK))
+    prev_m1_total: dict[str, float] = {}
     check: list[tuple[str, str, float, float]] = []
     rows, dropped, kept_days = [], 0, 0
     stems = months((first - pd.offsets.MonthBegin(1)).strftime("%Y-%m"), args.to_month)
@@ -114,6 +128,8 @@ def main() -> None:
                 v5 = float(bars.loc[bars["hhmm"] < "09:05", "volume"].sum())
                 past = np.array(vol_hist[sid], dtype=float)
                 vol_hist[sid].append(v5)
+                pv = prev_m1_total.get(sid, np.nan)
+                prev_m1_total[sid] = float(bars["volume"].sum())
                 if warmup or len(past) < MIN_HIST or v5 <= 0:
                     continue
                 pr = float(np.mean(past < v5))
@@ -138,7 +154,15 @@ def main() -> None:
                 first5 = bars[bars["hhmm"] < "09:05"]
                 if not first5.empty:
                     base["open5_rng"] = (first5["high"].max() - first5["low"].min()) / first5["open"].iloc[0] * 100
-                rows.extend(day_rows(bars, base, rules))
+                new = day_rows(bars, base, rules)
+                pratio = dvol.get((sid, d), (np.nan, np.nan))[1]
+                cum = dict(zip(bars["hhmm"], bars["volume"].astype(float).cumsum()))
+                v5_prev = past[-1] if len(past) else np.nan
+                for r in new:
+                    r["d1_prev_vol_ratio"] = pratio
+                    r["cum_vol_vs_prev_day"] = cum.get(r["time"], np.nan) / pv if pv and pv > 0 else np.nan
+                    r["vol5_vs_prev_vol5"] = v5 / v5_prev if v5_prev and v5_prev > 0 else np.nan
+                rows.extend(new)
         print(f"{stem}  +{len(rows) - n0} 列（累計 {len(rows)}，股票日 {kept_days}，剔除異常 {dropped}）", flush=True)
 
     df = pd.DataFrame(rows)
