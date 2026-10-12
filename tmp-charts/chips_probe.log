@@ -1,0 +1,114 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+total files 1375
+dir .gitattributes 1
+dir day_trade/day 129
+dir day_trade/inference 24
+dir day_trade/inference_eval 1
+dir day_trade/m1 3
+dir day_trade/m1_flags 1
+dir day_trade/settings.json 1
+dir day_trade/tickers 1
+dir db/active_stocks 1
+dir db/backtest 588
+dir db/chat 341
+dir db/day_trade 6
+dir db/day_trade_flags 1
+dir db/feature_cols 1
+dir db/ib 7
+dir db/ib_flags 1
+dir db/info 1
+dir db/margin 7
+dir db/margin_flags 1
+dir db/news_mops 1
+dir db/news_mops_flags 1
+dir db/predictions 157
+dir db/price 8
+dir db/rag 84
+dir db/youtube 3
+dir models/.DS_Store 1
+dir models/ib_margin_breakout_gmm.joblib 1
+dir models/margin_lgbm.joblib 1
+dir models/rfc_macd_6xx.joblib 1
+dir models/rfc_macd_ib_6xx.joblib 1
+
+== db/margin 7 first ['db/margin/201501_202605.parquet', 'db/margin/2026_10.parquet', 'db/margin/2026_5.parquet', 'db/margin/2026_6.parquet', 'db/margin/2026_7.parquet'] last ['db/margin/2026_5.parquet', 'db/margin/2026_6.parquet', 'db/margin/2026_7.parquet', 'db/margin/2026_8.parquet', 'db/margin/2026_9.parquet']
+
+-- db/margin/201501_202605.parquet (2083461, 16)
+stock_id                                 str
+date                                     str
+margin_purchase_buy                  float64
+margin_purchase_cash_repayment       float64
+margin_purchase_limit                float64
+margin_purchase_sell                 float64
+margin_purchase_today_balance        float64
+margin_purchase_yesterday_balance    float64
+note                                     str
+offset_loan_and_short                float64
+short_sale_buy                       float64
+short_sale_cash_repayment            float64
+short_sale_limit                     float64
+short_sale_sell                      float64
+short_sale_today_balance             float64
+short_sale_yesterday_balance         float64
+  stock_id        date  margin_purchase_buy  margin_purchase_cash_repayment  margin_purchase_limit  margin_purchase_sell  margin_purchase_today_balance  margin_purchase_yesterday_balance note  offset_loan_and_short  short_sale_buy  short_sale_cash_repayment  short_sale_limit  short_sale_sell  short_sale_today_balance  short_sale_yesterday_balance
+0     2330  2025-01-02               1387.0                             2.0              6483183.0                1066.0                        26483.0                            26164.0                         1.0           128.0                        0.0         6483183.0              2.0                     311.0                         437.0
+1     2330  2025-01-03                567.0                             7.0              6483183.0                1247.0                        25796.0                            26483.0                         0.0             7.0                        0.0         6483183.0             44.0                     348.0                         311.0
+2     2330  2025-01-06               2636.0                            10.0              6483183.0                2802.0                        25620.0                            25796.0                         3.0           216.0                        0.0         6483183.0            164.0                     296.0                         348.0
+3     2330  2025-01-07               1596.0                            22.0              6483183.0                1559.0                        25635.0                            25620.0                         7.0            44.0                        7.0         6483183.0             83.0                     328.0                         296.0
+4     2330  2025-01-08               2161.0                            40.0              6483183.0                 885.0                        26871.0                            25635.0                         1.0            67.0                        0.0         6483183.0             28.0                     289.0                         328.0
+range date 2015-01-05 2026-04-30 2762
+
+-- db/margin/2026_9.parquet (16536, 16)
+date                                   str
+stock_id                               str
+margin_purchase_buy                  int64
+margin_purchase_cash_repayment       int64
+margin_purchase_limit                int64
+margin_purchase_sell                 int64
+margin_purchase_today_balance        int64
+margin_purchase_yesterday_balance    int64
+note                                   str
+offset_loan_and_short                int64
+short_sale_buy                       int64
+short_sale_cash_repayment            int64
+short_sale_limit                     int64
+short_sale_sell                      int64
+short_sale_today_balance             int64
+short_sale_yesterday_balance         int64
+         date stock_id  margin_purchase_buy  margin_purchase_cash_repayment  margin_purchase_limit  margin_purchase_sell  margin_purchase_today_balance  margin_purchase_yesterday_balance note  offset_loan_and_short  short_sale_buy  short_sale_cash_repayment  short_sale_limit  short_sale_sell  short_sale_today_balance  short_sale_yesterday_balance
+0  2026-09-01     0050                  660                              45                5581375                  1265                          17946                              18596                          11              50                          5           5581375              182                       655                           528
+1  2026-09-01     0052                  225                               4                 644375                   337                           8583                               8699                           0               3                          0            644375                6                        42                            39
+2  2026-09-01     0056                  147                               3                3521758                    96                           3659                               3611                           2              26                          0           3521758               10                       191                           207
+3  2026-09-01     1101                 3932                              20                1880795                  2512                          36629                              35229                          65               0                          0           1880795               43                        79                            36
+4  2026-09-01     1102                   61                               0                 886640                   104                           1037                               1080                           0               0                          0            886640                0                        25                            25
+range date 2026-09-01 2026-09-29 19
+
+== db/ib 7 first ['db/ib/201501_202605.parquet', 'db/ib/2026_10.parquet', 'db/ib/2026_5.parquet', 'db/ib/2026_6.parquet', 'db/ib/2026_7.parquet'] last ['db/ib/2026_5.parquet', 'db/ib/2026_6.parquet', 'db/ib/2026_7.parquet', 'db/ib/2026_8.parquet', 'db/ib/2026_9.parquet']
+
+-- db/ib/201501_202605.parquet (9782320, 5)
+stock_id      str
+date          str
+buy         int64
+sell        int64
+name          str
+  stock_id        date    buy   sell              name
+0     1540  2015-01-05  15000  13000  Foreign_Investor
+1     1540  2015-01-05      0      0  Investment_Trust
+2     1540  2015-01-05      0      0       Dealer_self
+3     1540  2015-01-05      0      0    Dealer_Hedging
+4     1540  2015-01-06      0  15000  Foreign_Investor
+range date 2015-01-05 2026-04-30 2760
+
+-- db/ib/2026_9.parquet (83908, 5)
+stock_id      str
+date          str
+name          str
+buy         int64
+sell        int64
+  stock_id        date                 name       buy     sell
+0     0050  2026-09-01       Dealer_Hedging  32506452  1502764
+1     0050  2026-09-01          Dealer_self   8146000   494000
+2     0050  2026-09-01  Foreign_Dealer_Self         0        0
+3     0050  2026-09-01     Foreign_Investor  45310271  6254774
+4     0050  2026-09-01     Investment_Trust         0        0
+range date 2026-09-01 2026-09-29 19
