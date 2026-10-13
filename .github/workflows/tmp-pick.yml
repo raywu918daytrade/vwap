@@ -1,4 +1,5 @@
 name: tmp pick
+# random pick v2
 on:
   push:
     branches: ["claude/**"]
