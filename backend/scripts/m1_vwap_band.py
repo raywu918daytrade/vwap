@@ -37,6 +37,8 @@ def main() -> None:
     ap.add_argument("--year", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--sample", type=int, default=0)
+    ap.add_argument("--mode", default="touch", choices=["touch", "cross"],
+                    help="touch: band touch-and-return bar; cross: after a band touch, the first M1 close crossing VWAP")
     args = ap.parse_args()
     want = pd.read_parquet(args.days)
     want["stock_id"] = want["stock_id"].astype(str)
@@ -69,20 +71,33 @@ def main() -> None:
             if (sid, d) in sample_keys:
                 paths.append(pd.DataFrame({"stock_id": sid, "date": d, "time": hh, "o": o, "h": h, "l": l, "c": c,
                                            "vwap": vwap, "up": up, "dn": dn}))
+            touched_up = touched_dn = False
             for i in range(10, len(bars) - 1):
                 if hh[i] > "12:00":
                     break
                 if sd[i] <= 0:
                     continue
-                short = h[i] >= up[i] and c[i] < up[i]
-                long_ = l[i] <= dn[i] and c[i] > dn[i]
+                if args.mode == "touch":
+                    short = h[i] >= up[i] and c[i] < up[i]
+                    long_ = l[i] <= dn[i] and c[i] > dn[i]
+                else:
+                    # Armed by a band touch (any bar from 09:10); fires on the first close crossing VWAP after it.
+                    short = touched_up and c[i - 1] >= vwap[i - 1] and c[i] < vwap[i]
+                    long_ = touched_dn and c[i - 1] <= vwap[i - 1] and c[i] > vwap[i]
+                    touched_up |= bool(h[i] >= up[i])
+                    touched_dn |= bool(l[i] <= dn[i])
                 for side, ok, sign in (("short", short, -1), ("long", long_, 1)):
                     if not ok:
                         continue
+                    if args.mode == "cross":
+                        if side == "short":
+                            touched_up = False
+                        else:
+                            touched_dn = False
                     net, ex = outcome(o, h, l, c, i + 1, sign, 3.5, 3.0, COST)
                     hold, _ = outcome(o, h, l, c, i + 1, sign, 1e6, 3.0, COST)
                     rows.append({"date": d, "stock_id": sid, "side": side, "time": hh[i], "entry_time": hh[i + 1],
-                                 "entry_pct": (o[i + 1] / prev_close - 1) * 100,
+                                 "entry_pct": (o[i + 1] / prev_close - 1) * 100, "entry_price": o[i + 1],
                                  "hi_pct": (hi_so_far[i] / prev_close - 1) * 100, "lo_pct": (lo_so_far[i] / prev_close - 1) * 100,
                                  "band_pct": (K * sd[i] / vwap[i]) * 100, "vs_vwap": (c[i] / vwap[i] - 1) * 100,
                                  "net": net, "exit": ex, "hold": hold})
