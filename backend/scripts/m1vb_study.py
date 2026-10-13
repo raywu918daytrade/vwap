@@ -7,6 +7,7 @@ D1 VWAP20 band position (scripts.d1_vwap_band, z = yesterday's close vs VWAP20 i
 import argparse
 import glob
 
+import numpy as np
 import pandas as pd
 
 from scripts.chips_model import half
@@ -35,6 +36,7 @@ def main() -> None:
     ap.add_argument("--signals", required=True)
     ap.add_argument("--d1", required=True)
     ap.add_argument("--chips", required=True)
+    ap.add_argument("--tick-cost", action="store_true", help="charge 2 ticks per trade instead of 0.435%% + 0.1%% slippage")
     args = ap.parse_args()
     df = pd.concat([pd.read_parquet(p) for p in sorted(glob.glob(args.signals))], ignore_index=True)
     df["stock_id"] = df["stock_id"].astype(str)
@@ -44,8 +46,17 @@ def main() -> None:
     ch["stock_id"] = ch["stock_id"].astype(str)
     df = df.merge(d1, on=["date", "stock_id"], how="left").merge(ch, on=["date", "stock_id"], how="left")
     df = df[df["liq_amt20"].fillna(0) >= 1]
-    for c in ("net", "hold"):
-        df[c] -= SLIP
+    if args.tick_cost:
+        # Ray's real cost: ~2 ticks round trip (2026-10-13), charged instead of 0.435% + slippage.
+        px = df["entry_price"].to_numpy(float)
+        tick = np.select([px < 10, px < 50, px < 100, px < 500, px < 1000], [0.01, 0.05, 0.1, 0.5, 1.0], 5.0)
+        extra = 2 * tick / px * 100 - 0.435
+        for c in ("net", "hold"):
+            df[c] -= extra
+        print(f"成本 = 2 跳：中位數 {np.median(extra + 0.435):.3f}%\n")
+    else:
+        for c in ("net", "hold"):
+            df[c] -= SLIP
     head = ("| 條件 | 訓練 筆數 | 勝率 | 停利3.5 平均 | 測試 筆數 | 勝率 | 停利3.5 平均 | 測試 收盤 平均 | 測試 正的半年 | "
             "測試一次一筆 筆數 | 平均(停利3.5) | 回落 | 最多連輸 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for side in ("short", "long"):
