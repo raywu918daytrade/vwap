@@ -24,6 +24,7 @@ def main() -> None:
     ap.add_argument("--boxes", required=True)
     ap.add_argument("--chips", required=True)
     ap.add_argument("--picks", default=None, help="write sample signals (test period) for charts")
+    ap.add_argument("--setups", default=None, help="write every stock-day's first signal (for scripts.vwap_after_setup)")
     args = ap.parse_args()
     df = load(args)
     bx = pd.read_parquet(args.boxes)
@@ -37,7 +38,7 @@ def main() -> None:
     print()
     head = ("| 條件 | 訓練 筆數 | 勝率 | 停利3.5 平均 | 測試 筆數 | 勝率 | 停利3.5 平均 | 測試 收盤 平均 | 測試 正的半年 | "
             "測試一次一筆 筆數 | 平均(停利3.5) | 回落 | 最多連輸 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|")
-    picks = []
+    picks, allsig = [], []
     for side, net, hold in (("short", "short_net", "short_hold"), ("long", "long_net", "long_hold")):
         if side == "short":
             ok = df[(df["chg_from_prev_close"] <= 5) & (df["hi_prev"] < 9.5)]
@@ -57,7 +58,10 @@ def main() -> None:
         print(row("　盤整 ≥12 根", sig[sig["n_bars"] >= 12], net, hold))
         print()
         f = first_per_day(sig)
+        allsig.append(f[["date", "stock_id", "time", "lo_pct", "hi_pct"]].assign(side=side))
         picks.append(f[f["date"] >= "2023-01-01"].sample(min(5, len(f)), random_state=2).assign(side=side))
+    if args.setups:
+        pd.concat(allsig).to_csv(args.setups, index=False)
     if args.picks:
         pd.concat(picks).to_csv(args.picks, index=False)
 
