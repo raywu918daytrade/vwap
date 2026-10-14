@@ -36,6 +36,7 @@ def main() -> None:
         ok = (s["entry_pct_mid"] <= 5) & (s["hi_pct_mid"] < 9.5) if side == "short" else (s["entry_pct_mid"] >= -5) & (s["lo_pct_mid"] > -9.5)
         f = s[ok].sort_values(["date", "stock_id", "mid_time"]).groupby(["date", "stock_id"]).head(1)
         a, b = f[f["date"] < SPLIT], f[f["date"] >= SPLIT]
+        xm_a, xm_b = (tick_cost(g["entry_price_mid"].to_numpy(float)) - 0.435 for g in (a, b))
         lab = "上衝無力 → 回跌一半做空" if side == "short" else "下殺無力 → 反彈一半做多"
         print(f"## {lab}：訓練 {len(a)} 筆，測試 {len(b)} 筆\n")
         print("### 進場後最大有利幅度（再跌/再漲的空間，到收盤、未扣成本）\n")
@@ -59,6 +60,29 @@ def main() -> None:
                 print(f"| {tpl} | {sl:g}% | {(r > 0).mean() * 100:.0f}% | {r.mean():+.3f}% | {(hv > 0).sum()}/{len(hv)} | "
                       f"{ex.get(1, 0) * 100:.0f}% | {ex.get(-1, 0) * 100:.0f}% | {ex.get(0, 0) * 100:.0f}% | {a[c].mean():+.3f}% |")
         print()
+        if "g_1_run" in b:
+            print("### 停損放在那段大量的高/低點，停利分區間（測試 2023–26）\n")
+            d = b["sl_run_mid"]
+            print(f"停損距離（進場到那段高/低點）：中位數 {d.median():.2f}%，25/75 分位 {d.quantile(.25):.2f}%／{d.quantile(.75):.2f}%，"
+                  f"≥3% 的佔 {(d >= 3).mean() * 100:.0f}%。\n")
+            print("| 停利 | 勝率 | 平均/筆 | 正半年 | 停利出場 | 停損出場 | 收盤出場 | 訓練 平均/筆 |")
+            print("|---|---|---|---|---|---|---|---|")
+            for tp in GRID_TP:
+                c, x = f"g_{tp:g}_run", f"gx_{tp:g}_run"
+                r = b[c] - xm_b
+                hv = r.groupby(half(b["date"])).mean()
+                ex = b[x].value_counts(normalize=True)
+                tpl = "不停利" if tp >= 100 else f"{tp:g}%"
+                print(f"| {tpl} | {(r > 0).mean() * 100:.0f}% | {r.mean():+.3f}% | {(hv > 0).sum()}/{len(hv)} | "
+                      f"{ex.get(1, 0) * 100:.0f}% | {ex.get(-1, 0) * 100:.0f}% | {ex.get(0, 0) * 100:.0f}% | {(a[c] - xm_a).mean():+.3f}% |")
+            print("\n停損距離分組（停利 2%）：\n")
+            print("| 停損距離 | 筆數 | 勝率 | 平均/筆 |")
+            print("|---|---|---|---|")
+            for lo_, hi_ in ((0, 1), (1, 1.5), (1.5, 2), (2, 3), (3, 99)):
+                k = (d >= lo_) & (d < hi_)
+                r = (b["g_2_run"] - xm_b)[k]
+                print(f"| {lo_:g}～{hi_:g}% | {k.sum()} | {(r > 0).mean() * 100:.0f}% | {r.mean():+.3f}% |")
+            print()
 
 
 if __name__ == "__main__":
