@@ -46,8 +46,16 @@ def main() -> None:
     gaps = {k: g for k, (_, g) in atr_table(day).items()}
     rows, paths = [], {}
 
-    def outs(o, h, l, c, e, sign, sl_far):
-        return {"net": outcome(o, h, l, c, e, sign, 3.5, 3.0, COST)[0], "exit": outcome(o, h, l, c, e, sign, 3.5, 3.0, COST)[1],
+    def outs(o, h, l, c, e, sign, sl_far, sl_near=None):
+        # Ray 2026-10-14 「停損在高點對吧」: the against-run trade with its stop at the run's near extreme
+        # (run high for a short after an up run), TP 3.5 and hold; plus TP 1.5 / 2 for the same stop.
+        rev = {}
+        if sl_near is not None:
+            rev = {"rev_nearsl": outcome(o, h, l, c, e, -sign, 3.5, max(sl_near, 0.3), COST)[0],
+                   "rev_hold_nearsl": outcome(o, h, l, c, e, -sign, 1e6, max(sl_near, 0.3), COST)[0],
+                   "rev_tp2_nearsl": outcome(o, h, l, c, e, -sign, 2.0, max(sl_near, 0.3), COST)[0],
+                   "rev_tp15_nearsl": outcome(o, h, l, c, e, -sign, 1.5, max(sl_near, 0.3), COST)[0]}
+        return {**rev,"net": outcome(o, h, l, c, e, sign, 3.5, 3.0, COST)[0], "exit": outcome(o, h, l, c, e, sign, 3.5, 3.0, COST)[1],
                 "hold": outcome(o, h, l, c, e, sign, 1e6, 3.0, COST)[0],
                 "net_farsl": outcome(o, h, l, c, e, sign, 3.5, max(sl_far, 0.3), COST)[0],
                 "hold_farsl": outcome(o, h, l, c, e, sign, 1e6, max(sl_far, 0.3), COST)[0],
@@ -115,6 +123,7 @@ def main() -> None:
                 found = True
                 sign = 1 if up else -1  # "with the run"
                 far = run_lo if up else run_hi
+                near = run_hi if up else run_lo
                 e_a = u + 1
                 rec = {"date": d, "stock_id": sid, "run_dir": "up" if up else "dn", "run_start": hh[i], "run_end": hh[j - 1],
                        "touch": hh[u], "k": k, "move": move, "run_vol_x": run_avg / max(avg, 1e-9), "pb_bars": u - j + 1,
@@ -122,8 +131,8 @@ def main() -> None:
                        "entry_pct": (o[e_a] / prev_close - 1) * 100, "entry_price": o[e_a],
                        "hi_pct": (hi_so_far[u] / prev_close - 1) * 100, "lo_pct": (lo_so_far[u] / prev_close - 1) * 100,
                        "vs_vwap": (c[u] / vwap[u] - 1) * 100, "time": hh[u],
-                       "sl_far": abs(far / o[e_a] - 1) * 100}
-                rec.update(outs(o, h, l, c, e_a, sign, rec["sl_far"]))
+                       "sl_far": abs(far / o[e_a] - 1) * 100, "sl_near": abs(near / o[e_a] - 1) * 100}
+                rec.update(outs(o, h, l, c, e_a, sign, rec["sl_far"], rec["sl_near"]))
                 # entry B: confirmation bar
                 cf = None
                 for t in range(u + 1, min(u + 1 + args.confirm, nb - 1)):
@@ -133,13 +142,15 @@ def main() -> None:
                         cf = t
                         break
                 rec.update({"cf_time": None, "cf_entry_pct": np.nan, "cf_entry_price": np.nan, "cf_hi_pct": np.nan, "cf_lo_pct": np.nan, "cf_sl_far": np.nan,
-                            **{f"cf_{x}": np.nan for x in ("net", "exit", "hold", "net_farsl", "hold_farsl", "net_rev", "hold_rev")}})
+                            "cf_sl_near": np.nan,
+                            **{f"cf_{x}": np.nan for x in ("net", "exit", "hold", "net_farsl", "hold_farsl", "net_rev", "hold_rev",
+                                                           "rev_nearsl", "rev_hold_nearsl", "rev_tp2_nearsl", "rev_tp15_nearsl")}})
                 if cf is not None:
                     e_b = cf + 1
-                    slf = abs(far / o[e_b] - 1) * 100
+                    slf, sln = abs(far / o[e_b] - 1) * 100, abs(near / o[e_b] - 1) * 100
                     rec.update({"cf_time": hh[cf], "cf_entry_pct": (o[e_b] / prev_close - 1) * 100, "cf_entry_price": o[e_b],
                                 "cf_hi_pct": (hi_so_far[cf] / prev_close - 1) * 100, "cf_lo_pct": (lo_so_far[cf] / prev_close - 1) * 100,
-                                "cf_sl_far": slf, **{f"cf_{x}": y for x, y in outs(o, h, l, c, e_b, sign, slf).items()}})
+                                "cf_sl_far": slf, "cf_sl_near": sln, **{f"cf_{x}": y for x, y in outs(o, h, l, c, e_b, sign, slf, sln).items()}})
                 rows.append(rec)
                 i = u + 1
             if found and args.dump:

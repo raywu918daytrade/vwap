@@ -18,8 +18,10 @@ def prep(e: pd.DataFrame, pre: str) -> pd.DataFrame:
     """Rows with the given entry prefix ('' touch / 'cf_' confirm), cost at 2 ticks, standard columns."""
     f = e[e[f"{pre}net"].notna()].copy()
     extra = tick_cost(f[f"{pre}entry_price"].to_numpy(float)) - 0.435
-    for c in ("net", "hold", "net_farsl", "hold_farsl", "net_rev", "hold_rev", "exit", "entry_pct", "hi_pct", "lo_pct", "sl_far"):
-        f[c] = f[f"{pre}{c}"] - (extra if c in ("net", "hold", "net_farsl", "hold_farsl", "net_rev", "hold_rev") else 0)
+    money = ("net", "hold", "net_farsl", "hold_farsl", "net_rev", "hold_rev", "rev_nearsl", "rev_hold_nearsl", "rev_tp2_nearsl", "rev_tp15_nearsl")
+    for c in money + ("exit", "entry_pct", "hi_pct", "lo_pct", "sl_far", "sl_near"):
+        if f"{pre}{c}" in f:
+            f[c] = f[f"{pre}{c}"] - (extra if c in money else 0)
     if pre:
         f["time"] = f["cf_time"]
     return f
@@ -73,6 +75,16 @@ def main() -> None:
                 f = f[ok].sort_values(["date", "stock_id", "time"]).groupby(["date", "stock_id"]).head(1)
                 lab = f"{what}，{how}{'做多' if side == 'long' else '做空'}，{ent}"
                 print(row(lab, f))
+                if side != with_side and "rev_nearsl" in f:
+                    g = f.copy()
+                    g["net"], g["hold"] = g["rev_nearsl"], g["rev_hold_nearsl"]
+                    print(row(f"  停損改在那段{'高點' if side == 'short' else '低點'}（距離中位數 {g['sl_near'].median():.2f}%）", g))
+                    for tp, c in (("2", "rev_tp2_nearsl"), ("1.5", "rev_tp15_nearsl")):
+                        g2 = g.copy()
+                        g2["net"] = g2[c]
+                        print(row(f"    同上，停利 {tp}%", g2))
+                    print(row("  同上（停損在高/低點），10:00 後", g[g["time"] >= "10:00"]))
+                    print(row("  同上（停損在高/低點），推進 ≥3%", g[g["move"].abs() >= 3]))
                 if side == with_side:
                     g = f.copy()
                     g["net"], g["hold"] = g["net_farsl"], g["hold_farsl"]
