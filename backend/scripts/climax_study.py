@@ -39,6 +39,7 @@ def main() -> None:
     ap.add_argument("--events", required=True)
     ap.add_argument("--ft", required=True)
     ap.add_argument("--band", required=True)
+    ap.add_argument("--pr", type=float, default=90, help="opening-volume PR floor of the pool (control uses the same)")
     args = ap.parse_args()
     e = pd.concat([pd.read_parquet(p) for p in sorted(glob.glob(args.events))], ignore_index=True)
     e["stock_id"] = e["stock_id"].astype(str)
@@ -46,13 +47,13 @@ def main() -> None:
     extra = tick_cost(e["entry_price"].to_numpy(float)) - 0.435
     for c in ("net", "hold", "net_rev", "hold_rev"):
         e[c] = e[c] - extra
-    print(f"# 連續大量後的無力反轉，2020–26，PR ≥90 池子（09:10–12:00，每檔每天第一筆，成本 2 跳）\n")
+    print(f"# 連續大量後的無力反轉，2020–26，PR ≥{args.pr:g} 池子（09:10–12:00，每檔每天第一筆，成本 2 跳）\n")
     print(f"事件 {len(e)}；上衝後無力 {(e['side'] == 'short').sum()}，下殺後無力 {(e['side'] == 'long').sum()}\n")
     # control: random M5 row per stock-day in the same pool/window
     cols = ["date", "stock_id", "time", "minute", "day_atr", "vol5_pr", "chg_from_prev_close", "from_day_high", "from_day_low",
             "short_net", "short_hold", "long_net", "long_hold"]
     ft = pd.concat([pd.read_parquet(p, columns=cols) for p in sorted(glob.glob(args.ft))], ignore_index=True)
-    ft = ft[(ft["day_atr"] >= 5) & (ft["vol5_pr"] >= 90) & (ft["minute"] >= 10) & (ft["minute"] <= 180)]
+    ft = ft[(ft["day_atr"] >= 5) & (ft["vol5_pr"] >= args.pr) & (ft["minute"] >= 10) & (ft["minute"] <= 180)]
     ft["stock_id"] = ft["stock_id"].astype(str)
     bd = pd.read_parquet(args.band, columns=["date", "stock_id", "prev_close"])
     bd["stock_id"] = bd["stock_id"].astype(str)
