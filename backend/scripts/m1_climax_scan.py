@@ -139,6 +139,12 @@ def main() -> None:
                             g, gx = outcome(o, h, l, c, u_hit + 1, sign, tp, sl, COST)
                             m[f"g_{tp:g}_{sl:g}"] = g
                             m[f"gx_{tp:g}_{sl:g}"] = gx
+                    # Ray 2026-10-14: 停損放高點，停利用不同區間 — SL at the run extreme for every TP level.
+                    m["sl_run_mid"] = sl_mid
+                    for tp in GRID_TP:
+                        g, gx = outcome(o, h, l, c, u_hit + 1, sign, tp, max(sl_mid, 0.3), COST)
+                        m[f"g_{tp:g}_run"] = g
+                        m[f"gx_{tp:g}_run"] = gx
                 rows.append({**m, "date": d, "stock_id": sid, "side": side, "run_start": hh[i], "run_end": hh[j - 1], "time": hh[t],
                              "k": k, "move": move, "run_vol_x": run_avg / max(avg, 1e-9), "rev_vol_x": v[t] / max(run_avg, 1e-9),
                              "bars_after": t - (j - 1), "entry_pct": (o[t + 1] / prev_close - 1) * 100, "entry_price": o[t + 1],
