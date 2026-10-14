@@ -100,7 +100,30 @@ def main() -> None:
                 hold, _ = outcome(o, h, l, c, t + 1, sign, 1e6, 3.0, COST)
                 net_r, _ = outcome(o, h, l, c, t + 1, -sign, 3.5, 3.0, COST)
                 hold_r, _ = outcome(o, h, l, c, t + 1, -sign, 1e6, 3.0, COST)
-                rows.append({"date": d, "stock_id": sid, "side": side, "run_start": hh[i], "run_end": hh[j - 1], "time": hh[t],
+                # Ray 2026-10-14: 回跌一半再進場 — after the exhaustion bar, wait for price to retrace to the midpoint of
+                # the run's high-low range, enter at the next open; also an SL at the run's extreme instead of 3%.
+                run_hi, run_lo = h[i:j].max(), l[i:j].min()
+                mid = (run_hi + run_lo) / 2
+                u_hit = None
+                for u in range(t + 1, min(t + 60, len(bars) - 1)):
+                    if hh[u] > "12:00":
+                        break
+                    if (up and l[u] <= mid) or (dn and h[u] >= mid):
+                        u_hit = u
+                        break
+                m = {"mid_time": None, "entry_pct_mid": np.nan, "entry_price_mid": np.nan, "hi_pct_mid": np.nan, "lo_pct_mid": np.nan,
+                     "net_mid": np.nan, "hold_mid": np.nan, "net_mid_runsl": np.nan, "net_runsl": np.nan}
+                ext = run_hi if up else run_lo
+                sl_run = abs(ext / o[t + 1] - 1) * 100
+                m["net_runsl"] = outcome(o, h, l, c, t + 1, sign, 3.5, max(sl_run, 0.3), COST)[0]
+                if u_hit is not None:
+                    sl_mid = abs(ext / o[u_hit + 1] - 1) * 100
+                    m.update({"mid_time": hh[u_hit], "entry_pct_mid": (o[u_hit + 1] / prev_close - 1) * 100, "entry_price_mid": o[u_hit + 1],
+                              "hi_pct_mid": (hi_so_far[u_hit] / prev_close - 1) * 100, "lo_pct_mid": (lo_so_far[u_hit] / prev_close - 1) * 100,
+                              "net_mid": outcome(o, h, l, c, u_hit + 1, sign, 3.5, 3.0, COST)[0],
+                              "hold_mid": outcome(o, h, l, c, u_hit + 1, sign, 1e6, 3.0, COST)[0],
+                              "net_mid_runsl": outcome(o, h, l, c, u_hit + 1, sign, 3.5, max(sl_mid, 0.3), COST)[0]})
+                rows.append({**m, "date": d, "stock_id": sid, "side": side, "run_start": hh[i], "run_end": hh[j - 1], "time": hh[t],
                              "k": k, "move": move, "run_vol_x": run_avg / max(avg, 1e-9), "rev_vol_x": v[t] / max(run_avg, 1e-9),
                              "bars_after": t - (j - 1), "entry_pct": (o[t + 1] / prev_close - 1) * 100, "entry_price": o[t + 1],
                              "hi_pct": (hi_so_far[t] / prev_close - 1) * 100, "lo_pct": (lo_so_far[t] / prev_close - 1) * 100,
