@@ -45,8 +45,13 @@ def main() -> None:
     e["stock_id"] = e["stock_id"].astype(str)
     e = e[(e["time"] >= "09:10") & (e["time"] <= "12:00")]
     extra = tick_cost(e["entry_price"].to_numpy(float)) - 0.435
-    for c in ("net", "hold", "net_rev", "hold_rev"):
-        e[c] = e[c] - extra
+    for c in ("net", "hold", "net_rev", "hold_rev", "net_runsl"):
+        if c in e:
+            e[c] = e[c] - extra
+    if "net_mid" in e:
+        xm = tick_cost(e["entry_price_mid"].fillna(1).to_numpy(float)) - 0.435
+        for c in ("net_mid", "hold_mid", "net_mid_runsl"):
+            e[c] = e[c] - xm
     print(f"# 連續大量後的無力反轉，2020–26，PR ≥{args.pr:g} 池子（09:10–12:00，每檔每天第一筆，成本 2 跳）\n")
     print(f"事件 {len(e)}；上衝後無力 {(e['side'] == 'short').sum()}，下殺後無力 {(e['side'] == 'long').sum()}\n")
     # control: random M5 row per stock-day in the same pool/window
@@ -88,6 +93,21 @@ def main() -> None:
         r = r.sort_values(["date", "stock_id", "time"]).groupby(["date", "stock_id"]).head(1).copy()
         r["net"], r["hold"] = r["net_rev"], r["hold_rev"]
         print(row(f"  反向（{'做多' if side == 'short' else '做空'}）", r))
+        if "net_mid" in e:
+            v = f.copy()
+            v["net"], v["hold"] = v["net_runsl"], v["hold"]
+            print(row("  同上，停損改在那段高/低點", v))
+            okm = (s["entry_pct_mid"] <= 5) & (s["hi_pct_mid"] < 9.5) if side == "short" else (s["entry_pct_mid"] >= -5) & (s["lo_pct_mid"] > -9.5)
+            w = s[okm & s["net_mid"].notna()].sort_values(["date", "stock_id", "mid_time"]).groupby(["date", "stock_id"]).head(1).copy()
+            w["time"] = w["mid_time"]
+            w["net"], w["hold"] = w["net_mid"], w["hold_mid"]
+            print(row("回跌一半再進場（停損 3%）", w))
+            w2 = w.copy()
+            w2["net"] = w2["net_mid_runsl"]
+            print(row("回跌一半再進場，停損在那段高/低點", w2))
+            print(row("  回跌一半，推進 ≥3%", w[w["move"].abs() >= 3]))
+            print(row("  回跌一半，大量 ≥4 根", w[w["k"] >= 4]))
+            print(f"| （無力 K 後有回到一半的比例：{s['net_mid'].notna().mean() * 100:.0f}%） | | | | | | | | | | | | | | |")
 
 
 if __name__ == "__main__":
