@@ -21,6 +21,10 @@ from scripts.m1_vwap_band import band
 COST = 0.435
 
 
+GRID_TP = (1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 1e6)
+GRID_SL = (1.5, 2.0, 3.0)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", required=True)
@@ -123,6 +127,18 @@ def main() -> None:
                               "net_mid": outcome(o, h, l, c, u_hit + 1, sign, 3.5, 3.0, COST)[0],
                               "hold_mid": outcome(o, h, l, c, u_hit + 1, sign, 1e6, 3.0, COST)[0],
                               "net_mid_runsl": outcome(o, h, l, c, u_hit + 1, sign, 3.5, max(sl_mid, 0.3), COST)[0]})
+                    # Ray 2026-10-14: 再跌的空間有多少 / 降低停利 — favourable & adverse excursion after the mid entry
+                    # (to 13:24, before cost) and a TP x SL grid of raw outcomes (COST applied, exit code kept).
+                    e0, e1 = o[u_hit + 1], len(bars)
+                    seg_h, seg_l = h[u_hit + 1:e1], l[u_hit + 1:e1]
+                    fav = (e0 - seg_l.min()) / e0 * 100 if up else (seg_h.max() - e0) / e0 * 100
+                    adv = (seg_h.max() - e0) / e0 * 100 if up else (e0 - seg_l.min()) / e0 * 100
+                    m.update({"mfe_mid": fav, "mae_mid": adv})
+                    for tp in GRID_TP:
+                        for sl in GRID_SL:
+                            g, gx = outcome(o, h, l, c, u_hit + 1, sign, tp, sl, COST)
+                            m[f"g_{tp:g}_{sl:g}"] = g
+                            m[f"gx_{tp:g}_{sl:g}"] = gx
                 rows.append({**m, "date": d, "stock_id": sid, "side": side, "run_start": hh[i], "run_end": hh[j - 1], "time": hh[t],
                              "k": k, "move": move, "run_vol_x": run_avg / max(avg, 1e-9), "rev_vol_x": v[t] / max(run_avg, 1e-9),
                              "bars_after": t - (j - 1), "entry_pct": (o[t + 1] / prev_close - 1) * 100, "entry_price": o[t + 1],
