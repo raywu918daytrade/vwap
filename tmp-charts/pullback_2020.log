@@ -1,0 +1,25 @@
+2020_01 1
+2020_02 7
+2020_03 29
+2020_04 22
+2020_05 13
+2020_06 4
+/home/runner/work/vwap/vwap/backend/scripts/m1_pullback_scan.py:122: RuntimeWarning: divide by zero encountered in scalar divide
+  "entry_pct": (o[e_a] / prev_close - 1) * 100, "entry_price": o[e_a],
+/home/runner/work/vwap/vwap/backend/scripts/m1_pullback_scan.py:123: RuntimeWarning: divide by zero encountered in scalar divide
+  "hi_pct": (hi_so_far[u] / prev_close - 1) * 100, "lo_pct": (lo_so_far[u] / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/m1_pullback_scan.py:123: RuntimeWarning: invalid value encountered in scalar divide
+  "hi_pct": (hi_so_far[u] / prev_close - 1) * 100, "lo_pct": (lo_so_far[u] / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/m1_pullback_scan.py:140: RuntimeWarning: divide by zero encountered in scalar divide
+  rec.update({"cf_time": hh[cf], "cf_entry_pct": (o[e_b] / prev_close - 1) * 100, "cf_entry_price": o[e_b],
+/home/runner/work/vwap/vwap/backend/scripts/m1_pullback_scan.py:141: RuntimeWarning: divide by zero encountered in scalar divide
+  "cf_hi_pct": (hi_so_far[cf] / prev_close - 1) * 100, "cf_lo_pct": (lo_so_far[cf] / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/m1_pullback_scan.py:141: RuntimeWarning: invalid value encountered in scalar divide
+  "cf_hi_pct": (hi_so_far[cf] / prev_close - 1) * 100, "cf_lo_pct": (lo_so_far[cf] / prev_close - 1) * 100,
+2020_07 32
+2020_08 24
+2020_09 17
+2020_10 20
+2020_11 12
+2020_12 36
+rows 217 dumped 12
