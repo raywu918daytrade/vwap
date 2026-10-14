@@ -13,7 +13,8 @@ import pandas as pd
 
 from scripts.chips_model import half
 from scripts.d1_rebound_short import SPLIT
-from scripts.m1_climax_scan import GRID_SL, GRID_TP
+GRID_TP = (1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 1e6)  # keep in sync with scripts.m1_climax_scan (import needs fastapi)
+GRID_SL = (1.5, 2.0, 3.0)
 from scripts.m1vx_direction import tick_cost
 
 
