@@ -1,4 +1,5 @@
-"""Ray 2026-10-14: 1 根 M1 穿越 N 根 K 線 — one M1 bar whose high/low covers the whole range of the previous N bars.
+"""Ray 2026-10-14: 1 根 M1 穿越 N 根 K 線 — one M1 bar whose BODY (open..close) spans the whole high-low range of
+the previous N bars (it opens on one side of that box and closes beyond the other side), body >= --min-body %.
 Scans the given stock-days (ATR>=5, PR>=90 pool), records every such bar with N >= --min-n, the standard outcomes
 (next-M1-open entry, TP3.5/SL3 and hold-to-close, cost 0.435 baked), and dumps the M1 path (with volume and VWAP)
 of the --dump most recent stock-days that have an event, for charts.
@@ -26,6 +27,7 @@ def main() -> None:
     ap.add_argument("--year", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--min-n", type=int, default=5)
+    ap.add_argument("--min-body", type=float, default=0.5, help="bar body in %% of price, to skip 1-tick boxes")
     ap.add_argument("--dump", type=int, default=0, help="dump M1 paths of the N most recent stock-days with an event")
     args = ap.parse_args()
     want = pd.read_parquet(args.days)
@@ -57,9 +59,12 @@ def main() -> None:
             for i in range(args.min_n + 1, len(bars) - 1):
                 if hh[i] < "09:05" or hh[i] > "13:00":
                     continue
-                # largest N such that this bar's range covers the previous N bars
+                body_lo, body_hi = min(o[i], c[i]), max(o[i], c[i])
+                if (body_hi / body_lo - 1) * 100 < args.min_body:
+                    continue
+                # largest N such that this bar's body spans the previous N bars' high-low range
                 n = 0
-                while n < min(MAX_N, i - 1) and h[i] >= h[i - n - 1] and l[i] <= l[i - n - 1]:
+                while n < min(MAX_N, i - 1) and body_hi >= h[i - n - 1] and body_lo <= l[i - n - 1]:
                     n += 1
                 if n < args.min_n:
                     continue

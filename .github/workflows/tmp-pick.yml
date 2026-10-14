@@ -1,5 +1,5 @@
 name: tmp pick
-# engulf scan 2026
+# engulf scan 2026 v2 (body spans box)
 on:
   push:
     branches: ["claude/**"]
