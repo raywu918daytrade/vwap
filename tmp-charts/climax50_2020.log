@@ -1,0 +1,25 @@
+2020_01 0
+2020_02 13
+2020_03 52
+2020_04 23
+2020_05 15
+2020_06 5
+/home/runner/work/vwap/vwap/backend/scripts/m1_climax_scan.py:121: RuntimeWarning: divide by zero encountered in scalar divide
+  m.update({"mid_time": hh[u_hit], "entry_pct_mid": (o[u_hit + 1] / prev_close - 1) * 100, "entry_price_mid": o[u_hit + 1],
+/home/runner/work/vwap/vwap/backend/scripts/m1_climax_scan.py:122: RuntimeWarning: divide by zero encountered in scalar divide
+  "hi_pct_mid": (hi_so_far[u_hit] / prev_close - 1) * 100, "lo_pct_mid": (lo_so_far[u_hit] / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/m1_climax_scan.py:122: RuntimeWarning: invalid value encountered in scalar divide
+  "hi_pct_mid": (hi_so_far[u_hit] / prev_close - 1) * 100, "lo_pct_mid": (lo_so_far[u_hit] / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/m1_climax_scan.py:128: RuntimeWarning: divide by zero encountered in scalar divide
+  "bars_after": t - (j - 1), "entry_pct": (o[t + 1] / prev_close - 1) * 100, "entry_price": o[t + 1],
+/home/runner/work/vwap/vwap/backend/scripts/m1_climax_scan.py:129: RuntimeWarning: divide by zero encountered in scalar divide
+  "hi_pct": (hi_so_far[t] / prev_close - 1) * 100, "lo_pct": (lo_so_far[t] / prev_close - 1) * 100,
+/home/runner/work/vwap/vwap/backend/scripts/m1_climax_scan.py:129: RuntimeWarning: invalid value encountered in scalar divide
+  "hi_pct": (hi_so_far[t] / prev_close - 1) * 100, "lo_pct": (lo_so_far[t] / prev_close - 1) * 100,
+2020_07 36
+2020_08 25
+2020_09 28
+2020_10 20
+2020_11 20
+2020_12 43
+rows 280 dumped 0
