@@ -54,7 +54,9 @@ def main() -> None:
             rev = {"rev_nearsl": outcome(o, h, l, c, e, -sign, 3.5, max(sl_near, 0.3), COST)[0],
                    "rev_hold_nearsl": outcome(o, h, l, c, e, -sign, 1e6, max(sl_near, 0.3), COST)[0],
                    "rev_tp2_nearsl": outcome(o, h, l, c, e, -sign, 2.0, max(sl_near, 0.3), COST)[0],
-                   "rev_tp15_nearsl": outcome(o, h, l, c, e, -sign, 1.5, max(sl_near, 0.3), COST)[0]}
+                   "rev_tp15_nearsl": outcome(o, h, l, c, e, -sign, 1.5, max(sl_near, 0.3), COST)[0],
+                   "rev_tp3_nearsl": outcome(o, h, l, c, e, -sign, 3.0, max(sl_near, 0.3), COST)[0],
+                   "rev_tp25_nearsl": outcome(o, h, l, c, e, -sign, 2.5, max(sl_near, 0.3), COST)[0]}
         return {**rev,"net": outcome(o, h, l, c, e, sign, 3.5, 3.0, COST)[0], "exit": outcome(o, h, l, c, e, sign, 3.5, 3.0, COST)[1],
                 "hold": outcome(o, h, l, c, e, sign, 1e6, 3.0, COST)[0],
                 "net_farsl": outcome(o, h, l, c, e, sign, 3.5, max(sl_far, 0.3), COST)[0],
@@ -124,10 +126,13 @@ def main() -> None:
                 sign = 1 if up else -1  # "with the run"
                 far = run_lo if up else run_hi
                 near = run_hi if up else run_lo
+                ext_i = i + int(np.argmax(h[i:j])) if up else i + int(np.argmin(l[i:j]))
+                hi5_vol, open5_vol = v[max(ext_i - 4, 0):ext_i + 1].sum(), v[:5].sum()
                 e_a = u + 1
                 rec = {"date": d, "stock_id": sid, "run_dir": "up" if up else "dn", "run_start": hh[i], "run_end": hh[j - 1],
                        "touch": hh[u], "k": k, "move": move, "run_vol_x": run_avg / max(avg, 1e-9), "pb_bars": u - j + 1,
                        "pb_vol_x": pb_vol_x, "touch_vol_x": v[u] / max(run_avg, 1e-9),
+                       "hi5_vol": hi5_vol, "open5_vol": open5_vol, "hi5_x_open5": hi5_vol / max(open5_vol, 1e-9),
                        "entry_pct": (o[e_a] / prev_close - 1) * 100, "entry_price": o[e_a],
                        "hi_pct": (hi_so_far[u] / prev_close - 1) * 100, "lo_pct": (lo_so_far[u] / prev_close - 1) * 100,
                        "vs_vwap": (c[u] / vwap[u] - 1) * 100, "time": hh[u],
@@ -144,7 +149,8 @@ def main() -> None:
                 rec.update({"cf_time": None, "cf_entry_pct": np.nan, "cf_entry_price": np.nan, "cf_hi_pct": np.nan, "cf_lo_pct": np.nan, "cf_sl_far": np.nan,
                             "cf_sl_near": np.nan,
                             **{f"cf_{x}": np.nan for x in ("net", "exit", "hold", "net_farsl", "hold_farsl", "net_rev", "hold_rev",
-                                                           "rev_nearsl", "rev_hold_nearsl", "rev_tp2_nearsl", "rev_tp15_nearsl")}})
+                                                           "rev_nearsl", "rev_hold_nearsl", "rev_tp2_nearsl", "rev_tp15_nearsl",
+                                                           "rev_tp3_nearsl", "rev_tp25_nearsl")}})
                 if cf is not None:
                     e_b = cf + 1
                     slf, sln = abs(far / o[e_b] - 1) * 100, abs(near / o[e_b] - 1) * 100

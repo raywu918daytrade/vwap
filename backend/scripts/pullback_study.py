@@ -18,7 +18,7 @@ def prep(e: pd.DataFrame, pre: str) -> pd.DataFrame:
     """Rows with the given entry prefix ('' touch / 'cf_' confirm), cost at 2 ticks, standard columns."""
     f = e[e[f"{pre}net"].notna()].copy()
     extra = tick_cost(f[f"{pre}entry_price"].to_numpy(float)) - 0.435
-    money = ("net", "hold", "net_farsl", "hold_farsl", "net_rev", "hold_rev", "rev_nearsl", "rev_hold_nearsl", "rev_tp2_nearsl", "rev_tp15_nearsl")
+    money = ("net", "hold", "net_farsl", "hold_farsl", "net_rev", "hold_rev", "rev_nearsl", "rev_hold_nearsl", "rev_tp2_nearsl", "rev_tp15_nearsl", "rev_tp3_nearsl", "rev_tp25_nearsl")
     for c in money + ("exit", "entry_pct", "hi_pct", "lo_pct", "sl_far", "sl_near"):
         if f"{pre}{c}" in f:
             f[c] = f[f"{pre}{c}"] - (extra if c in money else 0)
@@ -79,12 +79,23 @@ def main() -> None:
                     g = f.copy()
                     g["net"], g["hold"] = g["rev_nearsl"], g["rev_hold_nearsl"]
                     print(row(f"  停損改在那段{'高點' if side == 'short' else '低點'}（距離中位數 {g['sl_near'].median():.2f}%）", g))
-                    for tp, c in (("2", "rev_tp2_nearsl"), ("1.5", "rev_tp15_nearsl")):
+                    for tp, c in (("3", "rev_tp3_nearsl"), ("2.5", "rev_tp25_nearsl"), ("2", "rev_tp2_nearsl"), ("1.5", "rev_tp15_nearsl")):
                         g2 = g.copy()
                         g2["net"] = g2[c]
                         print(row(f"    同上，停利 {tp}%", g2))
                     print(row("  同上（停損在高/低點），10:00 後", g[g["time"] >= "10:00"]))
                     print(row("  同上（停損在高/低點），推進 ≥3%", g[g["move"].abs() >= 3]))
+                    if "hi5_x_open5" in g:
+                        gv = g[g["hi5_x_open5"] > 1]
+                        print(row("  同上（停損在高/低點），高點前 5 根量 > 開盤 5 根量", gv))
+                        for tp, c in (("3", "rev_tp3_nearsl"), ("2.5", "rev_tp25_nearsl"), ("2", "rev_tp2_nearsl")):
+                            g2 = gv.copy()
+                            g2["net"] = g2[c]
+                            print(row(f"    同上，停利 {tp}%", g2))
+                        print(row("    同上，高點前 5 根量 > 開盤 5 根量 2 倍", g[g["hi5_x_open5"] > 2]))
+                        print(row("    同上，10:00 後", gv[gv["time"] >= "10:00"]))
+                        g3 = f[f["hi5_x_open5"] > 1].copy()
+                        print(row("  高點前 5 根量 > 開盤 5 根量，停損 3%", g3))
                 if side == with_side:
                     g = f.copy()
                     g["net"], g["hold"] = g["net_farsl"], g["hold_farsl"]
