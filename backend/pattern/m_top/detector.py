@@ -198,13 +198,13 @@ class MTopDetector(BasePatternDetector):
             # 【硬性條件 1】：四段時間對稱性
             times = [t1, t2, t3, t4]
             t_min, t_max = min(times), max(times)
-            if t_max / t_min > 4.0:
+            if t_max / t_min > getattr(self, "max_sym_ratio", 4.0):
                 continue
 
             # 【硬性條件 2】：四段振幅對稱性
             amps = [a1, a2, a3, a4]
             a_min, a_max = min(amps), max(amps)
-            if a_min <= 0 or a_max / a_min > 4.0:
+            if a_min <= 0 or a_max / a_min > getattr(self, "max_sym_ratio", 4.0):
                 continue
 
             # 【硬性條件 3】：結束點價格必須低於最高點

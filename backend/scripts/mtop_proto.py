@@ -11,9 +11,16 @@ import pandas as pd
 
 from pattern.m_top.detector import MTopDetector
 
-# D1 project defaults (pattern_api "m_top": MTopDetector()) except depth capped at 5% (Ray: M頭區間不要超過5%).
-DET = MTopDetector(window=3, max_top_diff_pct=0.05, min_depth_pct=0.03, max_depth_pct=0.05,
+# D1 project defaults (pattern_api "m_top": MTopDetector()) with tighter tolerances for M1 (Ray 2026-10-16:
+# M1 swings are smaller than D1, so 容錯率要調小): two tops within 1% (D1 5%), neckline depth 1.5-5% (D1 3-30%),
+# four-segment time/amplitude symmetry within 2.5x (D1 4x, see max_sym_ratio patch below).
+import os
+TOP_DIFF = float(os.environ.get("MTOP_TOP_DIFF", 0.01))
+MIN_DEPTH = float(os.environ.get("MTOP_MIN_DEPTH", 0.015))
+MAX_SYM = float(os.environ.get("MTOP_MAX_SYM", 2.5))
+DET = MTopDetector(window=3, max_top_diff_pct=TOP_DIFF, min_depth_pct=MIN_DEPTH, max_depth_pct=0.05,
                    min_top_dist=5, max_top_dist=60, min_candles=20, max_candles=120)
+DET.max_sym_ratio = MAX_SYM
 MIN_SCORE = 60.0  # same threshold as the D1 scan API default
 
 
@@ -65,4 +72,4 @@ if __name__ == "__main__":
     if len(df):
         print(df[["depth_pct", "diff_pct", "rise_pct", "score"]].describe().round(2).to_string())
         print("below vwap at neckline break:", round(df["below_vwap"].mean(), 2))
-        df.to_parquet(K + "mtop_d1def_proto.parquet", index=False)
+        df.to_parquet(K + os.environ.get("MTOP_OUT", "mtop_d1def_proto.parquet"), index=False)
