@@ -96,6 +96,17 @@ def main() -> None:
                         print(row("    同上，10:00 後", gv[gv["time"] >= "10:00"]))
                         g3 = f[f["hi5_x_open5"] > 1].copy()
                         print(row("  高點前 5 根量 > 開盤 5 根量，停損 3%", g3))
+                        # Ray 2026-10-16 「反了，我是指高前要小於開盤」
+                        gl = g[g["hi5_x_open5"] < 1]
+                        print(row("  同上（停損在高/低點），高點前 5 根量 < 開盤 5 根量", gl))
+                        for tp, c in (("3", "rev_tp3_nearsl"), ("2.5", "rev_tp25_nearsl"), ("2", "rev_tp2_nearsl")):
+                            g2 = gl.copy()
+                            g2["net"] = g2[c]
+                            print(row(f"    同上，停利 {tp}%", g2))
+                        print(row("    同上，高點前 5 根量 < 開盤 5 根量一半", g[g["hi5_x_open5"] < 0.5]))
+                        print(row("    同上，10:00 後", gl[gl["time"] >= "10:00"]))
+                        g4 = f[f["hi5_x_open5"] < 1].copy()
+                        print(row("  高點前 5 根量 < 開盤 5 根量，停損 3%", g4))
                 if side == with_side:
                     g = f.copy()
                     g["net"], g["hold"] = g["net_farsl"], g["hold_farsl"]
