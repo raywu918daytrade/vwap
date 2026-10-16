@@ -1,0 +1,37 @@
+2021_01 days 877 mtops 37
+2021_02 days 430 mtops 9
+2021_03 days 537 mtops 11
+2021_04 days 738 mtops 40
+multiprocessing.pool.RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.13.16/x64/lib/python3.13/multiprocessing/pool.py", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ~~~~^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.13.16/x64/lib/python3.13/multiprocessing/pool.py", line 48, in mapstar
+    return list(map(*args))
+  File "/home/runner/work/vwap/vwap/backend/scripts/m1_mtop_d1_scan.py", line 49, in one
+    r = DET.detect(df.iloc[:t + 1], sid, "1m")
+  File "/home/runner/work/vwap/vwap/backend/pattern/m_top/detector.py", line 122, in detect
+    if 0.5 <= (a1 / neckline_depth) <= 2.2:
+               ~~~^~~~~~~~~~~~~~~~
+ZeroDivisionError: float division by zero
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/vwap/vwap/backend/scripts/m1_mtop_d1_scan.py", line 146, in <module>
+    main()
+    ~~~~^^
+  File "/home/runner/work/vwap/vwap/backend/scripts/m1_mtop_d1_scan.py", line 131, in main
+    for res in pool.imap_unordered(one, jobs, chunksize=8):
+               ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.13.16/x64/lib/python3.13/multiprocessing/pool.py", line 451, in <genexpr>
+    return (item for chunk in result for item in chunk)
+                              ^^^^^^
+  File "/opt/hostedtoolcache/Python/3.13.16/x64/lib/python3.13/multiprocessing/pool.py", line 873, in next
+    raise value
+ZeroDivisionError: float division by zero
