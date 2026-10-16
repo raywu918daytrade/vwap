@@ -84,9 +84,24 @@ def main() -> None:
             am.axhline(0, color="gray", linewidth=0.6)
             am.axvline(t, color="gray", linewidth=0.8, linestyle="--")
             am.set_ylabel("MACD hist")
-            if "prior_hi" in r and pd.notna(r["prior_hi"]):
-                ax.axhline(float(r["prior_hi"]), color="orange", linewidth=0.8, linestyle="--", label=f"前高 {r['prior_hi']:g}")
-                am.set_title(f"前高柱峰 {r['prior_hist']:.3f} → 這波柱峰 {r['cur_hist']:.3f}（{r['div']}）", fontsize=9, loc="left")
+            # divergence line: price peaks p1 -> p2 and histogram peaks around them
+            p1 = p2 = None
+            times = b["time"].tolist()
+            if "p1_time" in r and isinstance(r["p1_time"], str) and r["p1_time"] in times and r["p2_time"] in times:
+                p1, p2 = times.index(r["p1_time"]), times.index(r["p2_time"])
+            elif "run_start" in r and r["run_start"] in times:
+                rs = times.index(r["run_start"])
+                if rs >= 6:
+                    p1 = int(np.argmax(h[:rs]))
+                    p2 = rs + int(np.argmax(h[rs:t + 1]))
+            if p1 is not None:
+                q1 = max(0, p1 - 3) + int(np.argmax(hist[max(0, p1 - 3):p1 + 4]))
+                q2 = max(0, p2 - 3) + int(np.argmax(hist[max(0, p2 - 3):p2 + 4]))
+                lab = r["div"] if "div" in r else ""
+                ax.plot([p1, p2], [h[p1], h[p2]], color="orange", linewidth=1.6, marker="v", markersize=6,
+                        label=f"高點 {times[p1]} {h[p1]:g} → {times[p2]} {h[p2]:g}")
+                am.plot([q1, q2], [hist[q1], hist[q2]], color="orange", linewidth=1.6, marker="o", markersize=5)
+                am.set_title(f"柱峰 {hist[q1]:.3f} → {hist[q2]:.3f}（{lab}）", fontsize=9, loc="left")
         step = max(1, len(b) // 12)
         (am if args.macd else av).set_xticks(x[::step], b["time"].to_numpy()[::step])
         ax.legend(loc="best", fontsize=9)
