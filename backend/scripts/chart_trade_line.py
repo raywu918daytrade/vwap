@@ -33,6 +33,7 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--stop", default="sl_near", help="column with the stop distance in %, or a number")
     ap.add_argument("--tp", type=float, default=3.5)
+    ap.add_argument("--tp-mult", type=float, default=0, help="take-profit = this x the stop distance (overrides --tp)")
     args = ap.parse_args()
     import matplotlib
     matplotlib.use("Agg")
@@ -56,7 +57,9 @@ def main() -> None:
         i = t + 1
         sign = 1 if r["side"] == "long" else -1
         sl = float(r[args.stop]) if args.stop in r else float(args.stop)
-        j, px, how = exit_point(o, h, l, c, i, sign, args.tp, max(sl, 0.3))
+        sl = max(sl, 0.3)
+        tp = args.tp_mult * sl if args.tp_mult else args.tp
+        j, px, how = exit_point(o, h, l, c, i, sign, tp, sl)
         ret = sign * (px - o[i]) / o[i] * 100
         fig, (ax, av) = plt.subplots(2, 1, figsize=(13, 7), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
         up = c >= o
@@ -66,7 +69,7 @@ def main() -> None:
         ax.axhline(float(b["prev_close"].iloc[0]), color="gray", linewidth=0.8, linestyle=":", label="prev close")
         col = "green" if ret > 0 else "red"
         ax.plot([i, j], [o[i], px], color=col, linewidth=2.2, marker="o", markersize=6, zorder=5,
-                label=f"{'short' if sign < 0 else 'long'} {b['time'][i]} {o[i]:g} → {b['time'][j]} {px:g} ({how} {ret:+.2f}%)")
+                label=f"{'short' if sign < 0 else 'long'} {b['time'][i]} {o[i]:g} → {b['time'][j]} {px:g} ({how} {ret:+.2f}%, TP {tp:.2f}% SL {sl:.2f}%)")
         av.bar(x, v, color=np.where(up, "tab:red", "tab:green"), width=0.8, alpha=0.7)
         av.set_ylabel("volume")
         step = max(1, len(b) // 12)
