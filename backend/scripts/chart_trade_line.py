@@ -96,11 +96,15 @@ def main() -> None:
                     p2 = rs + int(np.argmax(h[rs:t + 1]))
             if p1 is not None and "depth_pct" in r:
                 # M top: peak -> trough -> peak, neckline at the trough, break bar marked
-                tr = p1 + int(np.argmin(l[p1:p2 + 1]))
-                ax.plot([p1, tr, p2], [h[p1], l[tr], h[p2]], color="orange", linewidth=2.2, marker="o", markersize=6, zorder=6,
+                tr = times.index(r["tr_time"]) if "tr_time" in r and r["tr_time"] in times else p1 + int(np.argmin(l[p1:p2 + 1]))
+                xs, ys = [p1, tr, p2], [h[p1], l[tr], h[p2]]
+                if "l0_time" in r and isinstance(r["l0_time"], str) and r["l0_time"] in times:
+                    l0 = times.index(r["l0_time"])
+                    xs, ys = [l0] + xs, [l[l0]] + ys
+                ax.plot(xs, ys, color="orange", linewidth=2.2, marker="o", markersize=6, zorder=6,
                         label=f"M 頭 {times[p1]} {h[p1]:g} → {times[tr]} {l[tr]:g} → {times[p2]} {h[p2]:g}")
                 ax.axhline(l[tr], color="orange", linewidth=0.9, linestyle=":", label=f"頸線 {l[tr]:g}")
-                ax.axvline(t, color="gray", linewidth=0.9, linestyle="--", label=f"跌破 VWAP {times[t]}")
+                ax.axvline(t, color="gray", linewidth=0.9, linestyle="--", label=f"{r['brk_label'] if 'brk_label' in r else '跌破 VWAP'} {times[t]}")
                 am.axvline(t, color="gray", linewidth=0.8, linestyle="--")
                 am.set_title("", loc="left")
                 p1 = None
