@@ -109,6 +109,8 @@ class MTopDetector(BasePatternDetector):
 
             ph1, pl, ph2 = p_h1.price, p_l.price, p_h2.price
             neckline_depth = max(ph1, ph2) - pl
+            if neckline_depth <= 0:
+                continue  # flat bars (e.g. limit-locked): no valley between the tops
 
             # 【優化 L0 搜尋】：往回找價格與頸線 L 最接近的低點
             best_l0 = p_l0_raw
