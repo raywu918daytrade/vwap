@@ -95,8 +95,11 @@ def main() -> None:
                     p1 = int(np.argmax(h[:rs]))
                     p2 = rs + int(np.argmax(h[rs:t + 1]))
             if p1 is not None:
-                q1 = max(0, p1 - 3) + int(np.argmax(hist[max(0, p1 - 3):p1 + 4]))
-                q2 = max(0, p2 - 3) + int(np.argmax(hist[max(0, p2 - 3):p2 + 4]))
+                if "q1_time" in r and isinstance(r["q1_time"], str) and r["q1_time"] in times and r["q2_time"] in times:
+                    q1, q2 = times.index(r["q1_time"]), times.index(r["q2_time"])
+                else:
+                    q1 = max(0, p1 - 3) + int(np.argmax(hist[max(0, p1 - 3):p1 + 4]))
+                    q2 = max(0, p2 - 3) + int(np.argmax(hist[max(0, p2 - 3):p2 + 4]))
                 lab = r["div"] if "div" in r else ""
                 ax.plot([p1, p2], [h[p1], h[p2]], color="orange", linewidth=1.6, marker="v", markersize=6,
                         label=f"高點 {times[p1]} {h[p1]:g} → {times[p2]} {h[p2]:g}")

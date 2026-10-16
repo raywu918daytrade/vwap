@@ -16,6 +16,7 @@ from data.adjustment_query import load_pattern_day
 from scripts.build_feature_table import outcome
 from scripts.build_feature_table_long import atr_table, load_m1_month, months
 from scripts.m1_vwap_band import band
+from scripts.macd_rgr import rgr_divergence
 
 COST = 0.435
 W = 3
@@ -95,6 +96,7 @@ def main() -> None:
                     p1, p2, hp1, hp2, lab = -1, sw[0], np.nan, hist[max(0, sw[0] - W):sw[0] + W + 1].max(), "one"
                 else:
                     continue
+                rl, r1, r2, rq1, rq2 = rgr_divergence(h, hist, t)
                 e = t + 1
                 near = h[p2]
                 sl_near = (near / o[e] - 1) * 100
@@ -103,15 +105,23 @@ def main() -> None:
                        "p2_time": hh[p2], "p2_hi": near, "p2_hist": hp2, "bars_since_p2": t - p2,
                        "hist_t": hist[t], "entry_pct": (o[e] / prev_close - 1) * 100, "entry_price": o[e],
                        "hi_pct": (hi_so_far[t] / prev_close - 1) * 100, "vs_open": (o[e] / o[0] - 1) * 100,
-                       "sl_near": sl_near, "prev_close": prev_close}
+                       "sl_near": sl_near, "prev_close": prev_close,
+                       "rgr": rl, "r1_time": hh[r1] if r1 >= 0 else "", "r1_hi": h[r1] if r1 >= 0 else np.nan,
+                       "r2_time": hh[r2] if r2 >= 0 else "", "r2_hi": h[r2] if r2 >= 0 else np.nan,
+                       "rq1_time": hh[rq1] if rq1 >= 0 else "", "rq2_time": hh[rq2] if rq2 >= 0 else "",
+                       "sl_r2": (h[r2] / o[e] - 1) * 100 if r2 >= 0 else np.nan}
                 net, ex = outcome(o, h, l, c, e, -1, 3.5, 3.0, COST)
                 rec.update({"net": net, "exit": ex, "hold": outcome(o, h, l, c, e, -1, 1e6, 3.0, COST)[0]})
                 sn = max(sl_near, 0.3)
                 rec["rr1_nearsl"], rec["exit_rr1"] = outcome(o, h, l, c, e, -1, sn, sn, COST)
                 rec["tp35_nearsl"] = outcome(o, h, l, c, e, -1, 3.5, sn, COST)[0]
                 rec["hold_nearsl"] = outcome(o, h, l, c, e, -1, 1e6, sn, COST)[0]
+                if r2 >= 0:
+                    s2 = max(rec["sl_r2"], 0.3)
+                    rec["rr1_r2"], rec["exit_rr1_r2"] = outcome(o, h, l, c, e, -1, s2, s2, COST)
+                    rec["tp35_r2"] = outcome(o, h, l, c, e, -1, 3.5, s2, COST)[0]
                 rows.append(rec)
-                found = found or lab == "div"
+                found = found or lab == "div" or rl == "div"
             if found and args.dump:
                 paths[(d, sid)] = pd.DataFrame({"stock_id": sid, "date": d, "time": hh, "o": o, "h": h, "l": l, "c": c, "v": v,
                                                 "vwap": vwap, "up": vwap + 2 * sd, "dn": vwap - 2 * sd, "prev_close": prev_close})
