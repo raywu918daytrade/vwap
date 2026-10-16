@@ -102,13 +102,20 @@ def main() -> None:
     ap.add_argument("--dump", type=int, default=0)
     ap.add_argument("--procs", type=int, default=4)
     ap.add_argument("--k", type=float, default=1.0, help="two-top tolerance in M1 bar ranges")
+    ap.add_argument("--part", default="", help="i/n: process only the i-th of n slices of the year's stock-days")
     args = ap.parse_args()
     global K_BARS
     K_BARS = args.k
     want = pd.read_parquet(args.days)
     want["stock_id"] = want["stock_id"].astype(str)
     want = want[want["date"].str[:4] == args.year]
+    if args.part:
+        i, n = (int(x) for x in args.part.split("/"))
+        want = want.sort_values(["date", "stock_id"]).iloc[i::n]
     keys = set(zip(want["stock_id"], want["date"]))
+    extra = {}
+    if "day_atr" in want.columns:
+        extra = {(s, d): (a, p) for s, d, a, p in zip(want["stock_id"], want["date"], want["day_atr"], want["vol5_pr"])}
     ids = {s for s, _ in keys}
     day = load_pattern_day(start_date=f"{int(args.year) - 1}-11-01", end_date=f"{args.year}-12-31")
     day["stock_id"] = day["stock_id"].astype(str)
@@ -132,6 +139,8 @@ def main() -> None:
                 if res is None:
                     continue
                 rec, path = res
+                if extra:
+                    rec["day_atr"], rec["vol5_pr"] = extra.get((rec["stock_id"], rec["date"]), (np.nan, np.nan))
                 rows.append(rec)
                 paths[(rec["date"], rec["stock_id"])] = path
             print(stem, "days", len(jobs), "mtops", len(rows) - n0, flush=True)
