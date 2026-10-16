@@ -101,8 +101,13 @@ def main() -> None:
                 if "l0_time" in r and isinstance(r["l0_time"], str) and r["l0_time"] in times:
                     l0 = times.index(r["l0_time"])
                     xs, ys = [l0] + xs, [l[l0]] + ys
-                ax.plot(xs, ys, color="orange", linewidth=2.2, marker="o", markersize=6, zorder=6,
-                        label=f"M 頭 {times[p1]} {h[p1]:g} → {times[tr]} {l[tr]:g} → {times[p2]} {h[p2]:g}")
+                lab = f"M 頭 {times[p1]} {h[p1]:g} → {times[tr]} {l[tr]:g} → {times[p2]} {h[p2]:g}"
+                if "d_time" in r and isinstance(r["d_time"], str) and r["d_time"] in times:
+                    # 4th leg, as the D1 detector draws it: H2 -> D (close at the breakdown point)
+                    di = times.index(r["d_time"])
+                    xs, ys = xs + [di], ys + [float(r["d_price"])]
+                    lab += f" → {times[di]} {float(r['d_price']):g}"
+                ax.plot(xs, ys, color="orange", linewidth=2.2, marker="o", markersize=6, zorder=6, label=lab)
                 ax.axhline(l[tr], color="orange", linewidth=0.9, linestyle=":", label=f"頸線 {l[tr]:g}")
                 ax.axvline(t, color="gray", linewidth=0.9, linestyle="--", label=f"{r['brk_label'] if 'brk_label' in r else '跌破 VWAP'} {times[t]}")
                 am.axvline(t, color="gray", linewidth=0.8, linestyle="--")

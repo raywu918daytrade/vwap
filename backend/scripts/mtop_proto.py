@@ -41,7 +41,7 @@ def one(args):
         e = t + 1
         m_hi = max(h1.price, h2.price)
         out.append({"date": d, "stock_id": sid, "side": "short", "time": hh[t], "l0_time": l0.date, "p1_time": h1.date, "tr_time": lo.date,
-                    "p2_time": h2.date, "p1_hi": h1.price, "p2_hi": h2.price, "neck": lo.price, "m_hi": m_hi, "score": r.score,
+                    "p2_time": h2.date, "d_time": r.lines[3].end_date, "d_price": r.lines[3].end_price, "p1_hi": h1.price, "p2_hi": h2.price, "neck": lo.price, "m_hi": m_hi, "score": r.score,
                     "depth_pct": r.details["neckline_depth_pct"], "diff_pct": r.details["top_diff_pct"], "below_vwap": bool(c[t] < vw[t]),
                     "entry_price": o[e], "sl_near": (m_hi / o[e] - 1) * 100, "prev_close": float(b["prev_close"][0]),
                     "entry_pct": (o[e] / b["prev_close"][0] - 1) * 100, "hi_pct": (h[:t + 1].max() / b["prev_close"][0] - 1) * 100,
