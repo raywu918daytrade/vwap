@@ -18,6 +18,7 @@ import os
 TOP_DIFF = float(os.environ.get("MTOP_TOP_DIFF", 0.01))
 MIN_DEPTH = float(os.environ.get("MTOP_MIN_DEPTH", 0.015))
 MAX_SYM = float(os.environ.get("MTOP_MAX_SYM", 2.5))
+K_BARS = float(os.environ.get("MTOP_K_BARS", 0))  # >0: top tolerance = K_BARS x mean M1 bar range (Ray 2026-10-16 誤差用動態的)
 DET = MTopDetector(window=3, max_top_diff_pct=TOP_DIFF, min_depth_pct=MIN_DEPTH, max_depth_pct=0.05,
                    min_top_dist=5, max_top_dist=60, min_candles=20, max_candles=120)
 DET.max_sym_ratio = MAX_SYM
@@ -36,6 +37,9 @@ def one(args):
             continue
         if hh[t] > "12:00":
             break
+        if K_BARS > 0:
+            w = df.iloc[max(0, t - 119):t + 1]
+            DET.max_top_diff_pct = max(1e-4, K_BARS * float((w["high"] - w["low"]).mean()) / float(w["high"].max()))
         r = DET.detect(df.iloc[:t + 1], sid, "1m")
         if r is None or r.score < MIN_SCORE or r.details["breakout_status"] != "breakout_down":
             continue
