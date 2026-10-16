@@ -46,6 +46,7 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--years", default="2024-2026")
     ap.add_argument("--pick", default="")
+    ap.add_argument("--no-cap", action="store_true", help="drop the entry <= prev close +5% cap (keep the no-limit-up rule)")
     args = ap.parse_args()
     y0, y1 = (int(x) for x in args.years.split("-"))
     rows = []
@@ -54,7 +55,8 @@ def main() -> None:
         p = pd.read_parquet(K + f"mtopd1_k{args.k}_{y}_paths.parquet")
         e["stock_id"] = e["stock_id"].astype(str)
         p["stock_id"] = p["stock_id"].astype(str)
-        e = e[(e["time"] >= "09:10") & (e["time"] <= "12:00") & (e["entry_pct"] <= 5) & (e["hi_pct"] < 9.5)]
+        cap = 1e9 if args.no_cap else 5
+        e = e[(e["time"] >= "09:10") & (e["time"] <= "12:00") & (e["entry_pct"] <= cap) & (e["hi_pct"] < 9.5)]
         e = e.sort_values(["date", "stock_id", "time"]).groupby(["date", "stock_id"]).head(1)
         g = p.groupby(["date", "stock_id"])
         for _, r in e.iterrows():
@@ -78,7 +80,7 @@ def main() -> None:
                 cost = tick_cost(np.array([o[i]]))[0]
                 hi_sofar = h[:i].max()
                 bounce = h[t + 1:u + 1].max() if u > t else h[u]
-                if (o[i] / pc - 1) * 100 > 5 or (hi_sofar / pc - 1) * 100 >= 9.5:
+                if (o[i] / pc - 1) * 100 > cap or (hi_sofar / pc - 1) * 100 >= 9.5:
                     rec["skip"] = "進場時漲幅超標"
                 else:
                     sl_m = max((m_hi / o[i] - 1) * 100, 0.3)
@@ -131,7 +133,7 @@ def main() -> None:
             continue
         hv = gg.groupby(half(gg["date"]))["rr1_m"].mean()
         print(f"| {lab} | {len(gg)} | {(gg['rr1_m'] > 0).mean() * 100:.0f}% | {gg['rr1_m'].mean():+.3f}% | {(hv > 0).sum()}/{len(hv)} |")
-    df.to_parquet(K + f"mtop_macd_entry_k{args.k}_{y0}-{y1}.parquet", index=False)
+    df.to_parquet(K + f"mtop_macd_entry_k{args.k}_{y0}-{y1}{'_nocap' if args.no_cap else ''}.parquet", index=False)
     if args.pick:
         s = ok.sort_values("date", ascending=False)
         tp10 = s[s["exit_new"] == "TP"].head(10).assign(tag="tp")
