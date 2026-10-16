@@ -112,6 +112,11 @@ def main() -> None:
                 ax.axvline(t, color="gray", linewidth=0.9, linestyle="--", label=f"{r['brk_label'] if 'brk_label' in r else '跌破 VWAP'} {times[t]}")
                 am.axvline(t, color="gray", linewidth=0.8, linestyle="--")
                 am.set_title("", loc="left")
+                if "q1_time" in r and isinstance(r["q1_time"], str) and r["q1_time"] in times and r["q2_time"] in times:
+                    # red-green-red histogram divergence at the neckline break: join the two red-block peaks
+                    q1, q2 = times.index(r["q1_time"]), times.index(r["q2_time"])
+                    am.plot([q1, q2], [hist[q1], hist[q2]], color="orange", linewidth=1.6, marker="o", markersize=5)
+                    am.set_title(f"柱峰 {hist[q1]:.3f} → {hist[q2]:.3f}（紅綠紅頂背離）", fontsize=9, loc="left")
                 p1 = None
             if p1 is not None:
                 if "q1_time" in r and isinstance(r["q1_time"], str) and r["q1_time"] in times and r["q2_time"] in times:
