@@ -33,11 +33,13 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--stop", default="sl_near", help="column with the stop distance in %, or a number")
     ap.add_argument("--tp", type=float, default=3.5)
+    ap.add_argument("--macd", action="store_true", help="add an M1 MACD(12,26,9) histogram panel")
     ap.add_argument("--tp-mult", type=float, default=0, help="take-profit = this x the stop distance (overrides --tp)")
     args = ap.parse_args()
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    matplotlib.rcParams["font.family"] = ["WenQuanYi Zen Hei", "DejaVu Sans"]
 
     paths = pd.read_parquet(args.paths)
     pk = pd.read_parquet(args.pick)
@@ -61,7 +63,10 @@ def main() -> None:
         tp = args.tp_mult * sl if args.tp_mult else args.tp
         j, px, how = exit_point(o, h, l, c, i, sign, tp, sl)
         ret = sign * (px - o[i]) / o[i] * 100
-        fig, (ax, av) = plt.subplots(2, 1, figsize=(13, 7), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
+        if args.macd:
+            fig, (ax, av, am) = plt.subplots(3, 1, figsize=(13, 8.5), sharex=True, gridspec_kw={"height_ratios": [3, 1, 1]})
+        else:
+            fig, (ax, av) = plt.subplots(2, 1, figsize=(13, 7), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
         up = c >= o
         ax.vlines(x, l, h, color="black", linewidth=0.5)
         ax.bar(x, np.abs(c - o).clip(min=1e-6), bottom=np.minimum(o, c), color=np.where(up, "tab:red", "tab:green"), width=0.8)
@@ -72,8 +77,18 @@ def main() -> None:
                 label=f"{'short' if sign < 0 else 'long'} {b['time'][i]} {o[i]:g} → {b['time'][j]} {px:g} ({how} {ret:+.2f}%, TP {tp:.2f}% SL {sl:.2f}%)")
         av.bar(x, v, color=np.where(up, "tab:red", "tab:green"), width=0.8, alpha=0.7)
         av.set_ylabel("volume")
+        if args.macd:
+            from scripts.macd_div_study import macd_hist
+            hist = macd_hist(c)
+            am.bar(x, hist, color=np.where(hist >= 0, "tab:red", "tab:green"), width=0.8)
+            am.axhline(0, color="gray", linewidth=0.6)
+            am.axvline(t, color="gray", linewidth=0.8, linestyle="--")
+            am.set_ylabel("MACD hist")
+            if "prior_hi" in r and pd.notna(r["prior_hi"]):
+                ax.axhline(float(r["prior_hi"]), color="orange", linewidth=0.8, linestyle="--", label=f"前高 {r['prior_hi']:g}")
+                am.set_title(f"前高柱峰 {r['prior_hist']:.3f} → 這波柱峰 {r['cur_hist']:.3f}（{r['div']}）", fontsize=9, loc="left")
         step = max(1, len(b) // 12)
-        av.set_xticks(x[::step], b["time"].to_numpy()[::step])
+        (am if args.macd else av).set_xticks(x[::step], b["time"].to_numpy()[::step])
         ax.legend(loc="best", fontsize=9)
         ax.set_title(f"{sid} {d}")
         fig.tight_layout()
