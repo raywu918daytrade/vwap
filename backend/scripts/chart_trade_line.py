@@ -94,6 +94,16 @@ def main() -> None:
                 if rs >= 6:
                     p1 = int(np.argmax(h[:rs]))
                     p2 = rs + int(np.argmax(h[rs:t + 1]))
+            if p1 is not None and "depth_pct" in r:
+                # M top: peak -> trough -> peak, neckline at the trough, break bar marked
+                tr = p1 + int(np.argmin(l[p1:p2 + 1]))
+                ax.plot([p1, tr, p2], [h[p1], l[tr], h[p2]], color="orange", linewidth=2.2, marker="o", markersize=6, zorder=6,
+                        label=f"M 頭 {times[p1]} {h[p1]:g} → {times[tr]} {l[tr]:g} → {times[p2]} {h[p2]:g}")
+                ax.axhline(l[tr], color="orange", linewidth=0.9, linestyle=":", label=f"頸線 {l[tr]:g}")
+                ax.axvline(t, color="gray", linewidth=0.9, linestyle="--", label=f"跌破 VWAP {times[t]}")
+                am.axvline(t, color="gray", linewidth=0.8, linestyle="--")
+                am.set_title("", loc="left")
+                p1 = None
             if p1 is not None:
                 if "q1_time" in r and isinstance(r["q1_time"], str) and r["q1_time"] in times and r["q2_time"] in times:
                     q1, q2 = times.index(r["q1_time"]), times.index(r["q2_time"])
