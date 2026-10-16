@@ -11,8 +11,10 @@ import pandas as pd
 
 from pattern.m_top.detector import MTopDetector
 
-DET = MTopDetector(window=3, max_top_diff_pct=0.01, min_depth_pct=0.008, max_depth_pct=0.05,
-                   min_top_dist=6, max_top_dist=90, min_candles=15, max_candles=150)
+# D1 project defaults (pattern_api "m_top": MTopDetector()) except depth capped at 5% (Ray: M頭區間不要超過5%).
+DET = MTopDetector(window=3, max_top_diff_pct=0.05, min_depth_pct=0.03, max_depth_pct=0.05,
+                   min_top_dist=5, max_top_dist=60, min_candles=20, max_candles=120)
+MIN_SCORE = 60.0  # same threshold as the D1 scan API default
 
 
 def one(args):
@@ -22,13 +24,13 @@ def one(args):
     o, h, l, c, vw = (b[k].to_numpy(float) for k in ("o", "h", "l", "c", "vwap"))
     hh = b["time"].tolist()
     out, seen = [], set()
-    for t in range(15, len(b) - 1):
+    for t in range(20, len(b) - 1):
         if hh[t] < "09:10":
             continue
         if hh[t] > "12:00":
             break
         r = DET.detect(df.iloc[:t + 1], sid, "1m")
-        if r is None or r.details["breakout_status"] != "breakout_down":
+        if r is None or r.score < MIN_SCORE or r.details["breakout_status"] != "breakout_down":
             continue
         key = r.details["h2_date"]
         if key in seen:
@@ -63,4 +65,4 @@ if __name__ == "__main__":
     if len(df):
         print(df[["depth_pct", "diff_pct", "rise_pct", "score"]].describe().round(2).to_string())
         print("below vwap at neckline break:", round(df["below_vwap"].mean(), 2))
-        df.to_parquet(K + "mtop_d1det_proto.parquet", index=False)
+        df.to_parquet(K + "mtop_d1def_proto.parquet", index=False)
