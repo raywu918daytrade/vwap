@@ -116,7 +116,8 @@ def main() -> None:
                     # red-green-red histogram divergence at the neckline break: join the two red-block peaks
                     q1, q2 = times.index(r["q1_time"]), times.index(r["q2_time"])
                     am.plot([q1, q2], [hist[q1], hist[q2]], color="orange", linewidth=1.6, marker="o", markersize=5)
-                    am.set_title(f"柱峰 {hist[q1]:.3f} → {hist[q2]:.3f}（紅綠紅頂背離）", fontsize=9, loc="left")
+                    dl = r["div_label"] if "div_label" in r and isinstance(r["div_label"], str) else "紅綠紅頂背離"
+                    am.set_title(f"柱峰 {hist[q1]:.3f} → {hist[q2]:.3f}（{dl}）", fontsize=9, loc="left")
                 p1 = None
             if p1 is not None:
                 if "q1_time" in r and isinstance(r["q1_time"], str) and r["q1_time"] in times and r["q2_time"] in times:
