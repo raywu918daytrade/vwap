@@ -18,6 +18,7 @@ from scripts.mtop_macd_entry import find_entry
 
 LOW_K = 0
 LOCAL_K = 0
+SHAPE_N = 0  # Ray 2026-10-17: five-point symmetry (method B) from scripts.mtop_shape, 0 = off
 POOLS = [("ATR≥5、PR≥50（原本）", 5, 50), ("ATR≥3、PR≥50", 3, 50), ("ATR≥3、PR≥30", 3, 30)]
 
 
@@ -60,6 +61,14 @@ def build(dir_: str, pattern: str, y0: int, y1: int, low_k: float = 0) -> pd.Dat
                 rec["loc_bar_pct"] = loc
                 rec["top_bars_loc"] = float(r["diff_pct"]) / loc if loc > 0 else np.nan
                 rec["low_bars_loc"] = abs(l0p - float(r["neck"])) / float(r["neck"]) * 100 / loc if loc > 0 else np.nan
+                if SHAPE_N > 0:
+                    from scripts.mtop_shape import passes, shape_metrics
+                    sm = shape_metrics(b, r)
+                    rec.update(sm)
+                    if not passes(sm, SHAPE_N):
+                        rec["skip"] = "五點不對稱"
+                        rows.append(rec)
+                        continue
                 if LOCAL_K > 0 and not (rec["top_bars_loc"] <= LOCAL_K and rec["low_bars_loc"] <= LOCAL_K):
                     rec["skip"] = "M 不對稱（本地 K 棒）"
                     rows.append(rec)
@@ -95,7 +104,7 @@ def line(lab, d, col):
 
 
 def report(df: pd.DataFrame, y0: int, y1: int) -> None:
-    print(f"## M 頭（k=3{'，左右低點差 ≤3 根 K' if LOW_K else ''}{f'，兩頭差與左右低點差都 ≤{LOCAL_K:g} 根 M 本身的 K 棒' if LOCAL_K else ''}）跌破頸線 → 第一群 MACD 紅柱轉弱、未站回頸線做空，{y0}–{y1}，成本 2 跳\n")
+    print(f"## M 頭（k=3{'，左右低點差 ≤3 根 K' if LOW_K else ''}{f'，兩頭差與左右低點差都 ≤{LOCAL_K:g} 根 M 本身的 K 棒' if LOCAL_K else ''}{f'，五點對稱 n={SHAPE_N:g}（方法 B）' if SHAPE_N else ''}）跌破頸線 → 第一群 MACD 紅柱轉弱、未站回頸線做空，{y0}–{y1}，成本 2 跳\n")
     print(f"跌破訊號 {len(df)} 筆（{(~df['has_path']).sum()} 筆沒有存 M1 路徑，無法算進場）\n")
     ok = df[df["rr1_m"].notna()]
     for pl, a, p in POOLS:
@@ -121,12 +130,14 @@ def main() -> None:
     ap.add_argument("--years", default="2024-2026")
     ap.add_argument("--save", default="")
     ap.add_argument("--low-k", type=float, default=0, help="also require |L0 - neckline| <= this x mean bar range")
+    ap.add_argument("--shape-n", type=float, default=0, help="five-point symmetry (method B) limit in bar units, 0 = off")
     ap.add_argument("--local-k", type=float, default=0, help="tops diff AND |L0 - neckline| <= this x mean bar range of the M's own bars")
     args = ap.parse_args()
     y0, y1 = (int(x) for x in args.years.split("-"))
-    global LOW_K, LOCAL_K
+    global LOW_K, LOCAL_K, SHAPE_N
     LOW_K = args.low_k
     LOCAL_K = args.local_k
+    SHAPE_N = args.shape_n
     df = build(args.dir, args.glob, y0, y1, args.low_k)
     if args.save:
         df.to_parquet(args.save, index=False)
