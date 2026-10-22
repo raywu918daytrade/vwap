@@ -1,0 +1,32 @@
+name: Sync IB / Margin from j1s-data
+
+on:
+  schedule:
+    # 10:30 Asia/Taipei = 02:30 UTC，在 j1s-data 最後一輪 margin 更新（10:00）之後。
+    - cron: "30 2 * * 1-6"
+  workflow_dispatch:
+    inputs:
+      months:
+        description: "同步最近幾個月；0 = 全部"
+        required: false
+        default: "2"
+        type: string
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      HF_REPO_ID: ${{ secrets.HF_REPO_ID || vars.HF_REPO_ID || 'raywu918daytrade/daytrade' }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HUB_DISABLE_XET: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install huggingface_hub
+      - run: python -m scripts.sync_chips_from_j1s --months "${{ inputs.months || '2' }}"
